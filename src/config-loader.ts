@@ -33,16 +33,16 @@ export interface WorkspaceConfig {
   defaultPermissions: Record<string, unknown>;
 }
 
-export interface AgentSwitchConfig {
+export interface AgentOrchestratorConfig {
   server: ServerConfig;
   websocket: WebSocketConfig;
   orchestrator: OrchestratorConfig;
   workspace: WorkspaceConfig;
 }
 
-const CONFIG_PATH = join(process.cwd(), 'config', 'agentswitch.json');
+const CONFIG_PATH = join(process.cwd(), 'config', 'agentorchestrator.json');
 
-function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTSWITCH'): void {
+function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHESTRATOR'): void {
   for (const [envKey, envValue] of Object.entries(process.env)) {
     if (!envKey.startsWith(prefix + '_')) continue;
 
@@ -73,7 +73,7 @@ function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTSWITC
   }
 }
 
-export function validateConfig(config: AgentSwitchConfig): void {
+export function validateConfig(config: AgentOrchestratorConfig): void {
   const { orchestrator, server, websocket } = config;
 
   // Server validation
@@ -133,11 +133,11 @@ export function validateConfig(config: AgentSwitchConfig): void {
   }
 }
 
-export function loadConfig(): AgentSwitchConfig {
+export function loadConfig(): AgentOrchestratorConfig {
   const raw = readFileSync(CONFIG_PATH, 'utf-8');
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   applyEnvOverrides(parsed);
-  const config = parsed as unknown as AgentSwitchConfig;
+  const config = parsed as unknown as AgentOrchestratorConfig;
   validateConfig(config);
   return config;
 }

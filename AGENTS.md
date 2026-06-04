@@ -156,18 +156,18 @@ src/
 
 ## Environment Variables
 
-Any `config/agentswitch.json` field can be overridden via environment variables:
+Any `config/agentorchestrator.json` field can be overridden via environment variables:
 
 ```bash
-AGENTSWITCH_SERVER_PORT=8080
-AGENTSWITCH_ORCHESTRATOR_MAX_INSTANCES=20
-AGENTSWITCH_ORCHESTRATOR_IDLE_TIMEOUT_MS=600000
-AGENTSWITCH_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
+AGENTORCHESTRATOR_SERVER_PORT=8080
+AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
+AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS=600000
+AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
 ```
 
 ## Orchestrator Configuration
 
-The `orchestrator` section in `config/agentswitch.json` controls instance lifecycle:
+The `orchestrator` section in `config/agentorchestrator.json` controls instance lifecycle:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
