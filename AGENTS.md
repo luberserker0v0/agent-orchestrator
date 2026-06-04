@@ -1,0 +1,175 @@
+# AgentOrchestrator Development Guide
+
+This document defines the standard development workflow for all contributors,
+including AI agents. Every change to this repository must follow these rules.
+
+## Mandatory Development Workflow
+
+### 1. Always Start from main
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feat/<descriptive-name>
+```
+
+**Never** commit directly to `main`.
+
+### 2. Code, Test, Build
+
+After making changes, run the full verification pipeline:
+
+```bash
+npm run lint       # Must pass with 0 errors
+npm run test       # Must pass with 100% success
+npm run build      # TypeScript must compile cleanly
+```
+
+Shortcut (runs all three):
+
+```bash
+npm run preflight
+```
+
+### 3. Git Hooks
+
+This project uses Git hooks to enforce quality. Install them once:
+
+```bash
+node scripts/setup-hooks.js
+```
+
+- `pre-commit` automatically runs `npm run lint`
+- `pre-push` automatically runs `npm run test`
+
+To bypass in emergencies only: `git commit --no-verify` or `git push --no-verify`
+
+### 4. Commit Message Format
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <description>
+
+<body>
+```
+
+Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+
+Examples:
+
+```
+feat(orchestrator): add LRU eviction for max instances
+test(port-pool): add unit tests for allocation edge cases
+fix(websocket): resolve heartbeat timeout handling
+```
+
+### 5. Pull Request Process
+
+1. Push the feature branch:
+   ```bash
+   git push -u origin feat/<name>
+   ```
+
+2. Create a Pull Request using the template in `.github/pull_request_template.md`
+
+3. Wait for GitHub Actions CI to pass (lint + test + build on Node 20.x and 22.x)
+
+4. Review the PR description checklist. All items must be checked.
+
+5. Merge only after CI is green. Use "Squash and merge".
+
+6. Delete the feature branch after merge.
+
+### 6. PR Description Template
+
+When creating a PR, use the following structure (also available as a template on GitHub):
+
+```markdown
+## Summary
+Brief description of what changed and why.
+
+## Changes
+- List each significant change
+- Include file names if helpful
+
+## Testing
+- How was this tested?
+- Any manual verification steps?
+
+## Checklist
+- [ ] `npm run lint` passes
+- [ ] `npm run test` passes
+- [ ] `npm run build` compiles
+- [ ] Tests added for new logic
+- [ ] Documentation updated if needed
+- [ ] Follows Conventional Commits
+```
+
+## Project Structure
+
+```
+src/
+  config-loader.ts           # Configuration loading with env overrides
+  index.ts                   # Application entry point
+  http-api/
+    server.ts                # Express HTTP server
+  orchestrator/
+    instance-manager.ts      # OpenCode instance lifecycle
+    port-pool.ts             # Dynamic port allocation
+    workspace-factory.ts     # Workspace creation with sandboxed permissions
+  opencode-cli/
+    models.ts                # CLI model listing
+  opencode-http/
+    client.ts                # OpenCode HTTP API client
+    types.ts                 # TypeScript types for OpenCode API
+  utils/
+    logger.ts                # Structured logging with level/format control
+  websocket/
+    connection.ts            # JSON-RPC 2.0 WebSocket handler
+    router.ts                # WebSocket routing to instances
+```
+
+## Technology Stack
+
+- **Runtime**: Node.js >= 20.0.0
+- **Language**: TypeScript 5.4 (strict mode)
+- **Framework**: Express 4.x
+- **WebSocket**: ws 8.x
+- **Testing**: Vitest 4.x
+- **Linting**: ESLint 10.x with typescript-eslint
+- **Process Management**: cross-spawn, tree-kill
+
+## Environment Variables
+
+Any `config/agentswitch.json` field can be overridden via environment variables:
+
+```bash
+AGENTSWITCH_SERVER_PORT=8080
+AGENTSWITCH_ORCHESTRATOR_MAX_INSTANCES=20
+```
+
+## Common Commands
+
+```bash
+npm run dev           # Development mode (tsx watch)
+npm run build         # Compile TypeScript to dist/
+npm start             # Run compiled production build
+npm run test          # Run all tests once
+npm run test:watch    # Run tests in watch mode
+npm run lint          # Check code style
+npm run lint:fix      # Auto-fix lint issues
+npm run preflight     # Run lint + test + build in sequence
+node scripts/setup-hooks.js  # Install Git hooks
+```
+
+## Important Notes for AI Agents
+
+- **Do not** use `git push origin main` directly
+- **Do not** skip `npm run lint` or `npm run test` before committing
+- **Do not** forget to update `CHANGELOG.md` for user-facing changes
+- **Always** create a feature branch before making changes
+- **Always** verify `npm run build` passes before pushing
+- **Always** use the PR template when creating pull requests
+- **Always** wait for CI to pass before merging
+- When adding new features, include unit tests in `*.test.ts` files alongside the source
