@@ -160,10 +160,19 @@ Any `config/agentorchestrator.json` field can be overridden via environment vari
 
 ```bash
 AGENTORCHESTRATOR_SERVER_PORT=8080
+AGENTORCHESTRATOR_SERVER_SHUTDOWN_TIMEOUT_MS=15000
 AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS=600000
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
 ```
+
+## Server Configuration
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `port` | integer | 0 | HTTP server port (0 = auto-assign) |
+| `host` | string | '127.0.0.1' | Bind address |
+| `shutdownTimeoutMs` | integer | 15000 | Maximum time in ms for graceful shutdown before force exit |
 
 ## Orchestrator Configuration
 
@@ -180,6 +189,17 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
 
 **Validation rule:** `maxInstances` must not exceed the number of available ports (`portRange.end - portRange.start + 1`). The application will refuse to start if this constraint is violated.
+
+## Graceful Shutdown
+
+On `SIGINT` or `SIGTERM`, the orchestrator performs a graceful shutdown:
+
+1. Stops the idle sweep timer
+2. Closes all WebSocket connections cleanly (code 1001)
+3. Stops accepting new HTTP connections
+4. Waits for in-flight HTTP requests to finish (up to `shutdownTimeoutMs`)
+5. Destroys all active OpenCode instances
+6. Exits cleanly, or force-exits if the timeout is exceeded
 
 ## Prometheus Metrics
 

@@ -9,18 +9,28 @@ import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
 
+export interface HttpServer {
+  server: Server;
+  closeWebSockets: () => void;
+  waitForRequests: (timeoutMs: number) => Promise<void>;
+}
+
 export function createHttpServer(
   serverConfig: ServerConfig,
   wsConfig: WebSocketConfig,
   instanceManager: InstanceManager,
   orchestratorConfig: OrchestratorConfig
-): Server {
+): HttpServer {
   const app = express();
   app.use(express.json());
 
-  // HTTP request counter middleware
+  let activeRequests = 0;
+
+  // Track active requests and count finished requests
   app.use((req, res, next) => {
+    activeRequests++;
     res.on('finish', () => {
+      activeRequests--;
       httpRequestsTotal.inc({ method: req.method, status: String(res.statusCode) });
     });
     next();
@@ -108,7 +118,7 @@ export function createHttpServer(
 
   // WebSocket server - manual upgrade handling for dynamic paths
   const wss = new WebSocketServer({ noServer: true });
-  new WSRouter(wss, instanceManager, wsConfig);
+  const wsRouter = new WSRouter(wss, instanceManager, wsConfig);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ?? '';
@@ -121,7 +131,31 @@ export function createHttpServer(
     }
   });
 
-  return httpServer;
+  const closeWebSockets = (): void => {
+    wsRouter.closeAll();
+  };
+
+  const waitForRequests = (timeoutMs: number): Promise<void> => {
+    return new Promise((resolve) => {
+      if (activeRequests === 0) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(() => {
+        logger.warn(`Graceful shutdown: ${activeRequests} request(s) still in-flight after ${timeoutMs}ms`);
+        resolve();
+      }, timeoutMs);
+      const checkInterval = setInterval(() => {
+        if (activeRequests === 0) {
+          clearTimeout(timer);
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 100);
+    });
+  };
+
+  return { server: httpServer, closeWebSockets, waitForRequests };
 }
 
 function generateId(): string {
