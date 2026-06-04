@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { WSConnection } from './connection.js';
 import type { WebSocketConfig } from '../config-loader.js';
+import { wsConnectionsActive } from '../metrics/registry.js';
 
 export class WSRouter {
   private wss: WebSocketServer;
@@ -62,7 +63,14 @@ export class WSRouter {
     );
 
     this.connections.set(conversationId, connection);
+    wsConnectionsActive.inc();
     logger.info(`WS connection established: ${conversationId}`);
+
+    ws.on('close', () => {
+      this.connections.delete(conversationId);
+      wsConnectionsActive.dec();
+      logger.info(`WS connection closed: ${conversationId}`);
+    });
   }
 
   private async handleMessage(conversationId: string, method: string, params: unknown): Promise<unknown> {

@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { portPoolAvailable } from '../metrics/registry.js';
 
 export class PortPool {
   private available: number[];
@@ -9,6 +10,7 @@ export class PortPool {
     for (let p = start; p <= end; p++) {
       this.available.push(p);
     }
+    portPoolAvailable.set(this.available.length);
     logger.info(`PortPool initialized: ${start}-${end} (${this.available.length} ports)`);
   }
 
@@ -18,6 +20,7 @@ export class PortPool {
       return null;
     }
     this.inUse.add(port);
+    portPoolAvailable.set(this.available.length);
     logger.info(`Port allocated: ${port} (available: ${this.available.length})`);
     return port;
   }
@@ -26,6 +29,7 @@ export class PortPool {
     if (!this.inUse.has(port)) return;
     this.inUse.delete(port);
     this.available.push(port);
+    portPoolAvailable.set(this.available.length);
     logger.info(`Port released: ${port} (available: ${this.available.length})`);
   }
 
