@@ -30,6 +30,9 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}, shutting down...`);
 
+    // Stop idle sweep timer to prevent interference during shutdown
+    instanceManager.destroy();
+
     // Destroy all active OpenCode instances
     const instances = instanceManager.listInstances();
     if (instances.length > 0) {

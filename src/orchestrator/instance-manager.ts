@@ -31,16 +31,23 @@ export class InstanceManager {
   private portPool: PortPool;
   private workspaceFactory: WorkspaceFactory;
   private config: OrchestratorConfig;
+  private idleSweepTimer?: NodeJS.Timeout;
 
   constructor(config: OrchestratorConfig, workspaceFactory: WorkspaceFactory) {
     this.config = config;
     this.portPool = new PortPool(config.portRange.start, config.portRange.end);
     this.workspaceFactory = workspaceFactory;
+    this.startIdleSweep();
   }
 
   async createInstance(id: string, options?: WorkspaceOptions): Promise<InstanceInfo> {
     if (this.instances.has(id)) {
       throw new Error(`Instance already exists: ${id}`);
+    }
+
+    // Strict maxInstances enforcement: evict LRU if at capacity
+    if (this.instances.size >= this.config.maxInstances) {
+      await this.evictLRU();
     }
 
     // Try allocate; if exhausted, evict LRU and retry once
@@ -233,6 +240,30 @@ export class InstanceManager {
       };
       proc.once('exit', onExit);
     });
+  }
+
+  destroy(): void {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer);
+      this.idleSweepTimer = undefined;
+    }
+  }
+
+  private startIdleSweep(): void {
+    if (this.config.idleTimeoutMs === 0) {
+      logger.info('Idle sweep disabled (idleTimeoutMs=0)');
+      return;
+    }
+    this.idleSweepTimer = setInterval(() => {
+      const now = Date.now();
+      for (const inst of this.instances.values()) {
+        if (now - inst.lastUsedAt > this.config.idleTimeoutMs) {
+          logger.warn(`Idle timeout: destroying instance ${inst.id} (idle for ${now - inst.lastUsedAt}ms)`);
+          this.destroyInstance(inst.id).catch(() => {});
+        }
+      }
+    }, this.config.idleSweepIntervalMs);
+    logger.info(`Idle sweep started: interval=${this.config.idleSweepIntervalMs}ms, timeout=${this.config.idleTimeoutMs}ms`);
   }
 
   private delay(ms: number): Promise<void> {
