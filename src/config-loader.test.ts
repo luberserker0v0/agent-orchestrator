@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { loadConfig, validateConfig } from './config-loader.js';
-import type { AgentSwitchConfig } from './config-loader.js';
+import type { AgentOrchestratorConfig } from './config-loader.js';
 
-function createValidConfig(overrides?: Partial<AgentSwitchConfig>): AgentSwitchConfig {
+function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentOrchestratorConfig {
   return {
     server: { port: 8080, host: '127.0.0.1' },
     websocket: { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
@@ -16,7 +16,7 @@ function createValidConfig(overrides?: Partial<AgentSwitchConfig>): AgentSwitchC
     },
     workspace: { basePath: './workspace', defaultPermissions: {} },
     ...overrides,
-  } as AgentSwitchConfig;
+  } as AgentOrchestratorConfig;
 }
 
 describe('loadConfig', () => {

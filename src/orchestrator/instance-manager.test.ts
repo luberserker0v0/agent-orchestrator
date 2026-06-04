@@ -133,7 +133,7 @@ describe('InstanceManager', () => {
       mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
       mockCreateSession.mockResolvedValue({
         id: 'ses_test',
-        title: 'AgentSwitch-test',
+        title: 'AgentOrchestrator-test',
         parent_id: null,
         status: 'active',
         created_at: '',

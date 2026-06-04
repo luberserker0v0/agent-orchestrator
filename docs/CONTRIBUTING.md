@@ -16,7 +16,7 @@
 
 ```bash
 git clone <repository-url>
-cd agentswitch
+cd agent-orchestrator
 npm install
 ```
 
