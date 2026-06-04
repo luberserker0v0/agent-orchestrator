@@ -36,12 +36,12 @@ fi
 
 const prePushHook = `#!/bin/sh
 # Auto-generated pre-push hook
-# Runs tests before every push
+# Runs full verification pipeline before every push
 
-echo "[pre-push] Running tests..."
-npm run test
+echo "[pre-push] Running preflight (lint + test + build)..."
+npm run preflight
 if [ $? -ne 0 ]; then
-  echo "[pre-push] Tests failed. Push aborted."
+  echo "[pre-push] Preflight failed. Push aborted."
   exit 1
 fi
 `;
