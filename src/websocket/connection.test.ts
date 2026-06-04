@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { WSConnection } from './connection.js';
+import { WSConnection, type MessageHandler } from './connection.js';
 
 function createMockWebSocket() {
   const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
@@ -25,14 +25,14 @@ function createMockWebSocket() {
 
 describe('WSConnection', () => {
   let mockWs: ReturnType<typeof createMockWebSocket>;
-  let handler: ReturnType<typeof vi.fn>;
+  let handler: ReturnType<typeof vi.fn> & MessageHandler;
   let connection: WSConnection;
 
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     mockWs = createMockWebSocket();
-    handler = vi.fn();
-    connection = new WSConnection(mockWs as any, 'conv-001', handler, 5000, 10000);
+    handler = vi.fn() as unknown as ReturnType<typeof vi.fn> & MessageHandler;
+    connection = new WSConnection(mockWs as any, 'conv-001', handler as MessageHandler, 5000, 10000);
   });
 
   afterEach(() => {
