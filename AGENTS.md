@@ -161,7 +161,25 @@ Any `config/agentswitch.json` field can be overridden via environment variables:
 ```bash
 AGENTSWITCH_SERVER_PORT=8080
 AGENTSWITCH_ORCHESTRATOR_MAX_INSTANCES=20
+AGENTSWITCH_ORCHESTRATOR_IDLE_TIMEOUT_MS=600000
+AGENTSWITCH_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
 ```
+
+## Orchestrator Configuration
+
+The `orchestrator` section in `config/agentswitch.json` controls instance lifecycle:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `maxInstances` | integer | 10 | Strict upper limit of concurrent OpenCode instances |
+| `idleTimeoutMs` | integer | 600000 | Time in ms before an unused instance is auto-destroyed (0 = disabled) |
+| `idleSweepIntervalMs` | integer | 60000 | How often the background sweep checks for idle instances |
+| `portRange.start` | integer | 30000 | First port in the dynamic allocation range |
+| `portRange.end` | integer | 30100 | Last port in the dynamic allocation range |
+| `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
+| `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
+
+**Validation rule:** `maxInstances` must not exceed the number of available ports (`portRange.end - portRange.start + 1`). The application will refuse to start if this constraint is violated.
 
 ## Common Commands
 

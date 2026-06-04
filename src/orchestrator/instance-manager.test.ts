@@ -78,6 +78,8 @@ function createMockProc(opts: { exitCode?: number | null; pid?: number | undefin
 
 const testConfig: OrchestratorConfig = {
   maxInstances: 10,
+  idleTimeoutMs: 600000,
+  idleSweepIntervalMs: 60000,
   portRange: { start: 30000, end: 30001 },
   opencodeBinary: 'opencode',
   healthCheck: { retries: 2, intervalMs: 1 },
@@ -460,6 +462,83 @@ describe('InstanceManager', () => {
 
       await instanceManager.destroyInstance('conv-safe2');
       expect(mockedTreeKill).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('maxInstances strict enforcement', () => {
+    it('evicts LRU when maxInstances is reached', async () => {
+      const strictConfig: OrchestratorConfig = {
+        ...testConfig,
+        maxInstances: 1,
+        portRange: { start: 30000, end: 30001 },
+      };
+      const strictManager = new InstanceManager(strictConfig, workspaceFactory);
+
+      const procA = createMockProc();
+      mockedSpawn.mockReturnValue(procA as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+      mockCreateSession.mockResolvedValue({
+        id: 'ses_1',
+        title: null,
+        parent_id: null,
+        status: 'active',
+        created_at: '',
+        updated_at: '',
+      });
+
+      await strictManager.createInstance('conv-first');
+      expect(strictManager.listInstances()).toHaveLength(1);
+      expect(strictManager.listInstances()[0].id).toBe('conv-first');
+
+      // Creating a second instance should evict the first one
+      const procB = createMockProc();
+      mockedSpawn.mockReturnValue(procB as any);
+      await strictManager.createInstance('conv-second');
+
+      const list = strictManager.listInstances();
+      expect(list).toHaveLength(1);
+      expect(list[0].id).toBe('conv-second');
+    });
+  });
+
+  describe('idle timeout sweep', () => {
+    it('destroys idle instance after timeout', async () => {
+      const idleConfig: OrchestratorConfig = {
+        ...testConfig,
+        idleTimeoutMs: 100,
+        idleSweepIntervalMs: 50,
+      };
+      const idleManager = new InstanceManager(idleConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+      mockCreateSession.mockResolvedValue({
+        id: 'ses_idle',
+        title: null,
+        parent_id: null,
+        status: 'active',
+        created_at: '',
+        updated_at: '',
+      });
+
+      await idleManager.createInstance('conv-idle');
+      expect(idleManager.listInstances()).toHaveLength(1);
+
+      // Wait for idle timeout + sweep interval to pass
+      await new Promise((r) => setTimeout(r, 250));
+
+      expect(idleManager.listInstances()).toHaveLength(0);
+      idleManager.destroy();
+    });
+  });
+
+  describe('destroy', () => {
+    it('clears idle sweep timer without error', () => {
+      const manager = new InstanceManager(testConfig, workspaceFactory);
+      expect(() => manager.destroy()).not.toThrow();
+      // Calling destroy twice should also be safe
+      expect(() => manager.destroy()).not.toThrow();
     });
   });
 });
