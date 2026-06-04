@@ -181,6 +181,37 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 
 **Validation rule:** `maxInstances` must not exceed the number of available ports (`portRange.end - portRange.start + 1`). The application will refuse to start if this constraint is violated.
 
+## Prometheus Metrics
+
+AgentOrchestrator exposes a Prometheus-compatible `/metrics` endpoint:
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+### Available Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `agentorchestrator_instances_active` | Gauge | Currently active OpenCode instances |
+| `agentorchestrator_instances_total_created` | Counter | Total instances created since startup |
+| `agentorchestrator_port_pool_available` | Gauge | Available ports in the dynamic pool |
+| `agentorchestrator_websocket_connections_active` | Gauge | Active WebSocket connections |
+| `agentorchestrator_http_requests_total` | Counter | Total HTTP requests (labels: method, status) |
+| `nodejs_*` | Various | Node.js process metrics (memory, CPU, GC, event loop) |
+
+### Configuration for Prometheus
+
+Add the following job to your `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 'agentorchestrator'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: /metrics
+```
+
 ## Common Commands
 
 ```bash

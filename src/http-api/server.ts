@@ -7,6 +7,7 @@ import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { listModels } from '../opencode-cli/models.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
+import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
 
 export function createHttpServer(
   serverConfig: ServerConfig,
@@ -16,6 +17,14 @@ export function createHttpServer(
 ): Server {
   const app = express();
   app.use(express.json());
+
+  // HTTP request counter middleware
+  app.use((req, res, next) => {
+    res.on('finish', () => {
+      httpRequestsTotal.inc({ method: req.method, status: String(res.statusCode) });
+    });
+    next();
+  });
 
   // CORS
   app.use((req, res, next) => {
@@ -32,6 +41,12 @@ export function createHttpServer(
   // Health check
   app.get('/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+  });
+
+  // Prometheus metrics endpoint
+  app.get('/metrics', async (_req: Request, res: Response) => {
+    res.set('Content-Type', metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
   });
 
   // Create conversation
