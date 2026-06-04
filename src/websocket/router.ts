@@ -20,6 +20,14 @@ export class WSRouter {
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
   }
 
+  closeAll(): void {
+    for (const connection of this.connections.values()) {
+      connection.close(1001, 'Server shutting down');
+    }
+    this.connections.clear();
+    this.wss.close();
+  }
+
   private async onConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
     const url = req.url ?? '';
     const match = url.match(/^\/ws\/([^/]+)$/);

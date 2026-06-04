@@ -9,8 +9,8 @@ import {
 
 describe('Metrics', () => {
   it('exposes /metrics endpoint with correct content type', async () => {
-    const server = createHttpServer(
-      { port: 0, host: '127.0.0.1' },
+    const { server } = createHttpServer(
+      { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
       { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
       {
         createInstance: vi.fn(),

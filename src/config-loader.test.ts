@@ -4,7 +4,7 @@ import type { AgentOrchestratorConfig } from './config-loader.js';
 
 function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentOrchestratorConfig {
   return {
-    server: { port: 8080, host: '127.0.0.1' },
+    server: { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
     websocket: { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
     orchestrator: {
       maxInstances: 10,
@@ -73,5 +73,12 @@ describe('validateConfig', () => {
       orchestrator: { ...createValidConfig().orchestrator, idleSweepIntervalMs: 0 },
     });
     expect(() => validateConfig(config)).toThrow('idleSweepIntervalMs must be positive');
+  });
+
+  it('rejects non-positive shutdownTimeoutMs', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, shutdownTimeoutMs: 0 },
+    });
+    expect(() => validateConfig(config)).toThrow('shutdownTimeoutMs must be a positive integer');
   });
 });

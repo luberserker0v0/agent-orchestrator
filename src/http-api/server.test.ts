@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import { createHttpServer } from './server.js';
+import { createHttpServer, type HttpServer } from './server.js';
 
 describe('HTTP API Server', () => {
-  let server: ReturnType<typeof createHttpServer>;
+  let httpServer: HttpServer;
+  let server: HttpServer['server'];
   let mockInstanceManager: any;
   let mockListModels: any;
 
@@ -17,12 +18,13 @@ describe('HTTP API Server', () => {
 
     mockListModels = vi.fn();
 
-    server = createHttpServer(
-      { port: 0, host: '127.0.0.1' },
+    httpServer = createHttpServer(
+      { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
       { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
       mockInstanceManager,
       { opencodeBinary: 'opencode', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 } }
     );
+    server = httpServer.server;
   });
 
   afterEach(() => {
@@ -122,5 +124,45 @@ describe('HTTP API Server', () => {
       .set('Origin', 'http://example.com');
 
     expect(res.status).toBe(200);
+  });
+
+  it('waitForRequests resolves immediately when no active requests', async () => {
+    await expect(httpServer.waitForRequests(1000)).resolves.toBeUndefined();
+  });
+
+  it('waitForRequests resolves after active requests finish', async () => {
+    mockInstanceManager.createInstance.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve({ id: 'conv-001', port: 30000, sessionId: 'ses_1' }), 200))
+    );
+
+    const reqPromise = request(server).post('/api/conversations').send({});
+
+    // Give the request time to start
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const waitPromise = httpServer.waitForRequests(2000);
+
+    // Finish the request
+    await reqPromise;
+    await waitPromise;
+  });
+
+  it('waitForRequests resolves on timeout even if requests are still active', async () => {
+    mockInstanceManager.createInstance.mockImplementation(() => new Promise(() => {}));
+
+    const reqPromise = request(server).post('/api/conversations').send({});
+
+    // Give the request time to start
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    await expect(httpServer.waitForRequests(100)).resolves.toBeUndefined();
+
+    // Clean up the hanging request by closing the server
+    server.close();
+    await reqPromise.catch(() => {});
+  });
+
+  it('closeWebSockets does not throw', () => {
+    expect(() => httpServer.closeWebSockets()).not.toThrow();
   });
 });
