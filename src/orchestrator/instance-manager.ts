@@ -129,7 +129,7 @@ export class InstanceManager {
     // Create initial session
     let sessionId: string;
     try {
-      const session = await client.createSession({ title: `AgentSwitch-${id}` });
+      const session = await client.createSession({ title: `AgentOrchestrator-${id}` });
       sessionId = session.id;
       logger.info(`[OpenCode ${id}] session created: ${sessionId}`);
     } catch (err) {

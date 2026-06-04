@@ -28,7 +28,7 @@
 
 ```bash
 git clone <repository-url>
-cd agentswitch
+cd agent-orchestrator
 npm install
 ```
 
@@ -36,7 +36,7 @@ npm install
 
 ## 設定檔
 
-設定檔位於 `config/agentswitch.json`：
+設定檔位於 `config/agentorchestrator.json`：
 
 ```json
 {
@@ -89,17 +89,17 @@ npm install
 
 ### 環境變數覆寫
 
-任何 `config/agentswitch.json` 的欄位都可以透過環境變數覆寫，命名規則為 `AGENTSWITCH_<path>`（底線分隔、小寫駝峰）：
+任何 `config/agentorchestrator.json` 的欄位都可以透過環境變數覆寫，命名規則為 `AGENTORCHESTRATOR_<path>`（底線分隔、小寫駝峰）：
 
 ```bash
 # 覆寫 server.port
-AGENTSWITCH_SERVER_PORT=8080
+AGENTORCHESTRATOR_SERVER_PORT=8080
 
 # 覆寫 orchestrator.maxInstances
-AGENTSWITCH_ORCHESTRATOR_MAX_INSTANCES=20
+AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
 
 # 覆寫 opencodeBinary 為絕對路徑
-AGENTSWITCH_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
+AGENTORCHESTRATOR_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
 ```
 
 ---
@@ -300,7 +300,7 @@ wscat -c ws://127.0.0.1:11697/ws/demo
 
 ### 2. OpenCode CLI 路徑問題
 
-若 `opencode` 不在系統 PATH 中，修改 `config/agentswitch.json`：
+若 `opencode` 不在系統 PATH 中，修改 `config/agentorchestrator.json`：
 
 ```json
 "opencodeBinary": "C:\\Users\\<user>\\AppData\\Roaming\\npm\\opencode.cmd"
@@ -309,7 +309,7 @@ wscat -c ws://127.0.0.1:11697/ws/demo
 或使用環境變數：
 
 ```bash
-AGENTSWITCH_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
+AGENTORCHESTRATOR_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
 ```
 
 ### 3. 端口被占用
@@ -317,7 +317,7 @@ AGENTSWITCH_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
 若 `portRange` 內的端口已被其他程式占用：
 
 1. 結束占用端口的程式
-2. 或修改 `config/agentswitch.json` 中的 `portRange` 為其他範圍
+2. 或修改 `config/agentorchestrator.json` 中的 `portRange` 為其他範圍
 
 ### 4. 調整權限限制
 

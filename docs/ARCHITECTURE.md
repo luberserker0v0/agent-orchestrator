@@ -212,8 +212,8 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的 OpenCode 實例。
 設定載入與環境變數覆寫。
 
 **`loadConfig()`**：
-1. 讀取 `config/agentswitch.json`
-2. `applyEnvOverrides()`：掃描 `AGENTSWITCH_*` 環境變數並覆寫對應路徑
+1. 讀取 `config/agentorchestrator.json`
+2. `applyEnvOverrides()`：掃描 `AGENTORCHESTRATOR_*` 環境變數並覆寫對應路徑
 3. 回傳 `AgentOrchestratorConfig` 型別物件
 
 ---
