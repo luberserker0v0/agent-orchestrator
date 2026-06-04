@@ -21,7 +21,7 @@ describe('HTTP API Server', () => {
       { port: 0, host: '127.0.0.1' },
       { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
       mockInstanceManager,
-      { opencodeBinary: 'opencode', maxInstances: 10, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 } }
+      { opencodeBinary: 'opencode', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 } }
     );
   });
 
