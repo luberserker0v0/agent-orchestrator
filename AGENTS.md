@@ -31,6 +31,20 @@ Shortcut (runs all three):
 npm run preflight
 ```
 
+### 2a. Commit Completeness Check
+
+After making your final commit, verify **no changes are left behind**:
+
+```bash
+git status
+```
+
+If the working tree is not clean, either:
+- Stage and commit the remaining changes, or
+- Add them to `.gitignore` if they should not be tracked
+
+**Never push while there are uncommitted modifications.**
+
 ### 3. Git Hooks
 
 This project uses Git hooks to enforce quality. Install them once:
@@ -40,7 +54,7 @@ node scripts/setup-hooks.js
 ```
 
 - `pre-commit` automatically runs `npm run lint`
-- `pre-push` automatically runs `npm run test`
+- `pre-push` automatically runs `npm run preflight` (lint + test + build)
 
 To bypass in emergencies only: `git commit --no-verify` or `git push --no-verify`
 
@@ -169,7 +183,8 @@ node scripts/setup-hooks.js  # Install Git hooks
 - **Do not** skip `npm run lint` or `npm run test` before committing
 - **Do not** forget to update `CHANGELOG.md` for user-facing changes
 - **Always** create a feature branch before making changes
-- **Always** verify `npm run build` passes before pushing
+- **Always** run `git status` after the final commit to confirm the working tree is clean
+- **Always** verify `npm run preflight` passes before pushing
 - **Always** use the PR template when creating pull requests
 - **Always** wait for CI to pass before merging
 - When adding new features, include unit tests in `*.test.ts` files alongside the source
