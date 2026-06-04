@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { logger } from '../utils/logger.js';
@@ -60,7 +60,13 @@ export class WorkspaceFactory {
   }
 
   destroy(id: string): void {
-    // 實際刪除在 instance-manager 中處理，避免 rm -rf 的複雜性
-    logger.info(`Workspace destroy requested: ${id}`);
+    const wsId = sanitizeId(id);
+    const wsPath = join(this.basePath, wsId);
+    if (existsSync(wsPath)) {
+      rmSync(wsPath, { recursive: true, force: true });
+      logger.info(`Workspace destroyed: ${wsPath}`);
+    } else {
+      logger.warn(`Workspace not found for destruction: ${wsPath}`);
+    }
   }
 }
