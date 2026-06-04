@@ -8,6 +8,7 @@ import { OpenCodeClient } from '../opencode-http/client.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { PortPool } from './port-pool.js';
 import { WorkspaceFactory, type WorkspaceInfo, type WorkspaceOptions } from './workspace-factory.js';
+import { instancesActive, instancesTotalCreated } from '../metrics/registry.js';
 
 function generatePassword(): string {
   return randomBytes(16).toString('hex');
@@ -153,6 +154,8 @@ export class InstanceManager {
     };
 
     this.instances.set(id, instance);
+    instancesActive.inc();
+    instancesTotalCreated.inc();
     logger.info(`Instance ${id} ready on port ${port}`);
     return instance;
   }
@@ -215,6 +218,7 @@ export class InstanceManager {
       }
     }
 
+    instancesActive.dec();
     logger.info(`Instance ${id} destroyed`);
   }
 
