@@ -126,7 +126,7 @@ describe('WSConnection', () => {
   it('heartbeat terminates on timeout', () => {
     vi.advanceTimersByTime(5000);
     expect(mockWs.ping).toHaveBeenCalledTimes(1);
-    expect(mockWs.isAlive).toBe(false);
+    expect((connection as any).isAlive).toBe(false);
 
     vi.advanceTimersByTime(5000);
     expect(mockWs.terminate).toHaveBeenCalled();
