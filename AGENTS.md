@@ -120,6 +120,48 @@ Brief description of what changed and why.
 - [ ] Follows Conventional Commits
 ```
 
+## Lint Warning Policy
+
+- `npm run lint` **errors** must be 0 before any commit or push
+- **Warnings are tolerated** but should not be increased:
+  - Do not introduce new warnings in new code
+  - `*.test.ts` files may use `any` for mocks (existing warnings)
+  - Gradual cleanup of existing warnings is encouraged but not required
+- Treat warnings as indicators of technical debt, not blockers
+
+## AI Agent Git Rules
+
+These rules apply when AI agents (including automated tools) interact with this repository:
+
+- **AI must NOT** run `git commit --amend`, `git rebase`, `git push --force`, or any command that rewrites git history. These operations destroy the code review context and can corrupt CI/build pipelines.
+- **AI must NOT** infer the current branch state via `git branch` or `git status` to decide actions. If the user invokes `/review` or similar without stating their branch, the AI must ask for confirmation.
+- **AI must NOT** create branches (`git checkout -b`) unless explicitly instructed by the user.
+- **AI must** create a new conventional commit for each set of changes. Do not amend or squash commits on behalf of the user.
+- **The user is responsible for branch management.** AI follows the user's explicit instructions for git operations.
+
+## CHANGELOG.md Format
+
+Follow [Keep a Changelog](https://keepachangelog.com/) v1.1.0.
+
+Update the `[Unreleased]` section in each PR. Categories:
+
+- **Added** — New features
+- **Changed** — Changes to existing functionality
+- **Fixed** — Bug fixes
+- **Removed** — Deprecated features removed
+
+Example:
+
+```markdown
+## [Unreleased]
+
+### Added
+- feat(orchestrator): add LRU eviction for max instances (#7)
+
+### Fixed
+- fix(websocket): resolve heartbeat timeout handling (#10)
+```
+
 ## Project Structure
 
 ```
