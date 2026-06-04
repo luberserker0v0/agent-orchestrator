@@ -13,10 +13,10 @@ async function main() {
   const workspaceFactory = new WorkspaceFactory(config.workspace);
   const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory);
 
-  const server = createHttpServer(config.server, config.websocket, instanceManager, config.orchestrator);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, config.orchestrator);
 
-  server.listen(config.server.port, config.server.host, () => {
-    const addr = server.address();
+  httpServer.server.listen(config.server.port, config.server.host, () => {
+    const addr = httpServer.server.address();
     if (addr && typeof addr === 'object') {
       config.server.port = addr.port;
     }
@@ -30,26 +30,43 @@ async function main() {
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}, shutting down...`);
 
-    // Stop idle sweep timer to prevent interference during shutdown
-    instanceManager.destroy();
-
-    // Destroy all active OpenCode instances
-    const instances = instanceManager.listInstances();
-    if (instances.length > 0) {
-      logger.info(`Destroying ${instances.length} active instance(s)...`);
-      await Promise.all(instances.map((inst) => instanceManager.destroyInstance(inst.id).catch(() => {})));
-    }
-
-    server.close(() => {
-      logger.info('HTTP server closed');
-      process.exit(0);
-    });
-
-    // Force exit if graceful shutdown takes too long
-    setTimeout(() => {
-      logger.error('Shutdown timeout exceeded, forcing exit');
+    // Hard timeout for the entire shutdown sequence
+    const hardTimeout = setTimeout(() => {
+      logger.error(`Shutdown timeout exceeded (${config.server.shutdownTimeoutMs}ms), forcing exit`);
       process.exit(1);
-    }, 15000);
+    }, config.server.shutdownTimeoutMs);
+
+    try {
+      // Stop idle sweep timer to prevent interference during shutdown
+      instanceManager.destroy();
+
+      // Stop accepting new WebSocket connections and close existing ones cleanly
+      httpServer.closeWebSockets();
+      logger.info('WebSocket connections closed');
+
+      // Stop accepting new HTTP connections
+      httpServer.server.close(() => {
+        logger.info('HTTP server closed');
+      });
+
+      // Wait for in-flight HTTP requests to finish
+      await httpServer.waitForRequests(config.server.shutdownTimeoutMs);
+
+      // Destroy all active OpenCode instances
+      const instances = instanceManager.listInstances();
+      if (instances.length > 0) {
+        logger.info(`Destroying ${instances.length} active instance(s)...`);
+        await Promise.all(instances.map((inst) => instanceManager.destroyInstance(inst.id).catch(() => {})));
+      }
+
+      logger.info('Shutdown complete');
+      clearTimeout(hardTimeout);
+      process.exit(0);
+    } catch (err) {
+      logger.error('Error during shutdown:', err);
+      clearTimeout(hardTimeout);
+      process.exit(1);
+    }
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));

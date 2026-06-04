@@ -4,6 +4,7 @@ import { join } from 'node:path';
 export interface ServerConfig {
   port: number;
   host: string;
+  shutdownTimeoutMs: number;
 }
 
 export interface WebSocketConfig {
@@ -82,6 +83,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   }
   if (!server.host || typeof server.host !== 'string') {
     throw new Error('Config validation failed: server.host must be a non-empty string');
+  }
+  if (typeof server.shutdownTimeoutMs !== 'number' || !Number.isInteger(server.shutdownTimeoutMs) || server.shutdownTimeoutMs <= 0) {
+    throw new Error(`Config validation failed: server.shutdownTimeoutMs must be a positive integer, got ${server.shutdownTimeoutMs}`);
   }
 
   // WebSocket validation
