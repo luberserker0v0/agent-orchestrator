@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WorkspaceFactory } from './workspace-factory.js';
 
@@ -125,5 +125,226 @@ describe('WorkspaceFactory', () => {
     });
 
     expect(() => factory.destroy('non-existent')).not.toThrow();
+  });
+
+  // ─── Config ──────────────────────────────────────────────
+
+  describe('writeConfig / readConfig', () => {
+    it('should overwrite opencode.json completely', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-config');
+
+      factory.writeConfig('conv-config', { model: 'gpt-4', customKey: 'value' });
+
+      const config = factory.readConfig('conv-config');
+      expect(config.model).toBe('gpt-4');
+      expect(config.customKey).toBe('value');
+      expect(config.$schema).toBeUndefined(); // fully overwritten
+    });
+
+    it('should return empty object when config does not exist', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-config2');
+      rmSync(join(TEST_BASE_PATH, 'conv-config2', '.opencode', 'opencode.json'));
+
+      expect(factory.readConfig('conv-config2')).toEqual({});
+    });
+  });
+
+  // ─── Agents ──────────────────────────────────────────────
+
+  describe('agent CRUD', () => {
+    it('should write and read agent markdown', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agent');
+
+      factory.writeAgent('conv-agent', 'designer', '---\nmode: subagent\n---\nYou are a designer.');
+      const content = factory.readAgent('conv-agent', 'designer');
+      expect(content).toBe('---\nmode: subagent\n---\nYou are a designer.');
+    });
+
+    it('should list agents', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agent-list');
+
+      factory.writeAgent('conv-agent-list', 'designer', 'designer content');
+      factory.writeAgent('conv-agent-list', 'reviewer', 'reviewer content');
+
+      const agents = factory.listAgents('conv-agent-list');
+      expect(agents).toContain('designer');
+      expect(agents).toContain('reviewer');
+    });
+
+    it('should delete agent', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agent-del');
+
+      factory.writeAgent('conv-agent-del', 'temp', 'temp content');
+      factory.deleteAgent('conv-agent-del', 'temp');
+
+      expect(factory.listAgents('conv-agent-del')).not.toContain('temp');
+    });
+
+    it('should throw when reading non-existent agent', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agent-miss');
+
+      expect(() => factory.readAgent('conv-agent-miss', 'missing')).toThrow('Agent not found');
+    });
+  });
+
+  // ─── Generic Files ───────────────────────────────────────
+
+  describe('file CRUD', () => {
+    it('should write and read files', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-file');
+
+      factory.writeFile('conv-file', 'templates/design-spec.md', '# Design Spec');
+      const content = factory.readFile('conv-file', 'templates/design-spec.md');
+      expect(content).toBe('# Design Spec');
+    });
+
+    it('should list files', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-file-list');
+
+      factory.writeFile('conv-file-list', 'a.md', 'a');
+      factory.writeFile('conv-file-list', 'b.md', 'b');
+
+      const files = factory.listFiles('conv-file-list');
+      expect(files).toContain('a.md');
+      expect(files).toContain('b.md');
+    });
+
+    it('should delete files', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-file-del');
+
+      factory.writeFile('conv-file-del', 'temp.txt', 'temp');
+      factory.deleteFile('conv-file-del', 'temp.txt');
+      expect(() => factory.readFile('conv-file-del', 'temp.txt')).toThrow('File not found');
+    });
+
+    it('should block path traversal in file operations', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-sec');
+
+      expect(() => factory.writeFile('conv-sec', '../outside.txt', 'bad')).toThrow('path traversal');
+      expect(() => factory.readFile('conv-sec', '../outside.txt')).toThrow('path traversal');
+    });
+
+    it('should block absolute paths', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-sec2');
+
+      expect(() => factory.writeFile('conv-sec2', '/etc/passwd', 'bad')).toThrow('absolute paths');
+    });
+  });
+
+  // ─── Copy from local ─────────────────────────────────────
+
+  describe('copyFromLocal', () => {
+    beforeEach(() => {
+      // Setup allowed source directories
+      const assetsDir = join(process.cwd(), 'assets');
+      const templatesDir = join(process.cwd(), 'templates');
+      mkdirSync(assetsDir, { recursive: true });
+      mkdirSync(templatesDir, { recursive: true });
+
+      writeFileSync(join(assetsDir, 'template.md'), '# Template', 'utf-8');
+      writeFileSync(join(templatesDir, 'guide.txt'), 'Guide content', 'utf-8');
+    });
+
+    afterEach(() => {
+      const assetsDir = join(process.cwd(), 'assets');
+      const templatesDir = join(process.cwd(), 'templates');
+      if (existsSync(assetsDir)) rmSync(assetsDir, { recursive: true, force: true });
+      if (existsSync(templatesDir)) rmSync(templatesDir, { recursive: true, force: true });
+    });
+
+    it('should copy file from allowed source', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-copy');
+
+      factory.copyFromLocal('conv-copy', join('assets', 'template.md'), 'templates/template.md');
+      const content = factory.readFile('conv-copy', 'templates/template.md');
+      expect(content).toBe('# Template');
+    });
+
+    it('should reject copy from disallowed source', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-copy-denied');
+
+      expect(() =>
+        factory.copyFromLocal('conv-copy-denied', join('..', 'outside.txt'), 'outside.txt')
+      ).toThrow('Source path not allowed');
+    });
+  });
+
+  // ─── Quota ───────────────────────────────────────────────
+
+  describe('quota', () => {
+    it('should enforce 50MB workspace size limit', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-quota');
+
+      const bigContent = 'x'.repeat(51 * 1024 * 1024); // 51 MB of text
+
+      expect(() => factory.writeFile('conv-quota', 'big.txt', bigContent)).toThrow('quota exceeded');
+    });
+
+    it('should calculate workspace size', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-size');
+      factory.writeFile('conv-size', 'test.txt', 'hello');
+
+      expect(factory.getWorkspaceSize('conv-size')).toBeGreaterThan(0);
+    });
   });
 });
