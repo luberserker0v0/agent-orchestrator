@@ -12,19 +12,14 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 **回應**：
 ```json
-{ "status": "ok", "uptime": 12.34, "timestamp": "2026-06-03T14:45:22.734Z" }
+{ "status": "ok", "uptime": 12.34, "timestamp": "2026-06-05T14:45:22.734Z" }
 ```
 
 ---
 
 ### `POST /api/conversations`
 
-建立新對話。AgentOrchestrator 會：
-1. 建立 `workspace/{id}/` 資料夾
-2. 寫入 `opencode.json` 權限設定
-3. 分配動態端口並啟動 `opencode serve`
-4. 等待健康檢查通過
-5. 建立初始 Session
+準備新對話。僅建立 workspace，**不啟動** OpenCode 實例。
 
 **請求**：
 ```json
@@ -42,17 +37,331 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 ```json
 {
   "id": "my-conversation-001",
-  "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001",
-  "port": 30000,
-  "sessionId": "ses_171df93daffektj6tWpV4EBEmz",
-  "model": "anthropic/claude-3-5-sonnet",
-  "agent": "build"
+  "status": "prepared",
+  "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001"
 }
 ```
 
 **錯誤**（`500`）：
 ```json
-{ "error": "OpenCode instance failed health check after 10 retries" }
+{ "error": "Failed to create conversation: disk full" }
+```
+
+---
+
+### `POST /api/conversations/:id/start`
+
+啟動對話的 OpenCode 實例。若 workspace 已存在則直接重用。
+
+**請求**：空 body
+
+**回應**（`200 OK`）：
+```json
+{
+  "status": "running",
+  "port": 30000,
+  "sessionId": "ses_171df93daffektj6tWpV4EBEmz"
+}
+```
+
+**錯誤**：
+- `404`：對話不存在
+  ```json
+  { "error": "Conversation not found" }
+  ```
+- `409`：已經在運行
+  ```json
+  { "error": "Conversation already running" }
+  ```
+- `500`：啟動失敗（spawn 錯誤、健康檢查失敗等）
+  ```json
+  { "error": "OpenCode instance failed health check after 10 retries" }
+  ```
+
+---
+
+### `POST /api/conversations/:id/stop`
+
+停止 OpenCode 實例，**保留 workspace**。
+
+**請求**：空 body
+
+**回應**（`200 OK`）：
+```json
+{ "status": "stopped" }
+```
+
+**錯誤**（`409`）：
+```json
+{ "error": "Conversation not running" }
+```
+
+---
+
+### `POST /api/conversations/:id/restart`
+
+重啟 OpenCode 實例，**保留 workspace**（先 stop 再 start）。
+
+**請求**：空 body
+
+**回應**（`200 OK`）：
+```json
+{ "status": "restarting" }
+```
+
+**錯誤**（`404`）：
+```json
+{ "error": "Conversation not found" }
+```
+
+---
+
+### `GET /api/conversations/:id/config`
+
+讀取對話的 `opencode.json`。
+
+**回應**：
+```json
+{
+  "opencode": {
+    "$schema": "https://opencode.ai/schemas/opencode.json",
+    "permission": {
+      "external_directory": { "*": "deny" },
+      "bash": { "*": "deny" }
+    },
+    "model": "anthropic/claude-3-5-sonnet",
+    "agent": "build"
+  }
+}
+```
+
+---
+
+### `PUT /api/conversations/:id/config`
+
+**完整覆寫**對話的 `opencode.json`。
+
+**請求**：
+```json
+{
+  "opencode": {
+    "$schema": "https://opencode.ai/schemas/opencode.json",
+    "permission": {
+      "external_directory": { "*": "deny", "C:/Projects/**": "allow" },
+      "bash": { "*": "deny", "git *": "allow" }
+    },
+    "model": "openai/gpt-5"
+  }
+}
+```
+
+**回應**（`204 No Content`）
+
+---
+
+### `GET /api/conversations/:id/agents`
+
+列出對話的所有 Agent 定義檔。
+
+**回應**：
+```json
+[
+  { "name": "designer.md", "size": 256 },
+  { "name": "reviewer.md", "size": 189 }
+]
+```
+
+---
+
+### `PUT /api/conversations/:id/agents`
+
+寫入 Agent 定義檔（Markdown + YAML frontmatter）。OpenCode 會自動發現 `.opencode/agents/*.md`。
+
+**請求**：
+```json
+{
+  "name": "designer.md",
+  "content": "---\nname: Designer\n---\nYou are a senior UI/UX designer."
+}
+```
+
+**回應**（`201 Created`）
+
+---
+
+### `GET /api/conversations/:id/agents/:name`
+
+讀取指定 Agent 定義檔的內容。
+
+**回應**：
+```json
+{
+  "name": "designer.md",
+  "content": "---\nname: Designer\n---\nYou are a senior UI/UX designer."
+}
+```
+
+**錯誤**（`404`）：
+```json
+{ "error": "Agent not found" }
+```
+
+---
+
+### `DELETE /api/conversations/:id/agents/:name`
+
+刪除指定 Agent 定義檔。
+
+**回應**（`204 No Content`）
+
+---
+
+### `GET /api/conversations/:id/files`
+
+列出對話 workspace 中的所有檔案。
+
+**回應**：
+```json
+[
+  { "path": "templates/spec.md", "size": 1024 },
+  { "path": "assets/logo.png", "size": 4096 }
+]
+```
+
+---
+
+### `PUT /api/conversations/:id/files`
+
+寫入檔案。路徑放於 request body，避免 URL 特殊字元問題。
+
+**請求**：
+```json
+{
+  "path": "templates/spec.md",
+  "content": "# Design Spec\n\n## Goals\n..."
+}
+```
+
+**回應**（`201 Created`）
+
+**錯誤**（`400`）：
+```json
+{ "error": "Path contains .. or is absolute" }
+```
+
+---
+
+### `GET /api/conversations/:id/files/content`
+
+讀取指定檔案內容。路徑放於 query string。
+
+**Query**：`?path=templates/spec.md`
+
+**回應**：
+```json
+{
+  "path": "templates/spec.md",
+  "content": "# Design Spec\n\n## Goals\n..."
+}
+```
+
+**錯誤**（`400`）：
+```json
+{ "error": "Missing path query parameter" }
+```
+
+---
+
+### `DELETE /api/conversations/:id/files`
+
+刪除指定檔案。路徑放於 query string。
+
+**Query**：`?path=templates/spec.md`
+
+**回應**（`204 No Content`）
+
+---
+
+### `GET /api/conversations/:id/sessions`
+
+列出對話的所有會話。
+
+**回應**：
+```json
+[
+  {
+    "id": "ses_xxx",
+    "name": "default",
+    "createdAt": 1717420000,
+    "parent_id": null
+  }
+]
+```
+
+---
+
+### `GET /api/conversations/:id/sessions/:sid/children`
+
+取得指定會話的子會話（會話樹）。
+
+**回應**：
+```json
+[
+  {
+    "id": "ses_child_xxx",
+    "name": "fork-1",
+    "createdAt": 1717420100,
+    "parent_id": "ses_xxx"
+  }
+]
+```
+
+---
+
+### `POST /api/conversations/:id/sessions/:sid/fork`
+
+從指定會話建立分支（fork）。
+
+**請求**（可選）：
+```json
+{
+  "messageID": "msg_xxx"
+}
+```
+- 若提供 `messageID`，分支點為該訊息；否則為會話最新狀態
+
+**回應**（`200 OK`）：
+```json
+{
+  "sessionId": "ses_fork_xxx"
+}
+```
+
+---
+
+### `GET /api/conversations/:id/events`
+
+取得對話最近 100 條事件。適用於 WebSocket 重連時的事件回放。
+
+**回應**：
+```json
+[
+  {
+    "type": "conversation.prepared",
+    "timestamp": "2026-06-05T14:45:22.734Z",
+    "payload": { "id": "my-conversation-001" }
+  },
+  {
+    "type": "conversation.starting",
+    "timestamp": "2026-06-05T14:45:25.123Z",
+    "payload": { "id": "my-conversation-001" }
+  },
+  {
+    "type": "conversation.running",
+    "timestamp": "2026-06-05T14:45:28.456Z",
+    "payload": { "id": "my-conversation-001", "port": 30000 }
+  }
+]
 ```
 
 ---
@@ -80,7 +389,7 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 刪除對話。終止 OpenCode 進程、釋放端口、移除 workspace。
 
-**回應**：`204 No Content`
+**回應**（`204 No Content`）
 
 ---
 
@@ -108,7 +417,99 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 所有訊息採用 JSON-RPC 2.0 格式。
 
-### `message.send`
+**重要限制**：WebSocket 連線時若對話不存在（尚未 `POST /api/conversations`），伺服器會直接關閉連線（code `1011`）。若對話存在但狀態不是 `running`，需要執行實例的操作（如 `message.send`）會回傳 `-32001` invalid state。
+
+---
+
+### 會話類
+
+#### `session.create`
+
+建立新會話。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "session.create",
+  "params": {
+    "name": "feature-discussion"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "id": "ses_xxx",
+    "name": "feature-discussion"
+  }
+}
+```
+
+---
+
+#### `session.delete`
+
+刪除會話。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "session.delete",
+  "params": {
+    "id": "ses_xxx"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": { "deleted": true }
+}
+```
+
+---
+
+#### `session.list`
+
+列出所有會話。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "session.list",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": [
+    { "id": "ses_xxx", "name": "default" }
+  ]
+}
+```
+
+---
+
+### 訊息類
+
+#### `message.send`
 
 發送使用者訊息，等待 OpenCode AI 回應。OpenCode 會自動處理內建 tool calling loop（如 `read`/`edit`）。
 
@@ -116,7 +517,7 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 1,
+  "id": 4,
   "method": "message.send",
   "params": {
     "text": "Hello, what can you do?",
@@ -133,7 +534,7 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 1,
+  "id": 4,
   "result": {
     "messageId": "msg_xxx",
     "text": "I can help you with ...",
@@ -144,9 +545,18 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 }
 ```
 
+**錯誤**（`-32001` invalid state）：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "error": { "code": -32001, "message": "Conversation not running" }
+}
+```
+
 ---
 
-### `message.history`
+#### `message.history`
 
 取得對話歷史。
 
@@ -154,7 +564,7 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 2,
+  "id": 5,
   "method": "message.history",
   "params": { "limit": 10 }
 }
@@ -164,46 +574,554 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 ---
 
-### `session.abort`
+### 對話控制類
 
-中止當前正在生成的 AI 回應。
+#### `conversation.status`
+
+取得對話當前狀態。
 
 **請求**：
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 3,
-  "method": "session.abort",
+  "id": 6,
+  "method": "conversation.status",
   "params": {}
 }
 ```
 
 **回應**：
 ```json
-{ "jsonrpc": "2.0", "id": 3, "result": { "aborted": true } }
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": {
+    "id": "my-conversation-001",
+    "status": "running",
+    "port": 30000,
+    "sessionId": "ses_xxx"
+  }
+}
 ```
+
+---
+
+#### `conversation.start`
+
+透過 WebSocket 請求啟動對話（等同 `POST /start`）。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "conversation.start",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": { "status": "running" }
+}
+```
+
+---
+
+#### `conversation.stop`
+
+透過 WebSocket 請求停止對話（等同 `POST /stop`）。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "conversation.stop",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "result": { "status": "stopped" }
+}
+```
+
+---
+
+#### `conversation.restart`
+
+透過 WebSocket 請求重啟對話（等同 `POST /restart`）。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "method": "conversation.restart",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "result": { "status": "restarting" }
+}
+```
+
+---
+
+### 配置類
+
+#### `config.read`
+
+讀取 `opencode.json`。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "method": "config.read",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "result": {
+    "config": {
+      "$schema": "https://opencode.ai/schemas/opencode.json",
+      "permission": { "external_directory": { "*": "deny" }, "bash": { "*": "deny" } }
+    }
+  }
+}
+```
+
+---
+
+#### `config.write`
+
+覆寫 `opencode.json`。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 11,
+  "method": "config.write",
+  "params": {
+    "opencode": {
+      "$schema": "https://opencode.ai/schemas/opencode.json",
+      "permission": { "external_directory": { "*": "deny" }, "bash": { "*": "deny" } },
+      "model": "openai/gpt-5"
+    }
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 11,
+  "result": { "ok": true }
+}
+```
+
+---
+
+### Agent 類
+
+#### `agent.list`
+
+列出所有 Agent。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 12,
+  "method": "agent.list",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 12,
+  "result": [
+    { "name": "designer.md", "size": 256 }
+  ]
+}
+```
+
+---
+
+#### `agent.read`
+
+讀取指定 Agent。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 13,
+  "method": "agent.read",
+  "params": {
+    "name": "designer.md"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 13,
+  "result": {
+    "name": "designer.md",
+    "content": "---\nname: Designer\n---\nYou are a senior UI/UX designer."
+  }
+}
+```
+
+---
+
+#### `agent.write`
+
+寫入 Agent。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 14,
+  "method": "agent.write",
+  "params": {
+    "name": "designer.md",
+    "content": "---\nname: Designer\n---\nYou are a senior UI/UX designer."
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 14,
+  "result": { "ok": true }
+}
+```
+
+---
+
+#### `agent.delete`
+
+刪除指定 Agent。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 15,
+  "method": "agent.delete",
+  "params": {
+    "name": "designer.md"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 15,
+  "result": { "ok": true }
+}
+```
+
+---
+
+### 檔案類
+
+#### `file.list`
+
+列出所有檔案。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "method": "file.list",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "result": [
+    { "path": "templates/spec.md", "size": 1024 }
+  ]
+}
+```
+
+---
+
+#### `file.read`
+
+讀取指定檔案。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "method": "file.read",
+  "params": {
+    "path": "templates/spec.md"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "result": {
+    "path": "templates/spec.md",
+    "content": "# Design Spec\n\n## Goals\n..."
+  }
+}
+```
+
+---
+
+#### `file.write`
+
+寫入檔案。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "method": "file.write",
+  "params": {
+    "path": "templates/spec.md",
+    "content": "# Design Spec\n\n## Goals\n..."
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "result": { "ok": true }
+}
+```
+
+---
+
+#### `file.delete`
+
+刪除指定檔案。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 19,
+  "method": "file.delete",
+  "params": {
+    "path": "templates/spec.md"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 19,
+  "result": { "ok": true }
+}
+```
+
+---
+
+### 事件類
+
+#### `events.subscribe`
+
+訂閱對話事件流。訂閱後，伺服器會透過 WebSocket 主動推送 `conversation.*` 事件。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 20,
+  "method": "events.subscribe",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 20,
+  "result": { "subscribed": true }
+}
+```
+
+訂閱後可能收到的事件推送：
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "event",
+  "params": {
+    "type": "conversation.running",
+    "timestamp": "2026-06-05T14:45:28.456Z",
+    "payload": { "id": "demo", "port": 30000 }
+  }
+}
+```
+
+---
+
+#### `events.unsubscribe`
+
+取消訂閱事件流。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "method": "events.unsubscribe",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "result": { "subscribed": false }
+}
+```
+
+---
+
+## Conversation 生命周期事件
+
+當對話狀態改變時，AgentOrchestrator 會透過 WebSocket 推送事件（需先 `events.subscribe`）。
+
+| 事件類型 | 觸發時機 | Payload |
+|----------|----------|---------|
+| `conversation.prepared` | `POST /api/conversations` 完成 | `{ id }` |
+| `conversation.starting` | `POST /start` 開始 spawn | `{ id }` |
+| `conversation.running` | OpenCode 健康檢查通過 | `{ id, port }` |
+| `conversation.stopped` | `POST /stop` 完成 | `{ id }` |
+| `conversation.restarting` | `POST /restart` 開始 | `{ id }` |
+| `conversation.destroyed` | `DELETE /:id` 完成 | `{ id }` |
+
+**使用範例**：前端可在收到 `conversation.running` 後才啟用聊天輸入框，確保 OpenCode 已就緒。
+
+---
+
+## Agent 自動發現機制
+
+AgentOrchestrator 不直接管理 OpenCode 內部的 Agent 列表，而是透過**檔案系統約定**實現自動發現：
+
+1. 呼叫 `PUT /api/conversations/:id/agents` 時，AgentOrchestrator 將 Markdown 檔案寫入 `{workspace}/.opencode/agents/{name}.md`
+2. OpenCode 啟動時會自動掃描 `.opencode/agents/*.md`，讀取 YAML frontmatter 作為 Agent 定義
+3. 無需修改 `opencode.json` 或透過 HTTP API 註冊 Agent
+
+**Agent Markdown 格式**：
+```markdown
+---
+name: Designer
+description: A senior UI/UX designer for web applications
+---
+
+You are a senior UI/UX designer. Your responsibilities include:
+- Creating wireframes and mockups
+- Reviewing design consistency
+```
+
+---
+
+## 檔案操作安全限制與路徑參數規範
+
+### 為什麼路徑放在 body / query 而非 URL path？
+
+所有檔案與 Agent 操作的路徑參數統一放於 **request body**（`PUT`）或 **query string**（`GET` / `DELETE`），而非 URL path segment。原因如下：
+
+1. **避免 URL 特殊字元編碼問題**：檔案名可能包含空格、`#`、`%` 等字元，放在 body 無需擔心 URL encoding
+2. **防止 URL routing 層的路徑遍歷**：某些 web framework 可能將 URL path `../../../etc/passwd` 誤解析為合法路由；將路徑移至 body 可由應用層統一驗證
+3. **集中驗證**：所有路徑都通過 `sanitizeRelativePath()` 檢查，規則一致
+
+### `sanitizeRelativePath()` 規則
+
+- 拒絕包含 `..` 的相對路徑
+- 拒絕絕對路徑（以 `/` 或 Windows 磁碟機代號 `[A-Z]:` 開頭）
+- 允許純相對路徑如 `templates/spec.md`、`assets/logo.png`
+
+### 安全限制
+
+| 限制項目 | 說明 |
+|----------|------|
+| HTTP body limit | `express.json({ limit: '10mb' })` + `express.text({ limit: '5mb' })` |
+| Workspace 配額 | 上限 50 MB（`MAX_WORKSPACE_SIZE = 50 * 1024 * 1024` bytes），超過時寫入操作被拒絕 |
+| `copyFromLocal` 白名單 | 僅允許來源路徑在 `{cwd}/assets/` 或 `{cwd}/templates/` 下 |
 
 ---
 
 ## 錯誤處理
 
-REST API 與 WebSocket API 的錯誤回應格式：
+### REST HTTP 錯誤
 
-**REST HTTP 錯誤**：
+| 狀態碼 | 說明 |
+|--------|------|
+| `200` | OK |
+| `201` | Created |
+| `204` | No Content |
+| `400` | Bad Request（路徑遍歷、配額超過、缺少 body field） |
+| `404` | Not Found（對話、Agent、檔案不存在） |
+| `409` | Conflict（已運行 / 未運行 / 已存在） |
+| `500` | Server Error |
+
+**REST 錯誤回應格式**：
 ```json
 { "error": "錯誤訊息" }
 ```
 
-**WebSocket JSON-RPC 錯誤**：
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "error": { "code": -32000, "message": "錯誤訊息" }
-}
-```
-
-常見錯誤碼：
+### WebSocket JSON-RPC 錯誤
 
 | 錯誤碼 | 說明 |
 |--------|------|
@@ -211,3 +1129,13 @@ REST API 與 WebSocket API 的錯誤回應格式：
 | `-32600` | Invalid Request：jsonrpc 版本不對或缺少 method |
 | `-32601` | Method not found：未知的 WebSocket method |
 | `-32000` | Server error：一般伺服器錯誤 |
+| `-32001` | Invalid state：對話狀態不允許此操作（如未運行時呼叫 `message.send`） |
+
+**WebSocket JSON-RPC 錯誤回應格式**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": { "code": -32001, "message": "Conversation not running" }
+}
+```
