@@ -340,6 +340,36 @@ describe('HTTP API Server', () => {
     expect(mockWorkspaceFactory.importSkillFromLocal).not.toHaveBeenCalled();
   });
 
+  it('POST /api/conversations/:id/skills/import returns 403 for sibling prefix path skills_evil/', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+      throw new Error('Source path not allowed. Must be under one of: ...');
+    });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/import')
+      .send({ source: 'skills_evil/web-search', name: 'web-search' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('Source path not allowed');
+  });
+
+  it('POST /api/conversations/:id/skills/import returns 403 for absolute external path', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+      throw new Error('Source path not allowed. Must be under one of: ...');
+    });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/import')
+      .send({ source: 'C:\\temp\\external-skill', name: 'ext' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('Source path not allowed');
+  });
+
   it('GET /api/conversations/:id/skills/:name returns 400 for invalid name', async () => {
     mockConversationState.has.mockReturnValue(true);
 

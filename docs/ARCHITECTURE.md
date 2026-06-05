@@ -341,7 +341,7 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再�
 4. **自動資源回收**：LRU 淘汰與刪除時的 `treeKill` + `rmSync`，防止殭屍進程與磁碟洩漏
 5. **Workspace 配額限制**：單一 workspace 上限 50 MB，超過時寫入操作被拒絕
 6. **路徑遍歷防護**：所有檔案操作必須通過 `sanitizeRelativePath()`，拒絕 `..` 與絕對路徑；檔案路徑統一放於 request body 或 query string，避免 URL routing 層被惡意路徑段繞過
-7. **本地複製白名單**：`copyFromLocal` 僅允許來源為 `{cwd}/assets/`、`{cwd}/templates/` 或 `{cwd}/skills/`，防止任意本機路徑複製
+7. **本地複製白名單**：`copyFromLocal` 與 `importSkillFromLocal` 僅允許來源為 `{cwd}/assets/`、`{cwd}/templates/` 或 `{cwd}/skills/`；使用 `resolve()` + `sep` 邊界檢查取代字首比對，前綴相同的兄弟目錄（如 `skills_evil/`）一律拒絕
 8. **Skill 名稱驗證**：`validateSkillName()` 只允許 `[A-Za-z0-9_-]`，最大長度 128；API 層拒絕非法名稱後才進入檔案系統操作
 9. **Zip Slip 防護**：`skills/upload` 逐條驗證 zip entry 路徑，拒絕 `..`、絕對路徑與磁碟機路徑；`resolve()` 確認最終輸出路徑仍在 `destPath` 內才執行 extraction
 10. **Skill 結構驗證**：`skills/upload` 要求 zip 根層級必須包含 `SKILL.md`，否則直接拒絕

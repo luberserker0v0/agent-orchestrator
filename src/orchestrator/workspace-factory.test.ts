@@ -406,6 +406,42 @@ describe('WorkspaceFactory', () => {
 
       expect(() => factory.deleteSkill('conv-invalid-delete', 'foo/bar')).toThrow('Invalid skill name');
     });
+
+    it('should reject sibling prefix path skills_evil/', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-prefix-evil');
+
+      expect(() =>
+        factory.importSkillFromLocal('conv-prefix-evil', join('skills_evil', 'web-search'), 'web-search')
+      ).toThrow('Source path not allowed');
+    });
+
+    it('should reject sibling prefix path assets_backup/', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-prefix-assets');
+
+      expect(() =>
+        factory.importSkillFromLocal('conv-prefix-assets', join('assets_backup', 'shared-skill'), 'shared-skill')
+      ).toThrow('Source path not allowed');
+    });
+
+    it('should reject sibling prefix path templates-old/', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-prefix-tpl');
+
+      expect(() =>
+        factory.importSkillFromLocal('conv-prefix-tpl', join('templates-old', 'default-skill'), 'default-skill')
+      ).toThrow('Source path not allowed');
+    });
   });
 
   // ─── Copy from local ─────────────────────────────────────
@@ -450,6 +486,30 @@ describe('WorkspaceFactory', () => {
 
       expect(() =>
         factory.copyFromLocal('conv-copy-denied', join('..', 'outside.txt'), 'outside.txt')
+      ).toThrow('Source path not allowed');
+    });
+
+    it('should reject copy from sibling prefix path skills_evil/', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-copy-prefix-evil');
+
+      expect(() =>
+        factory.copyFromLocal('conv-copy-prefix-evil', join('skills_evil', 'malicious.txt'), 'malicious.txt')
+      ).toThrow('Source path not allowed');
+    });
+
+    it('should reject copy from sibling prefix path templates_backup/', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-copy-prefix-bak');
+
+      expect(() =>
+        factory.copyFromLocal('conv-copy-prefix-bak', join('templates_backup', 'old.txt'), 'old.txt')
       ).toThrow('Source path not allowed');
     });
   });
