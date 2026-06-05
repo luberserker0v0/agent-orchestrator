@@ -152,4 +152,67 @@ describe('OpenCodeClient', () => {
     const result = await client.deleteSession('ses_1');
     expect(result).toBeUndefined();
   });
+
+  it('makes GET request for listSessions()', async () => {
+    mockResponse(200, [
+      { id: 'ses_1', title: 'Test', parent_id: null, status: 'active', created_at: '', updated_at: '' },
+    ]);
+
+    const result = await client.listSessions();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:3000/session');
+    expect(init.method).toBe('GET');
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('ses_1');
+  });
+
+  it('makes GET request for getSessionChildren()', async () => {
+    mockResponse(200, [
+      { id: 'ses_child', title: 'Child', parent_id: 'ses_1', status: 'active', created_at: '', updated_at: '' },
+    ]);
+
+    const result = await client.getSessionChildren('ses_1');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:3000/session/ses_1/children');
+    expect(init.method).toBe('GET');
+    expect(result[0].parent_id).toBe('ses_1');
+  });
+
+  it('makes POST request for forkSession() with messageID', async () => {
+    mockResponse(200, {
+      id: 'ses_forked',
+      title: 'Forked',
+      parent_id: 'ses_1',
+      status: 'active',
+      created_at: '',
+      updated_at: '',
+    });
+
+    await client.forkSession('ses_1', 'msg_10');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:3000/session/ses_1/fork');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ messageID: 'msg_10' });
+  });
+
+  it('makes POST request for forkSession() without messageID', async () => {
+    mockResponse(200, {
+      id: 'ses_forked',
+      title: 'Forked',
+      parent_id: 'ses_1',
+      status: 'active',
+      created_at: '',
+      updated_at: '',
+    });
+
+    await client.forkSession('ses_1');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:3000/session/ses_1/fork');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+  });
 });

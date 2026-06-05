@@ -76,6 +76,18 @@ export class OpenCodeClient {
     return this.request<boolean>('POST', `/session/${sessionId}/abort`);
   }
 
+  async listSessions(): Promise<Session[]> {
+    return this.request<Session[]>('GET', '/session');
+  }
+
+  async getSessionChildren(id: string): Promise<Session[]> {
+    return this.request<Session[]>('GET', `/session/${id}/children`);
+  }
+
+  async forkSession(id: string, messageID?: string): Promise<Session> {
+    return this.request<Session>('POST', `/session/${id}/fork`, messageID ? { messageID } : undefined);
+  }
+
   async listAgents(): Promise<Agent[]> {
     return this.request<Agent[]>('GET', '/agent');
   }
