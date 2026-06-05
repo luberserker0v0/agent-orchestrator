@@ -88,6 +88,11 @@ describe('WSRouter', () => {
       listFiles: vi.fn(),
       deleteFile: vi.fn(),
       copyFromLocal: vi.fn(),
+      importSkillFromLocal: vi.fn(),
+      listSkills: vi.fn(),
+      readSkill: vi.fn(),
+      getSkillInfo: vi.fn(),
+      deleteSkill: vi.fn(),
     };
 
     mockConversationState = {
@@ -461,6 +466,153 @@ describe('WSRouter', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(mockWs.close).toHaveBeenCalledWith(1011, 'Conversation not found');
+  });
+
+  it('handles skills.list', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.listSkills.mockReturnValue(['web-search', 'code-review']);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 20,
+          method: 'skills.list',
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 20 && parsed.result;
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result).toEqual(['web-search', 'code-review']);
+  });
+
+  it('handles skills.get', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.readSkill.mockReturnValue('# web-search\nA skill.');
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 21,
+          method: 'skills.get',
+          params: { name: 'web-search' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 21 && parsed.result;
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result).toBe('# web-search\nA skill.');
+  });
+
+  it('handles skills.info', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.getSkillInfo.mockReturnValue({
+      name: 'web-search',
+      files: ['SKILL.md'],
+      totalSize: 1234,
+      sha256: 'abc123',
+    });
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 22,
+          method: 'skills.info',
+          params: { name: 'web-search' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 22 && parsed.result;
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result.sha256).toBe('abc123');
+  });
+
+  it('handles skills.delete', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 23,
+          method: 'skills.delete',
+          params: { name: 'web-search' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search');
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 23 && parsed.result?.deleted === 'web-search';
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
   });
 
   it('closeAll closes all connections and WSS', async () => {

@@ -10,7 +10,7 @@ import {
   cpSync,
 } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { WorkspaceConfig } from '../config-loader.js';
 
@@ -87,6 +87,7 @@ export class WorkspaceFactory {
     this.allowedCopySources = [
       join(process.cwd(), 'assets'),
       join(process.cwd(), 'templates'),
+      join(process.cwd(), 'skills'),
     ];
   }
 
@@ -309,6 +310,77 @@ export class WorkspaceFactory {
     return join(this.basePath, sanitizeId(id));
   }
 
+  // ─── Skills ──────────────────────────────────────────────
+
+  importSkillFromLocal(id: string, source: string, name: string): void {
+    const sanitizedName = sanitizeId(name);
+    const wsPath = this.resolveWorkspacePath(id);
+    const destPath = join(wsPath, '.opencode', 'skills', sanitizedName);
+
+    const resolvedSource = join(process.cwd(), source);
+    const isAllowed = this.allowedCopySources.some((allowed) =>
+      resolvedSource.startsWith(allowed)
+    );
+    if (!isAllowed) {
+      throw new Error(
+        `Source path not allowed. Must be under one of: ${this.allowedCopySources.join(', ')}`
+      );
+    }
+
+    if (!existsSync(resolvedSource)) {
+      throw new Error(`Source not found: ${source}`);
+    }
+
+    const stat = statSync(resolvedSource);
+    if (!stat.isDirectory()) {
+      throw new Error(`Source must be a directory: ${source}`);
+    }
+
+    const dirSize = getDirSize(resolvedSource);
+    this.assertQuota(wsPath, dirSize, destPath);
+
+    mkdirSync(destPath, { recursive: true });
+    cpSync(resolvedSource, destPath, { recursive: true, force: true });
+    logger.info(`Skill imported: ${resolvedSource} → ${destPath}`);
+  }
+
+  listSkills(id: string): string[] {
+    const wsPath = this.resolveWorkspacePath(id);
+    const skillsDir = join(wsPath, '.opencode', 'skills');
+    if (!existsSync(skillsDir)) return [];
+    return readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  }
+
+  readSkill(id: string, name: string): string {
+    const wsPath = this.resolveWorkspacePath(id);
+    const skillPath = join(wsPath, '.opencode', 'skills', sanitizeId(name), 'SKILL.md');
+    if (!existsSync(skillPath)) {
+      throw new Error(`Skill not found: ${name}`);
+    }
+    return readFileSync(skillPath, 'utf-8');
+  }
+
+  getSkillInfo(id: string, name: string): { name: string; files: string[]; totalSize: number; sha256: string } {
+    const wsPath = this.resolveWorkspacePath(id);
+    const skillDir = join(wsPath, '.opencode', 'skills', sanitizeId(name));
+    if (!existsSync(skillDir)) {
+      throw new Error(`Skill not found: ${name}`);
+    }
+    const info = hashDirectory(skillDir);
+    return { name, ...info };
+  }
+
+  deleteSkill(id: string, name: string): void {
+    const wsPath = this.resolveWorkspacePath(id);
+    const skillDir = join(wsPath, '.opencode', 'skills', sanitizeId(name));
+    if (existsSync(skillDir)) {
+      rmSync(skillDir, { recursive: true, force: true });
+      logger.info(`Skill deleted: ${skillDir}`);
+    }
+  }
+
   private assertQuota(wsPath: string, additionalBytes: number, excludingFile?: string): void {
     const currentSize = getDirSize(wsPath);
     // Exclude the file being overwritten so we don't double-count
@@ -326,4 +398,30 @@ export class WorkspaceFactory {
       );
     }
   }
+}
+
+function hashDirectory(dirPath: string): { files: string[]; totalSize: number; sha256: string } {
+  const hash = createHash('sha256');
+  const files: string[] = [];
+  let totalSize = 0;
+
+  function walk(dir: string, relativePrefix: string) {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const relativePath = relativePrefix ? `${relativePrefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(join(dir, entry.name), relativePath);
+      } else {
+        files.push(relativePath);
+        const content = readFileSync(join(dir, entry.name));
+        totalSize += content.length;
+        hash.update(relativePath);
+        hash.update(content);
+      }
+    }
+  }
+
+  walk(dirPath, '');
+  return { files, totalSize, sha256: hash.digest('hex') };
 }

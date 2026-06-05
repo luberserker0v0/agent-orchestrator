@@ -275,6 +275,87 @@ describe('WorkspaceFactory', () => {
     });
   });
 
+  // ─── Skills ──────────────────────────────────────────────
+
+  describe('skill CRUD', () => {
+    it('should import skill from local directory', () => {
+      // Setup source skill directory
+      const skillsDir = join(process.cwd(), 'skills');
+      const webSearchDir = join(skillsDir, 'web-search');
+      mkdirSync(webSearchDir, { recursive: true });
+      writeFileSync(join(webSearchDir, 'SKILL.md'), '# web-search\nA web search skill.', 'utf-8');
+      writeFileSync(join(webSearchDir, 'README.md'), 'Readme content', 'utf-8');
+
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-skill');
+
+      factory.importSkillFromLocal('conv-skill', join('skills', 'web-search'), 'web-search');
+
+      const content = factory.readSkill('conv-skill', 'web-search');
+      expect(content).toBe('# web-search\nA web search skill.');
+
+      const skills = factory.listSkills('conv-skill');
+      expect(skills).toContain('web-search');
+
+      const info = factory.getSkillInfo('conv-skill', 'web-search');
+      expect(info.name).toBe('web-search');
+      expect(info.files).toContain('SKILL.md');
+      expect(info.files).toContain('README.md');
+      expect(info.totalSize).toBeGreaterThan(0);
+      expect(info.sha256).toHaveLength(64);
+
+      // Cleanup
+      rmSync(skillsDir, { recursive: true, force: true });
+    });
+
+    it('should throw when skill not found', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-skill-miss');
+
+      expect(() => factory.readSkill('conv-skill-miss', 'missing')).toThrow('Skill not found');
+      expect(() => factory.getSkillInfo('conv-skill-miss', 'missing')).toThrow('Skill not found');
+    });
+
+    it('should delete skill', () => {
+      const skillsDir = join(process.cwd(), 'skills');
+      const tempDir = join(skillsDir, 'temp-skill');
+      mkdirSync(tempDir, { recursive: true });
+      writeFileSync(join(tempDir, 'SKILL.md'), '# temp', 'utf-8');
+
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-skill-del');
+
+      factory.importSkillFromLocal('conv-skill-del', join('skills', 'temp-skill'), 'temp-skill');
+      expect(factory.listSkills('conv-skill-del')).toContain('temp-skill');
+
+      factory.deleteSkill('conv-skill-del', 'temp-skill');
+      expect(factory.listSkills('conv-skill-del')).not.toContain('temp-skill');
+
+      rmSync(skillsDir, { recursive: true, force: true });
+    });
+
+    it('should reject import from disallowed source', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-skill-denied');
+
+      expect(() =>
+        factory.importSkillFromLocal('conv-skill-denied', join('..', 'outside'), 'outside')
+      ).toThrow('Source path not allowed');
+    });
+  });
+
   // ─── Copy from local ─────────────────────────────────────
 
   describe('copyFromLocal', () => {
