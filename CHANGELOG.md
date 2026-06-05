@@ -30,3 +30,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Path parameters for file APIs moved to request body to avoid URL encoding/special-char issues and path-traversal risks in routing.
 - Hardened skill zip upload against zip slip and unsafe skill names.
 - Rejected malformed skill archives without root SKILL.md.
+- Skill zip upload path containment now uses `resolve()` for proper normalization and boundary checking.
+- All skill APIs (REST and WebSocket) now reject invalid names via `validateSkillName()` instead of silently sanitizing with `sanitizeId()`.
