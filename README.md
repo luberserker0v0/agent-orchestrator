@@ -145,6 +145,7 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `POST` | `/api/conversations/:id/restart` | 重啟 OpenCode 實例（保留 workspace） |
 | `GET/PUT` | `/api/conversations/:id/config` | 讀取 / 覆寫 `opencode.json` |
 | `GET/PUT/GET/DELETE` | `/api/conversations/:id/agents` / `/:name` | Agent CRUD（自動發現） |
+| `POST/GET/GET/GET/DELETE` | `/api/conversations/:id/skills/upload` / `/import` / `/:name` / `/:name/info` | Skill 上傳（zip）/ 導入 / 讀取 / 資訊（結構+hash）/ 刪除 |
 | `GET/PUT/GET/DELETE` | `/api/conversations/:id/files` | 通用檔案 CRUD |
 | `GET/GET/POST` | `/api/conversations/:id/sessions` / `/:sid/children` / `/:sid/fork` | 會話樹查詢與分支 |
 | `GET` | `/api/conversations/:id/events` | 取得最近 100 條事件 |
@@ -163,6 +164,7 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `conversation.status` / `conversation.start` / `conversation.stop` / `conversation.restart` | 對話生命周期控制 |
 | `config.read` / `config.write` | 配置讀寫 |
 | `agent.list` / `agent.read` / `agent.write` / `agent.delete` | Agent CRUD |
+| `skills.import` / `skills.list` / `skills.get` / `skills.info` / `skills.delete` | Skill 導入 / 列出 / 讀取 / 資訊 / 刪除 |
 | `file.list` / `file.read` / `file.write` / `file.delete` | 檔案 CRUD |
 | `events.subscribe` / `events.unsubscribe` | 事件流訂閱 |
 

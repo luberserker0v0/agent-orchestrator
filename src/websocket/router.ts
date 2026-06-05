@@ -305,6 +305,50 @@ export class WSRouter {
         return { deleted: sessionId };
       }
 
+      // ─── Skills ────────────────────────────────────────────
+
+      case 'skills.import': {
+        const { source, name } = params as { source: string; name: string };
+        if (!source || !name) throw new Error('Missing source or name');
+        this.workspaceFactory.importSkillFromLocal(conversationId, source, name);
+        if (state.status === 'running') {
+          this.conversationState.markNeedsRestart(conversationId, `skill ${name} imported`);
+        }
+        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
+          changedFiles: [`.opencode/skills/${name}/`],
+        });
+        return { imported: name };
+      }
+
+      case 'skills.list': {
+        return this.workspaceFactory.listSkills(conversationId);
+      }
+
+      case 'skills.get': {
+        const { name } = params as { name: string };
+        if (!name) throw new Error('Missing name');
+        return this.workspaceFactory.readSkill(conversationId, name);
+      }
+
+      case 'skills.info': {
+        const { name } = params as { name: string };
+        if (!name) throw new Error('Missing name');
+        return this.workspaceFactory.getSkillInfo(conversationId, name);
+      }
+
+      case 'skills.delete': {
+        const { name } = params as { name: string };
+        if (!name) throw new Error('Missing name');
+        this.workspaceFactory.deleteSkill(conversationId, name);
+        if (state.status === 'running') {
+          this.conversationState.markNeedsRestart(conversationId, `skill ${name} deleted`);
+        }
+        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
+          changedFiles: [`.opencode/skills/${name}/`],
+        });
+        return { deleted: name };
+      }
+
       default:
         throw new Error(`Unknown method: ${method}`);
     }
