@@ -139,7 +139,15 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | 方法 | 端點 | 說明 |
 |------|------|------|
 | `GET` | `/health` | 健康檢查 |
-| `POST` | `/api/conversations` | 建立對話（可指定 model / agent） |
+| `POST` | `/api/conversations` | 準備對話（僅建立 workspace，不啟動 OpenCode） |
+| `POST` | `/api/conversations/:id/start` | 啟動 OpenCode 實例 |
+| `POST` | `/api/conversations/:id/stop` | 停止 OpenCode 實例（保留 workspace） |
+| `POST` | `/api/conversations/:id/restart` | 重啟 OpenCode 實例（保留 workspace） |
+| `GET/PUT` | `/api/conversations/:id/config` | 讀取 / 覆寫 `opencode.json` |
+| `GET/PUT/GET/DELETE` | `/api/conversations/:id/agents` / `/:name` | Agent CRUD（自動發現） |
+| `GET/PUT/GET/DELETE` | `/api/conversations/:id/files` | 通用檔案 CRUD |
+| `GET/GET/POST` | `/api/conversations/:id/sessions` / `/:sid/children` / `/:sid/fork` | 會話樹查詢與分支 |
+| `GET` | `/api/conversations/:id/events` | 取得最近 100 條事件 |
 | `GET` | `/api/models` | 查詢可用模型列表 |
 | `DELETE` | `/api/conversations/:id` | 刪除對話 |
 | `GET` | `/api/conversations` | 列出活躍對話 |
@@ -148,15 +156,23 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 
 | 方法 | 說明 |
 |------|------|
+| `session.create` / `session.delete` / `session.list` | 會話管理 |
 | `message.send` | 發送訊息，等待 AI 回應 |
 | `message.history` | 取得對話歷史 |
 | `session.abort` | 中止正在生成的回應 |
+| `conversation.status` / `conversation.start` / `conversation.stop` / `conversation.restart` | 對話生命周期控制 |
+| `config.read` / `config.write` | 配置讀寫 |
+| `agent.list` / `agent.read` / `agent.write` / `agent.delete` | Agent CRUD |
+| `file.list` / `file.read` / `file.write` / `file.delete` | 檔案 CRUD |
+| `events.subscribe` / `events.unsubscribe` | 事件流訂閱 |
 
 ---
 
 ## 快速開始
 
 ### 完整互動範例（curl + WebSocket）
+
+新版採用**延遲啟動（Delayed-Start）**設計：先準備 workspace，再注入 Agent 與檔案，最後啟動 OpenCode。
 
 ```bash
 # 1. 啟動服務
@@ -166,14 +182,27 @@ npm run dev
 MODELS=$(curl -s http://127.0.0.1:11697/api/models)
 echo "Available models: $MODELS"
 
-# 3. 建立對話並指定預設模型（假設 AgentOrchestrator 監聽在 11697）
+# 3. 準備對話（僅建立 workspace，不啟動 OpenCode）
 CONV=$(curl -s -X POST http://127.0.0.1:11697/api/conversations \
   -H "Content-Type: application/json" \
   -d '{"id":"demo","model":"anthropic/claude-3-5-sonnet","agent":"build"}')
 
-echo "Conversation created: $CONV"
+echo "Conversation prepared: $CONV"
 
-# 4. 使用 WebSocket 發送訊息（需安裝 wscat: npm install -g wscat）
+# 4. 寫入 Agent 定義（OpenCode 自動發現 .opencode/agents/*.md）
+curl -s -X PUT http://127.0.0.1:11697/api/conversations/demo/agents \
+  -H "Content-Type: application/json" \
+  -d '{"name":"designer.md","content":"---\nname: Designer\n---\nYou are a senior UI/UX designer."}'
+
+# 5. 寫入模板檔案
+curl -s -X PUT http://127.0.0.1:11697/api/conversations/demo/files \
+  -H "Content-Type: application/json" \
+  -d '{"path":"templates/spec.md","content":"# Design Spec\n\n## Goals\n..."}'
+
+# 6. 啟動 OpenCode
+curl -s -X POST http://127.0.0.1:11697/api/conversations/demo/start
+
+# 7. 使用 WebSocket 發送訊息（需安裝 wscat: npm install -g wscat）
 wscat -c ws://127.0.0.1:11697/ws/demo
 
 # 在 wscat 中輸入：
@@ -242,7 +271,10 @@ wscat -c ws://127.0.0.1:11697/ws/demo
 ```
 [Client / Frontend]
        |
-       | HTTP POST /api/conversations
+       | HTTP POST /api/conversations  (prepare workspace)
+       | PUT  /api/conversations/:id/agents
+       | PUT  /api/conversations/:id/files
+       | POST /api/conversations/:id/start
        | GET  /api/models
        v
 [AgentOrchestrator HTTP API]  ←── Express (port 0 = auto-allocated)
@@ -255,23 +287,29 @@ wscat -c ws://127.0.0.1:11697/ws/demo
        v                     v
 [OpenCode Server]       [Client Response]
 
+[ConversationState] ←── event-driven lifecycle
+       |
+       | subscribe(id, cb) → push events
+       v
 [Client / Frontend]
        |
        | WebSocket /ws/{id}
        v
-[AgentOrchestrator WS Router] → forwards to OpenCode Instance #1
+[AgentOrchestrator WS Router] → checks status via ConversationState
+                                → forwards to OpenCode Instance #1
 ```
 
 ### 核心模組
 
 | 模組 | 職責 |
 |------|------|
-| `src/orchestrator/instance-manager.ts` | 管理 OpenCode 實例生命周期（啟動、健康檢查、銷毀、LRU） |
+| `src/orchestrator/conversation-state.ts` | 事件驅動對話生命周期狀態機（prepared → running → stopped/destroyed），訂閱與事件回放 |
+| `src/orchestrator/instance-manager.ts` | 管理 OpenCode 實例生命周期（啟動、健康檢查、銷毀、LRU），支援 workspace 重用 |
 | `src/orchestrator/port-pool.ts` | 動態端口分配與回收 |
-| `src/orchestrator/workspace-factory.ts` | 建立 workspace 與 opencode.json 權限設定 |
-| `src/opencode-http/client.ts` | 與 OpenCode HTTP API 通訊（含 Basic Auth） |
+| `src/orchestrator/workspace-factory.ts` | 建立 workspace，config / agent / file CRUD，copyFromLocal，配額與路徑防護 |
+| `src/opencode-http/client.ts` | 與 OpenCode HTTP API 通訊（含 Basic Auth、會話樹 API） |
 | `src/opencode-cli/models.ts` | 執行 `opencode models` CLI，解析可用模型列表 |
-| `src/websocket/router.ts` | WebSocket 連線路由至對應 OpenCode 實例 |
+| `src/websocket/router.ts` | WebSocket 連線路由，20+ JSON-RPC 方法，事件推送，prepared-phase 處理 |
 | `src/websocket/connection.ts` | JSON-RPC 解析、heartbeat、idle timeout |
 | `src/config-loader.ts` | 載入 JSON 設定並支援環境變數覆寫 |
 
@@ -367,6 +405,14 @@ curl -s -X POST http://127.0.0.1:11697/api/conversations \
 ```json
 {"jsonrpc":"2.0","id":1,"method":"message.send","params":{"text":"Hello","model":"openai/gpt-5"}}
 ```
+
+### 8. WebSocket 返回 "conversation not running"
+
+- **原因**：WebSocket 連線成功，但對話尚未進入 `running` 狀態，或已在 `stopped`/`destroyed` 狀態。
+- **排查**：
+  - 確認已呼叫 `POST /api/conversations/:id/start`
+  - 等待 `conversation.running` 事件後再發送 `message.send`
+  - 透過 `GET /api/conversations/:id/events` 查看最近事件確認狀態
 
 ---
 
