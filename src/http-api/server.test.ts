@@ -35,6 +35,11 @@ describe('HTTP API Server', () => {
       deleteFile: vi.fn(),
       copyFromLocal: vi.fn(),
       getWorkspaceSize: vi.fn(),
+      importSkillFromLocal: vi.fn(),
+      listSkills: vi.fn(),
+      readSkill: vi.fn(),
+      getSkillInfo: vi.fn(),
+      deleteSkill: vi.fn(),
     };
 
     mockConversationState = {
@@ -200,6 +205,65 @@ describe('HTTP API Server', () => {
     // Clean up the hanging request by closing the server
     server.close();
     await reqPromise.catch(() => {});
+  });
+
+  it('GET /api/conversations/:id/skills lists skills', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockWorkspaceFactory.listSkills.mockReturnValue(['web-search', 'code-review']);
+
+    const res = await request(server).get('/api/conversations/conv-001/skills');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toContain('web-search');
+    expect(res.body).toContain('code-review');
+  });
+
+  it('GET /api/conversations/:id/skills/:name returns skill content', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockWorkspaceFactory.readSkill.mockReturnValue('# web-search\nA skill.');
+
+    const res = await request(server).get('/api/conversations/conv-001/skills/web-search');
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('web-search');
+    expect(res.body.content).toBe('# web-search\nA skill.');
+  });
+
+  it('GET /api/conversations/:id/skills/:name/info returns skill info', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockWorkspaceFactory.getSkillInfo.mockReturnValue({
+      name: 'web-search',
+      files: ['SKILL.md'],
+      totalSize: 1234,
+      sha256: 'abc123',
+    });
+
+    const res = await request(server).get('/api/conversations/conv-001/skills/web-search/info');
+
+    expect(res.status).toBe(200);
+    expect(res.body.sha256).toBe('abc123');
+  });
+
+  it('DELETE /api/conversations/:id/skills/:name deletes skill', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+
+    const res = await request(server).delete('/api/conversations/conv-001/skills/web-search');
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search');
+  });
+
+  it('POST /api/conversations/:id/skills/import imports skill', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/import')
+      .send({ source: 'skills/web-search', name: 'web-search' });
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.importSkillFromLocal).toHaveBeenCalledWith('conv-001', 'skills/web-search', 'web-search');
   });
 
   it('closeWebSockets does not throw', () => {

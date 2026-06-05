@@ -216,6 +216,100 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 ---
 
+### `POST /api/conversations/:id/skills/upload`
+
+上傳 Skill（以 zip 壓縮包形式）。解壓後存於 `.opencode/skills/{name}/`。
+
+**Query**：`?name=web-search`
+
+**Content-Type**：`application/zip`
+
+**Body**：zip 檔案的 binary 內容
+
+**回應**（`204 No Content`）
+
+**錯誤**（`400`）：
+```json
+{ "error": "Missing name query parameter" }
+```
+
+---
+
+### `POST /api/conversations/:id/skills/import`
+
+從伺服器本地目錄複製 Skill 到對話 workspace。來源必須在 `{cwd}/skills/`、`{cwd}/assets/` 或 `{cwd}/templates/` 下。
+
+**請求**：
+```json
+{
+  "source": "skills/web-search",
+  "name": "web-search"
+}
+```
+
+**回應**（`204 No Content`）
+
+**錯誤**（`400` / `403`）：
+```json
+{ "error": "Source path not allowed" }
+```
+
+---
+
+### `GET /api/conversations/:id/skills`
+
+列出對話的所有 Skill。
+
+**回應**：
+```json
+["web-search", "code-review"]
+```
+
+---
+
+### `GET /api/conversations/:id/skills/:name`
+
+讀取指定 Skill 的 `SKILL.md` 內容。
+
+**回應**：
+```json
+{
+  "name": "web-search",
+  "content": "# web-search\nA web search skill for OpenCode."
+}
+```
+
+**錯誤**（`404`）：
+```json
+{ "error": "Skill not found" }
+```
+
+---
+
+### `GET /api/conversations/:id/skills/:name/info`
+
+查詢 Skill 的目錄結構、總大小與內容 hash，供客戶端驗證上傳完整性。
+
+**回應**：
+```json
+{
+  "name": "web-search",
+  "files": ["SKILL.md", "README.md"],
+  "totalSize": 1234,
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+```
+
+---
+
+### `DELETE /api/conversations/:id/skills/:name`
+
+刪除指定 Skill（移除整個 `{name}/` 目錄）。
+
+**回應**（`204 No Content`）
+
+---
+
 ### `GET /api/conversations/:id/files`
 
 列出對話 workspace 中的所有檔案。
@@ -853,6 +947,147 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
   "jsonrpc": "2.0",
   "id": 15,
   "result": { "ok": true }
+}
+```
+
+---
+
+### Skill 類
+
+#### `skills.import`
+
+從伺服器本地目錄導入 Skill。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 15,
+  "method": "skills.import",
+  "params": {
+    "source": "skills/web-search",
+    "name": "web-search"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 15,
+  "result": { "imported": "web-search" }
+}
+```
+
+---
+
+#### `skills.list`
+
+列出所有 Skill。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "method": "skills.list",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "result": ["web-search", "code-review"]
+}
+```
+
+---
+
+#### `skills.get`
+
+讀取指定 Skill 的 `SKILL.md` 內容。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "method": "skills.get",
+  "params": {
+    "name": "web-search"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "result": "# web-search\nA web search skill for OpenCode."
+}
+```
+
+---
+
+#### `skills.info`
+
+查詢 Skill 結構與 hash。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "method": "skills.info",
+  "params": {
+    "name": "web-search"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "result": {
+    "name": "web-search",
+    "files": ["SKILL.md"],
+    "totalSize": 1234,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
+```
+
+---
+
+#### `skills.delete`
+
+刪除指定 Skill。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 19,
+  "method": "skills.delete",
+  "params": {
+    "name": "web-search"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 19,
+  "result": { "deleted": "web-search" }
 }
 ```
 

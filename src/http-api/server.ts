@@ -1,5 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createServer, type Server } from 'node:http';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
@@ -10,6 +12,7 @@ import { listModels } from '../opencode-cli/models.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
+import AdmZip from 'adm-zip';
 
 export interface HttpServer {
   server: Server;
@@ -582,6 +585,118 @@ export function createHttpServer(
         return;
       }
       await instance.client.deleteSession(req.params.sid);
+      res.status(204).send();
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─── Skills ────────────────────────────────────────────
+
+  // Upload skill as zip archive
+  app.post('/api/conversations/:id/skills/upload', express.raw({ type: 'application/zip', limit: '10mb' }), (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    const name = typeof req.query.name === 'string' ? req.query.name : undefined;
+    if (!name) {
+      res.status(400).json({ error: 'Missing name query parameter' });
+      return;
+    }
+
+    try {
+      const zip = new AdmZip(req.body as Buffer);
+      const wsPath = workspaceFactory['resolveWorkspacePath'](id);
+      const destPath = join(wsPath, '.opencode', 'skills', name);
+      mkdirSync(destPath, { recursive: true });
+      zip.extractAllTo(destPath, true);
+      markNeedsRestartIfRunning(id, `skill ${name} uploaded`);
+      conversationState.emitEvent(id, 'conversation.configChanged', {
+        changedFiles: [`.opencode/skills/${name}/`],
+      });
+      res.status(204).send();
+    } catch (err) {
+      logger.error(`Failed to upload skill for ${id}:`, err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Import skill from local directory
+  app.post('/api/conversations/:id/skills/import', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    const source = typeof req.body.source === 'string' ? req.body.source : undefined;
+    const name = typeof req.body.name === 'string' ? req.body.name : undefined;
+
+    if (!source || !name) {
+      res.status(400).json({ error: 'Missing source or name' });
+      return;
+    }
+
+    try {
+      workspaceFactory.importSkillFromLocal(id, source, name);
+      markNeedsRestartIfRunning(id, `skill ${name} imported`);
+      conversationState.emitEvent(id, 'conversation.configChanged', {
+        changedFiles: [`.opencode/skills/${name}/`],
+      });
+      res.status(204).send();
+    } catch (err) {
+      logger.error(`Failed to import skill for ${id}:`, err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // List skills
+  app.get('/api/conversations/:id/skills', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    try {
+      const skills = workspaceFactory.listSkills(id);
+      res.json(skills);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Read skill content (SKILL.md)
+  app.get('/api/conversations/:id/skills/:name', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    try {
+      const content = workspaceFactory.readSkill(id, req.params.name);
+      res.json({ name: req.params.name, content });
+    } catch (err) {
+      res.status(404).json({ error: (err as Error).message });
+    }
+  });
+
+  // Get skill info (files, size, hash)
+  app.get('/api/conversations/:id/skills/:name/info', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    try {
+      const info = workspaceFactory.getSkillInfo(id, req.params.name);
+      res.json(info);
+    } catch (err) {
+      res.status(404).json({ error: (err as Error).message });
+    }
+  });
+
+  // Delete skill
+  app.delete('/api/conversations/:id/skills/:name', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    try {
+      workspaceFactory.deleteSkill(id, req.params.name);
+      markNeedsRestartIfRunning(id, `skill ${req.params.name} deleted`);
+      conversationState.emitEvent(id, 'conversation.configChanged', {
+        changedFiles: [`.opencode/skills/${req.params.name}/`],
+      });
       res.status(204).send();
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });

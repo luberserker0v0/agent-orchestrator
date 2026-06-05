@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(http-api): full REST endpoints for delayed-start conversation lifecycle (`/conversations` prepare, `/:id/start|stop|restart`), config (`/:id/config`), agent auto-discovery (`/:id/agents`), generic file CRUD (`/:id/files`), session tree (`/:id/sessions/...`), and event replay (`/:id/events`).
 - feat(websocket): 20+ JSON-RPC methods, event pushing via `conversationState.subscribe()`, prepared-phase connection handling, no auto-create on WS connect.
 - feat(instance-manager): reuse existing workspaces on `createInstance` to preserve pre-configured agents/files across restarts.
-- test: 136 total tests including new coverage for `conversation-state`, `workspace-factory` CRUD, `client` session tree, and updated `server`/`router` mocks.
+- feat(skills): Skill CRUD API with `POST /skills/upload` (zip archive), `POST /skills/import` (local directory), `GET /skills`, `GET /skills/:name`, `GET /skills/:name/info` (structure + sha256 hash), and `DELETE /skills/:name`. Skills stored as `.opencode/skills/{name}/` directories.
+- test: 149 total tests including new coverage for `conversation-state`, `workspace-factory` CRUD, `client` session tree, `server`/`router` mocks, and skill CRUD.
 
 ### Changed
 
