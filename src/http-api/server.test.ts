@@ -327,6 +327,50 @@ describe('HTTP API Server', () => {
     expect(res.body.error).toContain('Workspace quota exceeded');
   });
 
+  it('POST /api/conversations/:id/skills/import returns 400 for invalid name', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/import')
+      .send({ source: 'skills/web-search', name: 'foo/bar' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid skill name');
+    expect(mockWorkspaceFactory.importSkillFromLocal).not.toHaveBeenCalled();
+  });
+
+  it('GET /api/conversations/:id/skills/:name returns 400 for invalid name', async () => {
+    mockConversationState.has.mockReturnValue(true);
+
+    const res = await request(server).get('/api/conversations/conv-001/skills/foo%5Cbar');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid skill name');
+    expect(mockWorkspaceFactory.readSkill).not.toHaveBeenCalled();
+  });
+
+  it('GET /api/conversations/:id/skills/:name/info returns 400 for invalid name', async () => {
+    mockConversationState.has.mockReturnValue(true);
+
+    const res = await request(server).get('/api/conversations/conv-001/skills/foo%5Cbar/info');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid skill name');
+    expect(mockWorkspaceFactory.getSkillInfo).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /api/conversations/:id/skills/:name returns 400 for invalid name', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+
+    const res = await request(server).delete('/api/conversations/conv-001/skills/foo%5Cbar');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid skill name');
+    expect(mockWorkspaceFactory.deleteSkill).not.toHaveBeenCalled();
+  });
+
   it('POST /api/conversations/:id/skills/upload returns 400 for invalid name', async () => {
     mockConversationState.has.mockReturnValue(true);
 

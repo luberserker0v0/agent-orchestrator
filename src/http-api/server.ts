@@ -1,7 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createServer, type Server } from 'node:http';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, dirname, sep } from 'node:path';
+import { join, dirname, sep, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
@@ -646,8 +646,9 @@ export function createHttpServer(
         }
 
         // Verify resolved output remains inside destPath
-        const resolvedOutput = join(destPath, entryName);
-        if (!resolvedOutput.startsWith(destPath + sep)) {
+        const resolvedDest = resolve(destPath);
+        const resolvedOutput = resolve(destPath, entryName);
+        if (resolvedOutput !== resolvedDest && !resolvedOutput.startsWith(resolvedDest + sep)) {
           res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
           return;
         }
@@ -667,7 +668,7 @@ export function createHttpServer(
       mkdirSync(destPath, { recursive: true });
       for (const entry of entries) {
         if (entry.isDirectory) continue;
-        const entryPath = join(destPath, entry.entryName);
+        const entryPath = resolve(destPath, entry.entryName);
         mkdirSync(dirname(entryPath), { recursive: true });
         writeFileSync(entryPath, entry.getData());
       }
@@ -693,6 +694,13 @@ export function createHttpServer(
 
     if (!source || !name) {
       res.status(400).json({ error: 'Missing source or name' });
+      return;
+    }
+
+    try {
+      validateSkillName(name);
+    } catch {
+      res.status(400).json({ error: 'Invalid skill name' });
       return;
     }
 
@@ -737,6 +745,13 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
+      validateSkillName(req.params.name);
+    } catch {
+      res.status(400).json({ error: 'Invalid skill name' });
+      return;
+    }
+
+    try {
       const content = workspaceFactory.readSkill(id, req.params.name);
       res.json({ name: req.params.name, content });
     } catch (err) {
@@ -750,6 +765,13 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
+      validateSkillName(req.params.name);
+    } catch {
+      res.status(400).json({ error: 'Invalid skill name' });
+      return;
+    }
+
+    try {
       const info = workspaceFactory.getSkillInfo(id, req.params.name);
       res.json(info);
     } catch (err) {
@@ -761,6 +783,13 @@ export function createHttpServer(
   app.delete('/api/conversations/:id/skills/:name', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
+
+    try {
+      validateSkillName(req.params.name);
+    } catch {
+      res.status(400).json({ error: 'Invalid skill name' });
+      return;
+    }
 
     try {
       workspaceFactory.deleteSkill(id, req.params.name);

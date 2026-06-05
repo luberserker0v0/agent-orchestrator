@@ -2,7 +2,7 @@ import type { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import { logger } from '../utils/logger.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
-import { WorkspaceFactory } from '../orchestrator/workspace-factory.js';
+import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { WSConnection } from './connection.js';
 import type { WebSocketConfig } from '../config-loader.js';
@@ -310,6 +310,7 @@ export class WSRouter {
       case 'skills.import': {
         const { source, name } = params as { source: string; name: string };
         if (!source || !name) throw new Error('Missing source or name');
+        validateSkillName(name);
         this.workspaceFactory.importSkillFromLocal(conversationId, source, name);
         if (state.status === 'running') {
           this.conversationState.markNeedsRestart(conversationId, `skill ${name} imported`);
@@ -327,18 +328,21 @@ export class WSRouter {
       case 'skills.get': {
         const { name } = params as { name: string };
         if (!name) throw new Error('Missing name');
+        validateSkillName(name);
         return this.workspaceFactory.readSkill(conversationId, name);
       }
 
       case 'skills.info': {
         const { name } = params as { name: string };
         if (!name) throw new Error('Missing name');
+        validateSkillName(name);
         return this.workspaceFactory.getSkillInfo(conversationId, name);
       }
 
       case 'skills.delete': {
         const { name } = params as { name: string };
         if (!name) throw new Error('Missing name');
+        validateSkillName(name);
         this.workspaceFactory.deleteSkill(conversationId, name);
         if (state.status === 'running') {
           this.conversationState.markNeedsRestart(conversationId, `skill ${name} deleted`);

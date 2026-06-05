@@ -615,6 +615,146 @@ describe('WSRouter', () => {
     expect(resultCall).toBeDefined();
   });
 
+  it('handles skills.import with invalid name', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 24,
+          method: 'skills.import',
+          params: { source: 'skills/test', name: 'foo/bar' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.importSkillFromLocal).not.toHaveBeenCalled();
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 24 && parsed.error?.message?.includes('Invalid skill name');
+      } catch {
+        return false;
+      }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles skills.get with invalid name', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 25,
+          method: 'skills.get',
+          params: { name: 'foo/bar' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.readSkill).not.toHaveBeenCalled();
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 25 && parsed.error?.message?.includes('Invalid skill name');
+      } catch {
+        return false;
+      }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles skills.info with invalid name', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 26,
+          method: 'skills.info',
+          params: { name: 'foo/bar' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.getSkillInfo).not.toHaveBeenCalled();
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 26 && parsed.error?.message?.includes('Invalid skill name');
+      } catch {
+        return false;
+      }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles skills.delete with invalid name', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 27,
+          method: 'skills.delete',
+          params: { name: 'foo/bar' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.deleteSkill).not.toHaveBeenCalled();
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 27 && parsed.error?.message?.includes('Invalid skill name');
+      } catch {
+        return false;
+      }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
   it('closeAll closes all connections and WSS', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
