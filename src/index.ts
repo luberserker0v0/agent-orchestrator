@@ -1,6 +1,7 @@
 import { loadConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';
+import { ConversationState } from './orchestrator/conversation-state.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
 
@@ -12,8 +13,9 @@ async function main() {
 
   const workspaceFactory = new WorkspaceFactory(config.workspace);
   const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory);
+  const conversationState = new ConversationState();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, config.orchestrator);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();

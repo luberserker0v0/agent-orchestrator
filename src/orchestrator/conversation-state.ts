@@ -158,7 +158,7 @@ export class ConversationState {
     };
   }
 
-  private emitEvent(id: string, type: string, payload: Record<string, unknown>): void {
+  emitEvent(id: string, type: string, payload: Record<string, unknown>): void {
     const state = this.states.get(id);
     if (!state) return;
 

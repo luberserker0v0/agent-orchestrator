@@ -62,6 +62,8 @@ function createMockWSS() {
 describe('WSRouter', () => {
   let mockWss: ReturnType<typeof createMockWSS>;
   let mockInstanceManager: any;
+  let mockWorkspaceFactory: any;
+  let mockConversationState: any;
   let router: WSRouter;
 
   beforeEach(() => {
@@ -74,10 +76,35 @@ describe('WSRouter', () => {
       createInstance: vi.fn(),
     };
 
+    mockWorkspaceFactory = {
+      writeConfig: vi.fn(),
+      readConfig: vi.fn(),
+      writeAgent: vi.fn(),
+      readAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      listAgents: vi.fn(),
+      writeFile: vi.fn(),
+      readFile: vi.fn(),
+      listFiles: vi.fn(),
+      deleteFile: vi.fn(),
+      copyFromLocal: vi.fn(),
+    };
+
+    mockConversationState = {
+      has: vi.fn().mockReturnValue(true),
+      get: vi.fn().mockReturnValue({ status: 'running' }),
+      markNeedsRestart: vi.fn(),
+      emitEvent: vi.fn(),
+      subscribe: vi.fn().mockReturnValue(() => {}),
+    };
+
     router = new WSRouter(
       mockWss as any,
       mockInstanceManager,
-      { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 }
+      mockWorkspaceFactory,
+      mockConversationState,
+      { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
+      { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 }
     );
   });
 
@@ -117,16 +144,14 @@ describe('WSRouter', () => {
     expect(mockWs.close).toHaveBeenCalledWith(1008, 'Invalid path');
   });
 
-  it('creates instance when not found', async () => {
+  it('rejects connection when conversation not found', async () => {
     const mockWs = createMockWebSocket();
-    mockInstanceManager.getInstance.mockReturnValue(undefined);
-    mockInstanceManager.createInstance.mockResolvedValue(createMockInstance());
+    mockConversationState.has.mockReturnValue(false);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001');
-    expect(mockWs.close).not.toHaveBeenCalled();
+    expect(mockWs.close).toHaveBeenCalledWith(1011, 'Conversation not found');
   });
 
   it('uses existing instance without creating new one', async () => {
@@ -384,10 +409,8 @@ describe('WSRouter', () => {
 
   it('throws when instance is gone during handleMessage', async () => {
     const mockWs = createMockWebSocket();
-    // First return instance for connection setup
-    mockInstanceManager.getInstance.mockReturnValueOnce(createMockInstance());
-    // Then return undefined when handling the message
-    mockInstanceManager.getInstance.mockReturnValueOnce(undefined);
+    // Return undefined when handling the message (instance not available)
+    mockInstanceManager.getInstance.mockReturnValue(undefined);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -417,18 +440,27 @@ describe('WSRouter', () => {
     });
     expect(errorCall).toBeDefined();
     const parsed = JSON.parse(errorCall![0]);
-    expect(parsed.error.message).toContain('Conversation instance not available');
+    expect(parsed.error.message).toContain('Instance not available');
   });
 
-  it('closes connection when createInstance fails', async () => {
+  it('rejects connection when conversation not found', async () => {
     const mockWs = createMockWebSocket();
-    mockInstanceManager.getInstance.mockReturnValue(undefined);
-    mockInstanceManager.createInstance.mockRejectedValue(new Error('No ports'));
+    mockConversationState.has.mockReturnValue(false);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWs.close).toHaveBeenCalledWith(1011, 'Failed to create conversation instance');
+    expect(mockWs.close).toHaveBeenCalledWith(1011, 'Conversation not found');
+  });
+
+  it('rejects connection when conversation not found', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.has.mockReturnValue(false);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWs.close).toHaveBeenCalledWith(1011, 'Conversation not found');
   });
 
   it('closeAll closes all connections and WSS', async () => {

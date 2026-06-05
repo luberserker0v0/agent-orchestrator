@@ -120,6 +120,14 @@ export class WorkspaceFactory {
     return { id: wsId, path: wsPath, opencodeDir };
   }
 
+  ensure(id: string): WorkspaceInfo {
+    const wsId = sanitizeId(id);
+    const wsPath = join(this.basePath, wsId);
+    const opencodeDir = join(wsPath, '.opencode');
+    mkdirSync(opencodeDir, { recursive: true });
+    return { id: wsId, path: wsPath, opencodeDir };
+  }
+
   destroy(id: string): void {
     const wsId = sanitizeId(id);
     const wsPath = join(this.basePath, wsId);
@@ -286,6 +294,10 @@ export class WorkspaceFactory {
   }
 
   // ─── Quota helpers ───────────────────────────────────────
+
+  hasWorkspace(id: string): boolean {
+    return existsSync(join(this.basePath, sanitizeId(id)));
+  }
 
   getWorkspaceSize(id: string): number {
     const wsPath = this.resolveWorkspacePath(id);

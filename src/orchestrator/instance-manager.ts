@@ -65,7 +65,11 @@ export class InstanceManager {
 
     let workspace: WorkspaceInfo;
     try {
-      workspace = this.workspaceFactory.create(id, options);
+      if (this.workspaceFactory.hasWorkspace(id)) {
+        workspace = this.workspaceFactory.ensure(id);
+      } else {
+        workspace = this.workspaceFactory.create(id, options);
+      }
     } catch (err) {
       this.portPool.release(port);
       throw new Error(`Failed to create workspace: ${(err as Error).message}`, { cause: err });
