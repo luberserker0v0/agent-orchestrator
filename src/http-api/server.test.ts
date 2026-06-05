@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { createHttpServer, type HttpServer } from './server.js';
+import AdmZip from 'adm-zip';
 
 describe('HTTP API Server', () => {
   let httpServer: HttpServer;
@@ -40,6 +41,8 @@ describe('HTTP API Server', () => {
       readSkill: vi.fn(),
       getSkillInfo: vi.fn(),
       deleteSkill: vi.fn(),
+      resolveWorkspacePath: vi.fn().mockReturnValue('/tmp/workspace'),
+      assertQuota: vi.fn(),
     };
 
     mockConversationState = {
@@ -254,6 +257,19 @@ describe('HTTP API Server', () => {
     expect(mockWorkspaceFactory.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search');
   });
 
+  it('DELETE /api/conversations/:id/skills/:name returns 404 when skill not found', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockWorkspaceFactory.deleteSkill.mockImplementation(() => {
+      throw new Error('Skill not found: web-search');
+    });
+
+    const res = await request(server).delete('/api/conversations/conv-001/skills/web-search');
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('Skill not found');
+  });
+
   it('POST /api/conversations/:id/skills/import imports skill', async () => {
     mockConversationState.has.mockReturnValue(true);
     mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
@@ -264,6 +280,144 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(204);
     expect(mockWorkspaceFactory.importSkillFromLocal).toHaveBeenCalledWith('conv-001', 'skills/web-search', 'web-search');
+  });
+
+  it('POST /api/conversations/:id/skills/import returns 403 for disallowed source', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+      throw new Error('Source path not allowed. Must be under one of: /skills');
+    });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/import')
+      .send({ source: '../outside', name: 'outside' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('Source path not allowed');
+  });
+
+  it('POST /api/conversations/:id/skills/import returns 404 for missing source', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+      throw new Error('Source not found: skills/missing');
+    });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/import')
+      .send({ source: 'skills/missing', name: 'missing' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('Source not found');
+  });
+
+  it('POST /api/conversations/:id/skills/import returns 413 for quota exceeded', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+      throw new Error('Workspace quota exceeded. Current: 50000000 bytes, Adding: 1000000 bytes, Limit: 50000000 bytes');
+    });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/import')
+      .send({ source: 'skills/huge', name: 'huge' });
+
+    expect(res.status).toBe(413);
+    expect(res.body.error).toContain('Workspace quota exceeded');
+  });
+
+  it('POST /api/conversations/:id/skills/upload returns 400 for invalid name', async () => {
+    mockConversationState.has.mockReturnValue(true);
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/upload?name=foo/bar')
+      .set('Content-Type', 'application/zip')
+      .send(Buffer.from('PK'));
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid skill name');
+  });
+
+  it('POST /api/conversations/:id/skills/upload returns 400 for missing name', async () => {
+    mockConversationState.has.mockReturnValue(true);
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/upload')
+      .set('Content-Type', 'application/zip')
+      .send(Buffer.from('PK'));
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Missing name query parameter');
+  });
+
+  it('POST /api/conversations/:id/skills/upload returns 400 for missing SKILL.md', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockWorkspaceFactory.resolveWorkspacePath.mockReturnValue('/tmp/workspace');
+
+    const zip = new AdmZip();
+    zip.addFile('README.md', Buffer.from('No skill here'));
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/upload?name=bad-skill')
+      .set('Content-Type', 'application/zip')
+      .send(zip.toBuffer());
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Skill archive must contain SKILL.md at the root');
+  });
+
+  it('POST /api/conversations/:id/skills/upload returns 400 for Windows drive path', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockWorkspaceFactory.resolveWorkspacePath.mockReturnValue('/tmp/workspace');
+
+    const zip = new AdmZip();
+    zip.addFile('SKILL.md', Buffer.from('# skill'));
+    zip.addFile('C:/windows/evil.txt', Buffer.from('evil'));
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/upload?name=slip-skill')
+      .set('Content-Type', 'application/zip')
+      .send(zip.toBuffer());
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Invalid zip entry path');
+  });
+
+  it('POST /api/conversations/:id/skills/upload returns 413 for quota exceeded', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockWorkspaceFactory.resolveWorkspacePath.mockReturnValue('/tmp/workspace');
+    mockWorkspaceFactory.assertQuota.mockImplementation(() => {
+      throw new Error('Workspace quota exceeded');
+    });
+
+    const zip = new AdmZip();
+    zip.addFile('SKILL.md', Buffer.from('# skill'));
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/upload?name=quota-skill')
+      .set('Content-Type', 'application/zip')
+      .send(zip.toBuffer());
+
+    expect(res.status).toBe(413);
+    expect(res.body.error).toBe('Skill archive exceeds workspace quota');
+  });
+
+  it('POST /api/conversations/:id/skills/upload succeeds for valid zip', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockWorkspaceFactory.resolveWorkspacePath.mockReturnValue('/tmp/workspace');
+
+    const zip = new AdmZip();
+    zip.addFile('SKILL.md', Buffer.from('# skill'));
+    zip.addFile('references/action.md', Buffer.from('action'));
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/skills/upload?name=valid-skill')
+      .set('Content-Type', 'application/zip')
+      .send(zip.toBuffer());
+
+    expect(res.status).toBe(204);
   });
 
   it('closeWebSockets does not throw', () => {

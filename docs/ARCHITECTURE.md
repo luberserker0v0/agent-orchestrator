@@ -11,12 +11,12 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
 │                         Client / Frontend                    │
 │  (curl, WebSocket Client, Browser, Mobile App...)            │
 └──────────────────────────────┬──────────────────────────────┘
-                               │
-           ┌───────────────────┼───────────────────┐
-           │                   │                   │
-           │  HTTP POST        │  HTTP GET         │  WS /ws/{id}
-           │  /api/conversations│  /api/models     │
-           ▼                   ▼                   ▼
+                                │
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+            │  HTTP POST        │  HTTP GET         │  WS /ws/{id}
+            │  /api/conversations│  /api/models     │
+            ▼                   ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    AgentOrchestrator HTTP API                │
 │  • Express Server (port 0 = auto-allocated)                 │
@@ -24,12 +24,12 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
 │  • JSON-RPC 2.0 dispatch                                    │
 │  • ConversationState (event-driven lifecycle)               │
 └──────────────────────────────┬──────────────────────────────┘
-                               │
-           ┌───────────────────┼───────────────────┐
-           │                   │                   │
-           │ spawn(...)        │ spawn("opencode   │ HTTP
-           │                   │  models")         │ (internal)
-           ▼                   ▼                   ▼
+                                │
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+            │ spawn(...)        │ spawn("opencode   │ HTTP
+            │                   │  models")         │ (internal)
+            ▼                   ▼                   ▼
 ┌─────────────────────┐  ┌─────────────────────┐  ┌──────────────┐
 │ OpenCode Instance #1│  │   Model List CLI    │  │  OpenCode   │
 │  port: 30000        │  │   stdout parse      │  │  HTTP API   │
@@ -158,14 +158,14 @@ AgentOrchestrator
 └─────┬─────┘                                          └─────┬─────┘
       │                                                     │
       └────────────────────────┬────────────────────────────┘
-                               │
-                               │ DELETE /{id} 或 LRU Eviction
-                               ▼
-                        ┌─────────────┐
-                        │  Destroyed   │
-                        │(treeKill +   │
-                        │ rm workspace)│
-                        └─────────────┘
+                                │
+                                │ DELETE /{id} 或 LRU Eviction
+                                ▼
+                         ┌─────────────┐
+                         │  Destroyed   │
+                         │(treeKill +   │
+                         │ rm workspace)│
+                         └─────────────┘
 ```
 
 ---
@@ -239,7 +239,7 @@ AgentOrchestrator
 
 ### `src/orchestrator/workspace-factory.ts`
 
-建立與管理每個對話的獨立 workspace，支援配置、Agent、檔案的 CRUD，以及本地檔案複製與配額管理。
+建立與管理每個對話的獨立 workspace，支援配置、Agent、檔案與 Skill 的 CRUD，以及本地檔案複製與配額管理。
 
 **`WorkspaceFactory`**：
 
@@ -252,11 +252,17 @@ AgentOrchestrator
 | `writeConfig(id, config)` / `readConfig(id)` | 覆寫 / 讀取 `opencode.json` |
 | `writeAgent(id, name, content)` / `readAgent(id, name)` / `listAgents(id)` / `deleteAgent(id, name)` | Agent Markdown 檔案 CRUD（寫入 `.opencode/agents/*.md`，OpenCode 自動發現） |
 | `writeFile(id, path, content)` / `readFile(id, path)` / `listFiles(id)` / `deleteFile(id, path)` | 通用檔案 CRUD（所有路徑經 `sanitizeRelativePath` 驗證） |
-| `copyFromLocal(id, source, dest)` | 從本機 `{cwd}/assets/` 或 `{cwd}/templates/` 複製檔案/資料夾到 workspace |
+| `copyFromLocal(id, source, dest)` | 從本機 `{cwd}/assets/`、`{cwd}/templates/` 或 `{cwd}/skills/` 複製檔案/資料夾到 workspace |
+| `importSkillFromLocal(id, source, name)` | 從本機 `{cwd}/skills/` 複製 Skill 目錄到 `.opencode/skills/{name}/` |
+| `listSkills(id)` | 列出 `.opencode/skills/` 下的所有 Skill 目錄 |
+| `readSkill(id, name)` | 讀取 `.opencode/skills/{name}/SKILL.md` 內容 |
+| `getSkillInfo(id, name)` | 取得 Skill 目錄結構、總大小與 SHA-256 hash |
+| `deleteSkill(id, name)` | 移除 `.opencode/skills/{name}/` 目錄；若不存在則拋出錯誤 |
 | `calculateWorkspaceSize(id)` | 計算 workspace 總大小（遞迴） |
 
 **安全機制**：
 - `sanitizeRelativePath(path)`：拒絕包含 `..` 的相對路徑與絕對路徑（`/...` 或 `C:\...`）
+- `validateSkillName(name)`：拒絕非 `[A-Za-z0-9_-]` 的字元，最大長度 128；API 層應先驗證，factory 層作為 defense-in-depth
 - 配額上限：`MAX_WORKSPACE_SIZE = 50 * 1024 * 1024` bytes（50 MB）；超過時寫入操作拒絕
 
 ---
@@ -303,13 +309,14 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再�
 - 解析 URL 中的 `conversationId`
 - 檢查 `conversationState.has(id)`；若不存在 → 關閉連線（code `1011`）
 - 訂閱 `conversationState.subscribe(id)`，將事件即時推送給客戶端
-- 處理 20+ JSON-RPC 方法，包括：
+- 處理 25+ JSON-RPC 方法，包括：
   - 會話類：`session.create`, `session.delete`, `session.list`
   - 訊息類：`message.send`, `message.history`
   - 對話控制類：`conversation.status`, `conversation.start`, `conversation.stop`, `conversation.restart`
   - 配置類：`config.read`, `config.write`
   - Agent 類：`agent.list`, `agent.read`, `agent.write`, `agent.delete`
   - 檔案類：`file.list`, `file.read`, `file.write`, `file.delete`
+  - Skill 類：`skills.import`, `skills.list`, `skills.get`, `skills.info`, `skills.delete`
   - 事件類：`events.subscribe`, `events.unsubscribe`
 - 若對話狀態非 `running`，執行需實例操作的方法時回傳 `-32001` invalid state
 
@@ -334,5 +341,9 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再�
 4. **自動資源回收**：LRU 淘汰與刪除時的 `treeKill` + `rmSync`，防止殭屍進程與磁碟洩漏
 5. **Workspace 配額限制**：單一 workspace 上限 50 MB，超過時寫入操作被拒絕
 6. **路徑遍歷防護**：所有檔案操作必須通過 `sanitizeRelativePath()`，拒絕 `..` 與絕對路徑；檔案路徑統一放於 request body 或 query string，避免 URL routing 層被惡意路徑段繞過
-7. **本地複製白名單**：`copyFromLocal` 僅允許來源為 `{cwd}/assets/` 或 `{cwd}/templates/`，防止任意本機路徑複製
-8. **延遲啟動隔離**：`POST /conversations` 僅建立 workspace，不啟動 OpenCode；Agent 與檔案可在啟動前預先注入，確保 OpenCode 啟動時即擁有完整上下文，同時避免未準備完成的實例被外部誤用
+7. **本地複製白名單**：`copyFromLocal` 僅允許來源為 `{cwd}/assets/`、`{cwd}/templates/` 或 `{cwd}/skills/`，防止任意本機路徑複製
+8. **Skill 名稱驗證**：`validateSkillName()` 只允許 `[A-Za-z0-9_-]`，最大長度 128；API 層拒絕非法名稱後才進入檔案系統操作
+9. **Zip Slip 防護**：`skills/upload` 逐條驗證 zip entry 路徑，拒絕 `..`、絕對路徑與磁碟機路徑；`resolve()` 確認最終輸出路徑仍在 `destPath` 內才執行 extraction
+10. **Skill 結構驗證**：`skills/upload` 要求 zip 根層級必須包含 `SKILL.md`，否則直接拒絕
+11. **未壓縮大小檢查**：`skills/upload` 計算 `sum(entry.header.size)` 並調用 `assertQuota`，防止 zip bomb 繞過 request body limit
+12. **延遲啟動隔離**：`POST /conversations` 僅建立 workspace，不啟動 OpenCode；Agent 與 Skill 可在啟動前預先注入，確保 OpenCode 啟動時即擁有完整上下文，同時避免未準備完成的實例被外部誤用

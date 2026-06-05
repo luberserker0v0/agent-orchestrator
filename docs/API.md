@@ -232,6 +232,31 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 ```json
 { "error": "Missing name query parameter" }
 ```
+```json
+{ "error": "Invalid skill name" }
+```
+```json
+{ "error": "Skill archive must contain SKILL.md at the root" }
+```
+```json
+{ "error": "Invalid zip entry path: ../evil.txt" }
+```
+
+**錯誤**（`413`）：
+```json
+{ "error": "Skill archive exceeds workspace quota" }
+```
+
+**安全規則**：
+- `name` 必須符合 `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`，否則回傳 `400 Invalid skill name`
+- zip 根層級必須包含 `SKILL.md`，否則回傳 `400 Skill archive must contain SKILL.md at the root`
+- 所有 zip entry 路徑經過驗證：
+  - 拒絕包含 `..` 的路徑
+  - 拒絕絕對路徑（以 `/` 或 `\` 開頭）
+  - 拒絕 Windows 磁碟機路徑（如 `C:\...`）
+  - `resolve()` 確認最終輸出路徑仍在 `destPath` 內
+- 未壓縮總大小受 50 MB workspace 配額限制，超過回傳 `413`
+- 上傳/匯入/刪除會標記 `needsRestart=true`（若對話處於 `running` 狀態）
 
 ---
 
@@ -249,9 +274,19 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 **回應**（`204 No Content`）
 
-**錯誤**（`400` / `403`）：
+**錯誤**（`403`）：
 ```json
-{ "error": "Source path not allowed" }
+{ "error": "Source path not allowed. Must be under one of: /skills, /assets, /templates" }
+```
+
+**錯誤**（`404`）：
+```json
+{ "error": "Source not found: skills/web-search" }
+```
+
+**錯誤**（`413`）：
+```json
+{ "error": "Workspace quota exceeded. Current: ... bytes, Adding: ... bytes, Limit: ... bytes" }
 ```
 
 ---
@@ -307,6 +342,77 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 刪除指定 Skill（移除整個 `{name}/` 目錄）。
 
 **回應**（`204 No Content`）
+
+**錯誤**（`404`）：
+```json
+{ "error": "Skill not found: web-search" }
+```
+
+---
+
+### Skill API 錯誤碼對照表
+
+| 錯誤情境 | 狀態碼 | 回應範例 |
+|----------|--------|----------|
+| Missing name | 400 | `{"error": "Missing name query parameter"}` |
+| Invalid skill name | 400 | `{"error": "Invalid skill name"}` |
+| Invalid zip entry path | 400 | `{"error": "Invalid zip entry path: ../evil.txt"}` |
+| Missing SKILL.md | 400 | `{"error": "Skill archive must contain SKILL.md at the root"}` |
+| Zip parse failed | 400 | `{"error": "Invalid or unsupported zip format"}` |
+| Source path not allowed | 403 | `{"error": "Source path not allowed. Must be under one of: ..."}` |
+| Source not found | 404 | `{"error": "Source not found: skills/missing"}` |
+| Skill not found | 404 | `{"error": "Skill not found: web-search"}` |
+| Quota exceeded | 413 | `{"error": "Skill archive exceeds workspace quota"}` |
+| Unexpected error | 500 | `{"error": "Internal server error"}` |
+
+---
+
+### Blender 多專家 Skill 部署範例
+
+以下展示 Blender runner 使用 AgentOrchestrator 部署多專家技能的完整流程：
+
+```
+POST /api/conversations
+  ↓
+PUT /api/conversations/:id/agents
+  ↓
+POST /api/conversations/:id/skills/upload?name=extract-design-artifact
+POST /api/conversations/:id/skills/upload?name=extract-spec-artifact
+POST /api/conversations/:id/skills/upload?name=extract-plan-artifact
+POST /api/conversations/:id/skills/upload?name=extract-validation-artifact
+POST /api/conversations/:id/skills/upload?name=blender-build-actions
+POST /api/conversations/:id/skills/upload?name=blender-assembly-actions
+  ↓
+GET /api/conversations/:id/skills/blender-build-actions/info
+  ↓
+POST /api/conversations/:id/start
+  ↓
+WS /ws/:id → message.send
+```
+
+**成功 Skill info 回應**：
+```json
+{
+  "name": "blender-build-actions",
+  "files": [
+    "SKILL.md",
+    "references/build_action_contract.md"
+  ],
+  "totalSize": 8421,
+  "sha256": "a1b2c3d4e5f6..."
+}
+```
+
+**Zip 結構要求**：
+```
+SKILL.md
+references/action_schema.md
+references/capabilities.md
+```
+
+**注意**：
+- Skill 必須在 `prepared` 狀態時上傳，啟動後再更新需呼叫 `POST /restart` 才能生效
+- `upload`/`import`/`delete` 會標記 `needsRestart=true`，但不會自動重啟 OpenCode
 
 ---
 
@@ -1333,7 +1439,11 @@ You are a senior UI/UX designer. Your responsibilities include:
 |----------|------|
 | HTTP body limit | `express.json({ limit: '10mb' })` + `express.text({ limit: '5mb' })` |
 | Workspace 配額 | 上限 50 MB（`MAX_WORKSPACE_SIZE = 50 * 1024 * 1024` bytes），超過時寫入操作被拒絕 |
-| `copyFromLocal` 白名單 | 僅允許來源路徑在 `{cwd}/assets/` 或 `{cwd}/templates/` 下 |
+| `copyFromLocal` 白名單 | 僅允許來源路徑在 `{cwd}/assets/`、`{cwd}/templates/` 或 `{cwd}/skills/` 下 |
+| Skill 名稱驗證 | `validateSkillName()` 只允許 `[A-Za-z0-9_-]`，最大長度 128 |
+| Zip Slip 防護 | `skills/upload` 逐條驗證 zip entry 路徑，確認 `resolve()` 後仍在 `destPath` 內 |
+| Skill 結構驗證 | `skills/upload` 要求 zip 根層級必須包含 `SKILL.md` |
+| 未壓縮大小檢查 | `skills/upload` 計算 `sum(entry.header.size)` 並調用 `assertQuota`，防止 zip bomb |
 
 ---
 
@@ -1346,9 +1456,11 @@ You are a senior UI/UX designer. Your responsibilities include:
 | `200` | OK |
 | `201` | Created |
 | `204` | No Content |
-| `400` | Bad Request（路徑遍歷、配額超過、缺少 body field） |
-| `404` | Not Found（對話、Agent、檔案不存在） |
+| `400` | Bad Request（路徑遍歷、配額超過、缺少 body field、無效 skill 名稱、zip 結構錯誤） |
+| `403` | Forbidden（本地複製來源不在白名單） |
+| `404` | Not Found（對話、Agent、檔案、Skill 不存在） |
 | `409` | Conflict（已運行 / 未運行 / 已存在） |
+| `413` | Payload Too Large（Skill 壓縮包未壓縮大小超過 50 MB 配額） |
 | `500` | Server Error |
 
 **REST 錯誤回應格式**：
