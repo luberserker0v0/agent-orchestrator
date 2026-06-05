@@ -22,7 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `POST /api/conversations` now prepares workspace only; `POST /:id/start` spawns the OpenCode process, enabling pre-configuration of agents and files before launch.
 - `message.send` remains conversation-scoped via WebSocket; session-scoped operations (list, fork, delete) moved to HTTP REST endpoints.
+- Skill API now returns more precise 400/403/404/413 errors.
+- Documented Blender multi-expert skill provisioning flow and restart behavior.
 
 ### Fixed
 
 - Path parameters for file APIs moved to request body to avoid URL encoding/special-char issues and path-traversal risks in routing.
+- Hardened skill zip upload against zip slip and unsafe skill names.
+- Rejected malformed skill archives without root SKILL.md.
