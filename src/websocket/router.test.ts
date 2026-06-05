@@ -650,6 +650,44 @@ describe('WSRouter', () => {
     expect(errorCall).toBeDefined();
   });
 
+  it('handles skills.import with source from sibling prefix path skills_evil/', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+      throw new Error('Source path not allowed. Must be under one of: ...');
+    });
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 25,
+          method: 'skills.import',
+          params: { source: 'skills_evil/web-search', name: 'web-search' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.importSkillFromLocal).toHaveBeenCalledWith('conv-001', 'skills_evil/web-search', 'web-search');
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 25 && parsed.error?.message?.includes('Source path not allowed');
+      } catch {
+        return false;
+      }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
   it('handles skills.get with invalid name', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());

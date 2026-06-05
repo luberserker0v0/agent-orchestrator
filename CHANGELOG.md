@@ -32,3 +32,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rejected malformed skill archives without root SKILL.md.
 - Skill zip upload path containment now uses `resolve()` for proper normalization and boundary checking.
 - All skill APIs (REST and WebSocket) now reject invalid names via `validateSkillName()` instead of silently sanitizing with `sanitizeId()`.
+- Hardened `copyFromLocal` and `importSkillFromLocal` source allowlist to reject sibling prefix paths (e.g. `skills_evil/`) using `resolve()` + `sep` boundary checks instead of `startsWith()`.

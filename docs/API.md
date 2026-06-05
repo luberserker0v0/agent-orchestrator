@@ -262,7 +262,7 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 ### `POST /api/conversations/:id/skills/import`
 
-從伺服器本地目錄複製 Skill 到對話 workspace。來源必須在 `{cwd}/skills/`、`{cwd}/assets/` 或 `{cwd}/templates/` 下。
+從伺服器本地目錄複製 Skill 到對話 workspace。來源必須在 `{cwd}/skills/`、`{cwd}/assets/` 或 `{cwd}/templates/` 下。前綴相同的兄弟目錄（例如 `skills_evil/`）會被拒絕。
 
 **請求**：
 ```json

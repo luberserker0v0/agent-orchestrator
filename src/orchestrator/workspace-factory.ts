@@ -9,7 +9,7 @@ import {
   copyFileSync,
   cpSync,
 } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname, basename, resolve, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { WorkspaceConfig } from '../config-loader.js';
@@ -276,10 +276,11 @@ export class WorkspaceFactory {
     const destPath = ensureWithinWorkspace(wsPath, sanitizedDest);
 
     // Validate source is within allowed directories
-    const resolvedSource = join(process.cwd(), source);
-    const isAllowed = this.allowedCopySources.some((allowed) =>
-      resolvedSource.startsWith(allowed)
-    );
+    const resolvedSource = resolve(process.cwd(), source);
+    const isAllowed = this.allowedCopySources.some((allowed) => {
+      const resolvedAllowed = resolve(allowed);
+      return resolvedSource === resolvedAllowed || resolvedSource.startsWith(resolvedAllowed + sep);
+    });
     if (!isAllowed) {
       throw new Error(
         `Source path not allowed. Must be under one of: ${this.allowedCopySources.join(', ')}`
@@ -327,10 +328,11 @@ export class WorkspaceFactory {
     const wsPath = this.resolveWorkspacePath(id);
     const destPath = join(wsPath, '.opencode', 'skills', skillName);
 
-    const resolvedSource = join(process.cwd(), source);
-    const isAllowed = this.allowedCopySources.some((allowed) =>
-      resolvedSource.startsWith(allowed)
-    );
+    const resolvedSource = resolve(process.cwd(), source);
+    const isAllowed = this.allowedCopySources.some((allowed) => {
+      const resolvedAllowed = resolve(allowed);
+      return resolvedSource === resolvedAllowed || resolvedSource.startsWith(resolvedAllowed + sep);
+    });
     if (!isAllowed) {
       throw new Error(
         `Source path not allowed. Must be under one of: ${this.allowedCopySources.join(', ')}`
