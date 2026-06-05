@@ -169,11 +169,12 @@ src/
   config-loader.ts           # Configuration loading with env overrides
   index.ts                   # Application entry point
   http-api/
-    server.ts                # Express HTTP server
+    server.ts                # Express HTTP server with conversation lifecycle, config, agents, files, sessions, events endpoints
   orchestrator/
-    instance-manager.ts      # OpenCode instance lifecycle
+    conversation-state.ts    # Event-driven conversation lifecycle with subscription and event replay
+    instance-manager.ts      # OpenCode instance lifecycle with workspace reuse
     port-pool.ts             # Dynamic port allocation
-    workspace-factory.ts     # Workspace creation with sandboxed permissions
+    workspace-factory.ts     # Workspace creation, config/agent/file CRUD, copy, quota, path sanitization
   opencode-cli/
     models.ts                # CLI model listing
   opencode-http/
@@ -183,7 +184,7 @@ src/
     logger.ts                # Structured logging with level/format control
   websocket/
     connection.ts            # JSON-RPC 2.0 WebSocket handler
-    router.ts                # WebSocket routing to instances
+    router.ts                # WebSocket routing with 20+ JSON-RPC methods, event pushing, prepared-phase handling
 ```
 
 ## Technology Stack
