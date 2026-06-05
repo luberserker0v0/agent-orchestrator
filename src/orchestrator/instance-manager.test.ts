@@ -219,6 +219,8 @@ describe('InstanceManager', () => {
           throw new Error('disk full');
         }),
         destroy: vi.fn(),
+        hasWorkspace: vi.fn().mockReturnValue(false),
+        ensure: vi.fn(),
       } as any;
 
       const manager = new InstanceManager(testConfig, badFactory);

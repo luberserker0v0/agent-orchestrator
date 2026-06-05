@@ -18,6 +18,8 @@ describe('Metrics', () => {
         listInstances: vi.fn(),
         getInstance: vi.fn(),
       } as any,
+      {} as any,
+      {} as any,
       { opencodeBinary: 'opencode', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 } }
     );
 

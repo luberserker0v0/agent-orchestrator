@@ -6,6 +6,8 @@ describe('HTTP API Server', () => {
   let httpServer: HttpServer;
   let server: HttpServer['server'];
   let mockInstanceManager: any;
+  let mockWorkspaceFactory: any;
+  let mockConversationState: any;
   let mockListModels: any;
 
   beforeEach(() => {
@@ -16,12 +18,50 @@ describe('HTTP API Server', () => {
       getInstance: vi.fn(),
     };
 
+    mockWorkspaceFactory = {
+      create: vi.fn(),
+      destroy: vi.fn(),
+      ensure: vi.fn(),
+      hasWorkspace: vi.fn(),
+      writeConfig: vi.fn(),
+      readConfig: vi.fn(),
+      writeAgent: vi.fn(),
+      readAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      listAgents: vi.fn(),
+      writeFile: vi.fn(),
+      readFile: vi.fn(),
+      listFiles: vi.fn(),
+      deleteFile: vi.fn(),
+      copyFromLocal: vi.fn(),
+      getWorkspaceSize: vi.fn(),
+    };
+
+    mockConversationState = {
+      create: vi.fn().mockImplementation((id: string) => ({ id, status: 'prepared', wsUrl: `ws://localhost/ws/${id}` })),
+      get: vi.fn().mockReturnValue({ id: 'test-id', status: 'prepared' }),
+      has: vi.fn().mockReturnValue(true),
+      list: vi.fn().mockReturnValue([]),
+      remove: vi.fn(),
+      transition: vi.fn(),
+      markNeedsRestart: vi.fn(),
+      clearNeedsRestart: vi.fn(),
+      setInstanceInfo: vi.fn(),
+      setRunningInstance: vi.fn(),
+      removeRunningInstance: vi.fn(),
+      getRecentEvents: vi.fn().mockReturnValue([]),
+      subscribe: vi.fn().mockReturnValue(() => {}),
+      emitEvent: vi.fn(),
+    };
+
     mockListModels = vi.fn();
 
     httpServer = createHttpServer(
       { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
       { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
       mockInstanceManager,
+      mockWorkspaceFactory,
+      mockConversationState,
       { opencodeBinary: 'opencode', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 } }
     );
     server = httpServer.server;
@@ -39,14 +79,8 @@ describe('HTTP API Server', () => {
     expect(res.body.uptime).toBeGreaterThan(0);
   });
 
-  it('POST /api/conversations creates instance', async () => {
-    mockInstanceManager.createInstance.mockResolvedValue({
-      id: 'conv-001',
-      port: 30000,
-      sessionId: 'ses_1',
-      defaultModel: 'anthropic/claude',
-      defaultAgent: 'build',
-    });
+  it('POST /api/conversations prepares workspace', async () => {
+    mockConversationState.has.mockReturnValue(false);
 
     const res = await request(server)
       .post('/api/conversations')
@@ -54,20 +88,22 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.id).toBe('conv-001');
-    expect(res.body.port).toBe(30000);
-    expect(res.body.sessionId).toBe('ses_1');
+    expect(res.body.status).toBe('prepared');
     expect(res.body.wsUrl).toContain('/ws/conv-001');
   });
 
-  it('POST /api/conversations returns 500 on failure', async () => {
-    mockInstanceManager.createInstance.mockRejectedValue(new Error('No ports'));
+  it('POST /api/conversations returns 500 on workspace failure', async () => {
+    mockConversationState.has.mockReturnValue(false);
+    mockWorkspaceFactory.create.mockImplementation(() => {
+      throw new Error('disk full');
+    });
 
     const res = await request(server)
       .post('/api/conversations')
       .send({});
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain('No ports');
+    expect(res.body.error).toContain('disk full');
   });
 
   it('GET /api/models lists models', async () => {
@@ -82,27 +118,31 @@ describe('HTTP API Server', () => {
     expect(res.status).toBe(200);
   });
 
-  it('DELETE /api/conversations/:id destroys instance', async () => {
-    mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
+  it('DELETE /api/conversations/:id destroys instance and workspace', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ status: 'stopped' });
 
     const res = await request(server).delete('/api/conversations/conv-001');
 
     expect(res.status).toBe(204);
-    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
+    // When stopped, instance should already be destroyed, so destroyInstance is not called again
+    expect(mockInstanceManager.destroyInstance).not.toHaveBeenCalled();
+    expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationState.remove).toHaveBeenCalledWith('conv-001');
   });
 
-  it('DELETE /api/conversations/:id returns 500 on failure', async () => {
-    mockInstanceManager.destroyInstance.mockRejectedValue(new Error('Not found'));
+  it('DELETE /api/conversations/:id returns 404 when not found', async () => {
+    mockConversationState.has.mockReturnValue(false);
 
     const res = await request(server).delete('/api/conversations/conv-001');
 
-    expect(res.status).toBe(500);
-    expect(res.body.error).toContain('Not found');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('Conversation not found');
   });
 
-  it('GET /api/conversations lists instances', async () => {
-    mockInstanceManager.listInstances.mockReturnValue([
-      { id: 'conv-001', port: 30000, lastUsedAt: Date.now(), isReady: true },
+  it('GET /api/conversations lists conversations', async () => {
+    mockConversationState.list.mockReturnValue([
+      { id: 'conv-001', status: 'prepared', needsRestart: false, port: undefined, sessionId: undefined, wsUrl: 'ws://localhost:8080/ws/conv-001', createdAt: Date.now(), updatedAt: Date.now() },
     ]);
 
     const res = await request(server).get('/api/conversations');
