@@ -4,6 +4,8 @@
 
 AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例的編排器（Orchestrator），為每個對話（Conversation）動態建立獨立的 `opencode serve` 進程，並透過 HTTP REST API 與 WebSocket 提供統一的外部介面。
 
+與舊版直接「建立即啟動」不同，新版採用**延遲啟動（Delayed-Start）**設計：先準備 workspace（`prepared`），再由用戶端決定何時啟動 OpenCode（`starting` → `running`），允許在啟動前預先寫入 Agent 定義、模板檔案與對話配置。
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         Client / Frontend                    │
@@ -16,10 +18,11 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
            │  /api/conversations│  /api/models     │
            ▼                   ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    AgentOrchestrator HTTP API                     │
+│                    AgentOrchestrator HTTP API                │
 │  • Express Server (port 0 = auto-allocated)                 │
 │  • WebSocket upgrade handling                               │
 │  • JSON-RPC 2.0 dispatch                                    │
+│  • ConversationState (event-driven lifecycle)               │
 └──────────────────────────────┬──────────────────────────────┘
                                │
            ┌───────────────────┼───────────────────┐
@@ -32,13 +35,21 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
 │  port: 30000        │  │   stdout parse      │  │  HTTP API   │
 │  cwd: workspace/... │  │                     │  │  /session   │
 └─────────────────────┘  └─────────────────────┘  └──────────────┘
+
+Event Stream (WebSocket push via conversationState.subscribe):
+  conversation.prepared
+  conversation.starting
+  conversation.running
+  conversation.stopped
+  conversation.restarting
+  conversation.destroyed
 ```
 
 ---
 
 ## 資料流
 
-### 1. 建立對話
+### 1. 準備對話
 
 ```
 Client → POST /api/conversations (with model, agent)
@@ -46,15 +57,37 @@ Client → POST /api/conversations (with model, agent)
   ▼
 AgentOrchestrator
   │ 1. 產生 UUID → workspace/{id}/
-  │ 2. 寫入 opencode.json (permissions + model + agent)
-  │ 3. PortPool.allocate() → 動態端口 (e.g., 30000)
-  │ 4. spawn("opencode serve --port 30000", cwd=workspace/{id}/)
-  │ 5. 輪詢 GET /global/health 直到通過
-  │ 6. POST /session → 建立初始 Session
-  │ 7. 註冊 InstanceInfo (含 defaultModel, defaultAgent)
+  │ 2. WorkspaceFactory.create(id, options) → 建立資料夾與 opencode.json
+  │ 3. ConversationState.create(id) → status = 'prepared'
+  │ 4. 註冊 wsUrl (尚未分配 port，不啟動 OpenCode)
   │
   ▼
-回傳 { id, wsUrl, port, sessionId, model, agent }
+回傳 { id, status: 'prepared', wsUrl }
+```
+
+### 1.5. 啟動對話
+
+```
+Client → POST /api/conversations/{id}/start
+  │
+  ▼
+AgentOrchestrator
+  │ 1. ConversationState.transition(id, 'starting')
+  │    → emit 'conversation.starting'
+  │ 2. InstanceManager.createInstance(id, reuseWorkspace=true)
+  │    │ 2a. 若 workspace 已存在 → 跳過 create，直接使用
+  │    │ 2b. PortPool.allocate() → 動態端口
+  │    │ 2c. spawn("opencode serve --port 30000", cwd=workspace/{id}/)
+  │    │ 2d. 輪詢 GET /global/health 直到通過
+  │    │ 2e. POST /session → 建立初始 Session
+  │    ▼
+  │ 3. ConversationState.transition(id, 'running')
+  │    → setRunningInstance(port, sessionId)
+  │    → emit 'conversation.running'
+  │    → push to WebSocket subscribers
+  │
+  ▼
+回傳 { status: 'running', port, sessionId }
 ```
 
 ### 2. 發送訊息（WebSocket）
@@ -64,10 +97,13 @@ Client → WS connect /ws/{conversationId}
   │
   ▼
 AgentOrchestrator WS Router
-  │ 1. 查找 InstanceInfo (Map<conversationId>)
-  │ 2. 解析 JSON-RPC message.send
-  │ 3. model 字串 → { providerID, modelID } (或 fallback 到 defaultModel)
-  │ 4. agent → fallback 到 defaultAgent
+  │ 1. 檢查 ConversationState.has(id)；若不存在 → reject (1011)
+  │ 2. 訂閱 conversationState.subscribe(id, cb) → 接收事件推送
+  │ 3. 接收 JSON-RPC 請求 (e.g. message.send)
+  │ 4. 檢查 status === 'running'；若否 → reject (-32001 invalid state)
+  │ 5. 查找 InstanceInfo (Map<conversationId>)
+  │ 6. model 字串 → { providerID, modelID } (或 fallback 到 defaultModel)
+  │ 7. agent → fallback 到 defaultAgent
   │
   ▼
 HTTP POST → OpenCode /session/{sid}/message
@@ -84,10 +120,12 @@ Client → DELETE /api/conversations/{id}
   │
   ▼
 AgentOrchestrator
-  │ 1. InstanceManager.destroyInstance(id)
-  │ 2. treeKill(proc.pid) → 終止 OpenCode 進程樹
-  3. PortPool.release(port)
-  4. rmSync(workspace/{id}/) → 移除 workspace
+  │ 1. InstanceManager.destroyInstance(id) (若 running)
+  │    │ 1a. treeKill(proc.pid) → 終止 OpenCode 進程樹
+  │    │ 1b. PortPool.release(port)
+  │ 2. ConversationState.transition(id, 'destroyed')
+  │    → emit 'conversation.destroyed'
+  │ 3. WorkspaceFactory.destroy(id) → rmSync(workspace/{id}/)
   │
   ▼
 回傳 204 No Content
@@ -98,26 +136,63 @@ AgentOrchestrator
 ## OpenCode 實例生命週期
 
 ```
-┌─────────┐     ┌──────────┐     ┌─────────────┐     ┌──────────┐
-│ Created │────▶│ Spawning │────▶│ Health Check │────▶│  Ready   │
-│(allocate│     │(spawn    │     │(poll /global │     │(session  │
-│ port &  │     │ opencode │     │  /health)    │     │ created) │
-│ workspace)│     │ serve)   │     │              │     │          │
-└─────────┘     └──────────┘     └─────────────┘     └────┬─────┘
-                                                            │
-                                 ┌──────────────────────────┘
-                                 │  LRU Eviction / User Delete
-                                 ▼
-                          ┌─────────────┐
-                          │  Destroyed   │
-                          │(treeKill +   │
-                          │ rm workspace)│
-                          └─────────────┘
+┌───────────┐
+│ Prepared  │  (workspace created, no process yet)
+└─────┬─────┘
+      │ POST /start
+      ▼
+┌───────────┐     ┌──────────┐     ┌─────────────┐     ┌──────────┐
+│ Starting  │────▶│ Spawning │────▶│ Health Check │────▶│ Running  │
+│           │     │(spawn    │     │(poll /global │     │(session  │
+│           │     │ opencode │     │  /health)    │     │ created) │
+└─────┬─────┘     └──────────┘     └─────────────┘     └────┬─────┘
+      │                                                     │
+      │ POST /stop                                            │ POST /restart
+      ▼                                                     ▼
+┌───────────┐                                          ┌───────────┐
+│ Stopped   │                                          │ Restarting│
+│(process   │                                          │(stop old  │
+│ killed,   │                                          │ process, │
+│ workspace │                                          │ keep ws, │
+│ kept)     │                                          │ respawn) │
+└─────┬─────┘                                          └─────┬─────┘
+      │                                                     │
+      └────────────────────────┬────────────────────────────┘
+                               │
+                               │ DELETE /{id} 或 LRU Eviction
+                               ▼
+                        ┌─────────────┐
+                        │  Destroyed   │
+                        │(treeKill +   │
+                        │ rm workspace)│
+                        └─────────────┘
 ```
 
 ---
 
 ## 核心模組
+
+### `src/orchestrator/conversation-state.ts`
+
+事件驅動的對話生命周期狀態機，管理從 `prepared` 到 `destroyed` 的所有狀態轉換，並提供訂閱機制供 WebSocket 推送即時事件。
+
+**關鍵類別**：`ConversationState`
+
+| 方法 | 職責 |
+|------|------|
+| `create(id)` | 建立對話狀態（`prepared`），允許預設 UUID |
+| `get(id)` | 取得對話狀態與執行中實例資訊 |
+| `has(id)` | 檢查對話是否存在 |
+| `transition(id, toStatus)` | 原子性狀態轉換，觸發對應事件 |
+| `setRunningInstance(id, port, sessionId)` | 記錄啟動後的實例資訊 |
+| `removeRunningInstance(id)` | 清除實例資訊（停止時） |
+| `subscribe(id, callback)` | WebSocket 訂閱事件流；回傳 unsubscribe 函式 |
+| `getRecentEvents(id)` | 取得最近 100 條事件（供 REST `GET /events` 與重連時回放） |
+| `emitEvent(id, type, payload?)` | 內部發射事件並寫入歷史 |
+
+**`ConversationStatus`**：`prepared` → `starting` → `running` → `stopped` / `restarting` → `destroyed`
+
+---
 
 ### `src/orchestrator/instance-manager.ts`
 
@@ -127,9 +202,9 @@ AgentOrchestrator
 
 | 方法 | 職責 |
 |------|------|
-| `createInstance(id, options?)` | 建立新實例：分配端口、建立 workspace、spawn OpenCode、健康檢查、建立 Session |
+| `createInstance(id, options?)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、spawn OpenCode、健康檢查、建立 Session |
 | `getInstance(id)` | 取得實例資訊，並更新 `lastUsedAt` |
-| `destroyInstance(id)` | 銷毀實例：kill 進程、釋放端口、移除 workspace |
+| `destroyInstance(id)` | 銷毀實例：kill 進程、釋放端口（**保留 workspace**） |
 | `listInstances()` | 列出所有活躍實例 |
 | `evictLRU()` | 私有方法：達上限時淘汰最久未使用的實例 |
 
@@ -149,6 +224,8 @@ AgentOrchestrator
 }
 ```
 
+---
+
 ### `src/orchestrator/port-pool.ts`
 
 動態端口分配器，確保 OpenCode 實例端口不衝突。
@@ -158,17 +235,31 @@ AgentOrchestrator
 - `release(port)` → 將端口放回池中
 - `getUsedCount()` → 取得已使用端口數量
 
+---
+
 ### `src/orchestrator/workspace-factory.ts`
 
-建立每個對話的獨立 workspace。
+建立與管理每個對話的獨立 workspace，支援配置、Agent、檔案的 CRUD，以及本地檔案複製與配額管理。
 
-**`WorkspaceFactory.create(id, options?)`**：
-1. `mkdir -p workspace/{id}/.opencode/`
-2. 生成 `opencode.json`：
-   - `$schema`
-   - `permission`（沙箱限制）
-   - `model`（若指定）
-   - `agent`（若指定）
+**`WorkspaceFactory`**：
+
+| 方法 | 職責 |
+|------|------|
+| `create(id, options?)` | 建立 workspace 與 `opencode.json`（含沙箱權限、model、agent） |
+| `hasWorkspace(id)` | 檢查 workspace 是否已存在 |
+| `ensure(id)` | 確保 workspace 存在（供重用時呼叫） |
+| `destroy(id)` | 移除 workspace 資料夾 |
+| `writeConfig(id, config)` / `readConfig(id)` | 覆寫 / 讀取 `opencode.json` |
+| `writeAgent(id, name, content)` / `readAgent(id, name)` / `listAgents(id)` / `deleteAgent(id, name)` | Agent Markdown 檔案 CRUD（寫入 `.opencode/agents/*.md`，OpenCode 自動發現） |
+| `writeFile(id, path, content)` / `readFile(id, path)` / `listFiles(id)` / `deleteFile(id, path)` | 通用檔案 CRUD（所有路徑經 `sanitizeRelativePath` 驗證） |
+| `copyFromLocal(id, source, dest)` | 從本機 `{cwd}/assets/` 或 `{cwd}/templates/` 複製檔案/資料夾到 workspace |
+| `calculateWorkspaceSize(id)` | 計算 workspace 總大小（遞迴） |
+
+**安全機制**：
+- `sanitizeRelativePath(path)`：拒絕包含 `..` 的相對路徑與絕對路徑（`/...` 或 `C:\...`）
+- 配額上限：`MAX_WORKSPACE_SIZE = 50 * 1024 * 1024` bytes（50 MB）；超過時寫入操作拒絕
+
+---
 
 ### `src/opencode-http/client.ts`
 
@@ -177,6 +268,9 @@ AgentOrchestrator
 **`OpenCodeClient`**：
 - 支援 Basic Auth（`Authorization: Basic ...`）
 - 方法：`health()`, `createSession()`, `sendPrompt()`, `listMessages()`, `abortSession()`
+- **新增**：`listSessions()`, `getSessionChildren(id)`, `forkSession(id, messageID?)` → 支援 OpenCode 會話樹遍歷
+
+---
 
 ### `src/opencode-cli/models.ts`
 
@@ -186,6 +280,8 @@ AgentOrchestrator
 - `spawn(binary, ['models'])`
 - 解析 stdout（每行 `provider/model` 格式）
 - 回傳 `{ id, provider, model }[]`
+
+---
 
 ### `src/websocket/connection.ts`
 
@@ -197,15 +293,27 @@ AgentOrchestrator
 - Idle timeout（自動斷線）
 - 事件推送（`sendEvent`）
 
+---
+
 ### `src/websocket/router.ts`
 
-WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的 OpenCode 實例。
+WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再自動建立實例**，所有操作都透過 `ConversationState` 檢查與事件訂閱。
 
 **`WSRouter`**：
 - 解析 URL 中的 `conversationId`
-- 若實例不存在，自動建立新實例
-- 處理 `message.send` / `message.history` / `session.abort`
-- model 字串 → `{ providerID, modelID }` 轉換與 fallback 邏輯
+- 檢查 `conversationState.has(id)`；若不存在 → 關閉連線（code `1011`）
+- 訂閱 `conversationState.subscribe(id)`，將事件即時推送給客戶端
+- 處理 20+ JSON-RPC 方法，包括：
+  - 會話類：`session.create`, `session.delete`, `session.list`
+  - 訊息類：`message.send`, `message.history`
+  - 對話控制類：`conversation.status`, `conversation.start`, `conversation.stop`, `conversation.restart`
+  - 配置類：`config.read`, `config.write`
+  - Agent 類：`agent.list`, `agent.read`, `agent.write`, `agent.delete`
+  - 檔案類：`file.list`, `file.read`, `file.write`, `file.delete`
+  - 事件類：`events.subscribe`, `events.unsubscribe`
+- 若對話狀態非 `running`，執行需實例操作的方法時回傳 `-32001` invalid state
+
+---
 
 ### `src/config-loader.ts`
 
@@ -224,3 +332,7 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的 OpenCode 實例。
 2. **檔案系統沙箱**：`opencode.json` 限制 `external_directory: deny`，工具只能存取 workspace 內檔案
 3. **動態 Basic Auth**：每個 OpenCode 實例自動生成獨立密碼，避免與使用者全域設定衝突
 4. **自動資源回收**：LRU 淘汰與刪除時的 `treeKill` + `rmSync`，防止殭屍進程與磁碟洩漏
+5. **Workspace 配額限制**：單一 workspace 上限 50 MB，超過時寫入操作被拒絕
+6. **路徑遍歷防護**：所有檔案操作必須通過 `sanitizeRelativePath()`，拒絕 `..` 與絕對路徑；檔案路徑統一放於 request body 或 query string，避免 URL routing 層被惡意路徑段繞過
+7. **本地複製白名單**：`copyFromLocal` 僅允許來源為 `{cwd}/assets/` 或 `{cwd}/templates/`，防止任意本機路徑複製
+8. **延遲啟動隔離**：`POST /conversations` 僅建立 workspace，不啟動 OpenCode；Agent 與檔案可在啟動前預先注入，確保 OpenCode 啟動時即擁有完整上下文，同時避免未準備完成的實例被外部誤用
