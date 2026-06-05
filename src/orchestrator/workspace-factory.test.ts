@@ -343,6 +343,16 @@ describe('WorkspaceFactory', () => {
       rmSync(skillsDir, { recursive: true, force: true });
     });
 
+    it('should throw when deleting non-existent skill', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-skill-del-miss');
+
+      expect(() => factory.deleteSkill('conv-skill-del-miss', 'missing')).toThrow('Skill not found');
+    });
+
     it('should reject import from disallowed source', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',

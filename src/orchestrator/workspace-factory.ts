@@ -49,6 +49,16 @@ function sanitizeRelativePath(raw: string): string {
   return normalized;
 }
 
+export function validateSkillName(name: string): string {
+  if (!name || typeof name !== 'string') {
+    throw new Error('Invalid skill name');
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(name)) {
+    throw new Error('Invalid skill name');
+  }
+  return name;
+}
+
 function getDirSize(dirPath: string): number {
   let total = 0;
   try {
@@ -375,10 +385,11 @@ export class WorkspaceFactory {
   deleteSkill(id: string, name: string): void {
     const wsPath = this.resolveWorkspacePath(id);
     const skillDir = join(wsPath, '.opencode', 'skills', sanitizeId(name));
-    if (existsSync(skillDir)) {
-      rmSync(skillDir, { recursive: true, force: true });
-      logger.info(`Skill deleted: ${skillDir}`);
+    if (!existsSync(skillDir)) {
+      throw new Error(`Skill not found: ${name}`);
     }
+    rmSync(skillDir, { recursive: true, force: true });
+    logger.info(`Skill deleted: ${skillDir}`);
   }
 
   private assertQuota(wsPath: string, additionalBytes: number, excludingFile?: string): void {

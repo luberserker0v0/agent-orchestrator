@@ -1,12 +1,12 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createServer, type Server } from 'node:http';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname, sep } from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
-import { WorkspaceFactory } from '../orchestrator/workspace-factory.js';
+import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { listModels } from '../opencode-cli/models.js';
 import { WSRouter } from '../websocket/router.js';
@@ -598,18 +598,80 @@ export function createHttpServer(
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
-    const name = typeof req.query.name === 'string' ? req.query.name : undefined;
-    if (!name) {
+    const rawName = typeof req.query.name === 'string' ? req.query.name : undefined;
+    if (!rawName) {
       res.status(400).json({ error: 'Missing name query parameter' });
+      return;
+    }
+
+    let name: string;
+    try {
+      name = validateSkillName(rawName);
+    } catch {
+      res.status(400).json({ error: 'Invalid skill name' });
       return;
     }
 
     try {
       const zip = new AdmZip(req.body as Buffer);
+      const entries = zip.getEntries();
+
+      // Validate root SKILL.md
+      const hasRootSkillMd = entries.some((e) => e.entryName === 'SKILL.md');
+      if (!hasRootSkillMd) {
+        res.status(400).json({ error: 'Skill archive must contain SKILL.md at the root' });
+        return;
+      }
+
+      // Validate zip entry paths and calculate uncompressed size
       const wsPath = workspaceFactory['resolveWorkspacePath'](id);
       const destPath = join(wsPath, '.opencode', 'skills', name);
+      let totalUncompressedSize = 0;
+
+      for (const entry of entries) {
+        const entryName = entry.entryName;
+
+        // Reject absolute paths, drive paths, and traversal
+        if (entryName.includes('..')) {
+          res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
+          return;
+        }
+        if (entryName.startsWith('/') || entryName.startsWith('\\')) {
+          res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
+          return;
+        }
+        if (/^[A-Za-z]:/i.test(entryName)) {
+          res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
+          return;
+        }
+
+        // Verify resolved output remains inside destPath
+        const resolvedOutput = join(destPath, entryName);
+        if (!resolvedOutput.startsWith(destPath + sep)) {
+          res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
+          return;
+        }
+
+        totalUncompressedSize += entry.header.size;
+      }
+
+      // Check quota
+      try {
+        workspaceFactory['assertQuota'](wsPath, totalUncompressedSize, destPath);
+      } catch {
+        res.status(413).json({ error: 'Skill archive exceeds workspace quota' });
+        return;
+      }
+
+      // Safe extraction
       mkdirSync(destPath, { recursive: true });
-      zip.extractAllTo(destPath, true);
+      for (const entry of entries) {
+        if (entry.isDirectory) continue;
+        const entryPath = join(destPath, entry.entryName);
+        mkdirSync(dirname(entryPath), { recursive: true });
+        writeFileSync(entryPath, entry.getData());
+      }
+
       markNeedsRestartIfRunning(id, `skill ${name} uploaded`);
       conversationState.emitEvent(id, 'conversation.configChanged', {
         changedFiles: [`.opencode/skills/${name}/`],
@@ -642,8 +704,17 @@ export function createHttpServer(
       });
       res.status(204).send();
     } catch (err) {
+      const message = (err as Error).message;
       logger.error(`Failed to import skill for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      if (message.includes('Source path not allowed')) {
+        res.status(403).json({ error: message });
+      } else if (message.includes('Source not found') || message.includes('Source must be a directory')) {
+        res.status(404).json({ error: message });
+      } else if (message.includes('Workspace quota exceeded')) {
+        res.status(413).json({ error: message });
+      } else {
+        res.status(500).json({ error: message });
+      }
     }
   });
 
@@ -699,7 +770,12 @@ export function createHttpServer(
       });
       res.status(204).send();
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      const message = (err as Error).message;
+      if (message.includes('Skill not found')) {
+        res.status(404).json({ error: message });
+      } else {
+        res.status(500).json({ error: message });
+      }
     }
   });
 
