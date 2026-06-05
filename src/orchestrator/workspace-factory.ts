@@ -323,9 +323,9 @@ export class WorkspaceFactory {
   // ─── Skills ──────────────────────────────────────────────
 
   importSkillFromLocal(id: string, source: string, name: string): void {
-    const sanitizedName = sanitizeId(name);
+    const skillName = validateSkillName(name);
     const wsPath = this.resolveWorkspacePath(id);
-    const destPath = join(wsPath, '.opencode', 'skills', sanitizedName);
+    const destPath = join(wsPath, '.opencode', 'skills', skillName);
 
     const resolvedSource = join(process.cwd(), source);
     const isAllowed = this.allowedCopySources.some((allowed) =>
@@ -364,8 +364,9 @@ export class WorkspaceFactory {
   }
 
   readSkill(id: string, name: string): string {
+    const skillName = validateSkillName(name);
     const wsPath = this.resolveWorkspacePath(id);
-    const skillPath = join(wsPath, '.opencode', 'skills', sanitizeId(name), 'SKILL.md');
+    const skillPath = join(wsPath, '.opencode', 'skills', skillName, 'SKILL.md');
     if (!existsSync(skillPath)) {
       throw new Error(`Skill not found: ${name}`);
     }
@@ -373,18 +374,20 @@ export class WorkspaceFactory {
   }
 
   getSkillInfo(id: string, name: string): { name: string; files: string[]; totalSize: number; sha256: string } {
+    const skillName = validateSkillName(name);
     const wsPath = this.resolveWorkspacePath(id);
-    const skillDir = join(wsPath, '.opencode', 'skills', sanitizeId(name));
+    const skillDir = join(wsPath, '.opencode', 'skills', skillName);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill not found: ${name}`);
     }
     const info = hashDirectory(skillDir);
-    return { name, ...info };
+    return { name: skillName, ...info };
   }
 
   deleteSkill(id: string, name: string): void {
+    const skillName = validateSkillName(name);
     const wsPath = this.resolveWorkspacePath(id);
-    const skillDir = join(wsPath, '.opencode', 'skills', sanitizeId(name));
+    const skillDir = join(wsPath, '.opencode', 'skills', skillName);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill not found: ${name}`);
     }

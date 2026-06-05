@@ -364,6 +364,48 @@ describe('WorkspaceFactory', () => {
         factory.importSkillFromLocal('conv-skill-denied', join('..', 'outside'), 'outside')
       ).toThrow('Source path not allowed');
     });
+
+    it('should reject invalid skill name in importSkillFromLocal', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-invalid-import');
+
+      expect(() =>
+        factory.importSkillFromLocal('conv-invalid-import', join('skills', 'test'), 'foo/bar')
+      ).toThrow('Invalid skill name');
+    });
+
+    it('should reject invalid skill name in readSkill', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-invalid-read');
+
+      expect(() => factory.readSkill('conv-invalid-read', 'foo/bar')).toThrow('Invalid skill name');
+    });
+
+    it('should reject invalid skill name in getSkillInfo', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-invalid-info');
+
+      expect(() => factory.getSkillInfo('conv-invalid-info', 'foo/bar')).toThrow('Invalid skill name');
+    });
+
+    it('should reject invalid skill name in deleteSkill', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-invalid-delete');
+
+      expect(() => factory.deleteSkill('conv-invalid-delete', 'foo/bar')).toThrow('Invalid skill name');
+    });
   });
 
   // ─── Copy from local ─────────────────────────────────────
