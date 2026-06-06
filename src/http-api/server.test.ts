@@ -210,6 +210,90 @@ describe('HTTP API Server', () => {
     await reqPromise.catch(() => {});
   });
 
+  // ─── Start / Stop / Restart ──────────────────────────────
+
+  it('POST /api/conversations/:id/start returns 200 and transitions to running', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30000, sessionId: 'ses_1', process: {}, client: {} });
+
+    const res = await request(server).post('/api/conversations/conv-001/start');
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('running');
+    expect(res.body.port).toBe(30000);
+    expect(res.body.sessionId).toBe('ses_1');
+    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001');
+  });
+
+  it('POST /api/conversations/:id/start returns 409 when already running', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+
+    const res = await request(server).post('/api/conversations/conv-001/start');
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('already starting or running');
+  });
+
+  it('POST /api/conversations/:id/start returns 500 on instance creation failure', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+    mockInstanceManager.createInstance.mockRejectedValue(new Error('port allocation failed'));
+
+    const res = await request(server).post('/api/conversations/conv-001/start');
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('port allocation failed');
+  });
+
+  // ─── Sessions ───────────────────────────────────────────
+
+  it('POST /api/conversations/:id/sessions creates a session', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    const mockClient = { createSession: vi.fn().mockResolvedValue({ id: 'ses_new', title: 'test', status: 'active', created_at: '2026-01-01', updated_at: '2026-01-01' }) };
+    mockInstanceManager.getInstance.mockReturnValue({ client: mockClient });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/sessions')
+      .send({ title: 'test' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.id).toBe('ses_new');
+    expect(mockClient.createSession).toHaveBeenCalledWith({ title: 'test', parentID: undefined });
+  });
+
+  it('POST /api/conversations/:id/sessions returns 404 when conversation not found', async () => {
+    mockConversationState.has.mockReturnValue(false);
+
+    const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('Conversation not found');
+  });
+
+  it('POST /api/conversations/:id/sessions returns 409 when not running', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+
+    const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('not running');
+  });
+
+  it('POST /api/conversations/:id/sessions returns 500 when instance reference lost', async () => {
+    mockConversationState.has.mockReturnValue(true);
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockInstanceManager.getInstance.mockReturnValue(undefined);
+
+    const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('Instance reference lost');
+  });
+
   it('GET /api/conversations/:id/skills lists skills', async () => {
     mockConversationState.has.mockReturnValue(true);
     mockWorkspaceFactory.listSkills.mockReturnValue(['web-search', 'code-review']);
