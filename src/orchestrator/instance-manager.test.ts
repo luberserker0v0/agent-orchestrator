@@ -283,7 +283,8 @@ describe('InstanceManager', () => {
 
       const info = await instanceManager.createInstance('conv-opt', {
         model: 'anthropic/claude-3-5-sonnet',
-        agent: 'build',
+        agent: { build: { description: 'build agent' } },
+        default_agent: 'build',
       });
 
       expect(info.defaultModel).toBe('anthropic/claude-3-5-sonnet');

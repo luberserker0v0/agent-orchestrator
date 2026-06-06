@@ -154,7 +154,7 @@ export class InstanceManager {
       lastUsedAt: Date.now(),
       isReady: true,
       defaultModel: options?.model,
-      defaultAgent: options?.agent,
+      defaultAgent: options?.default_agent,
     };
 
     this.instances.set(id, instance);

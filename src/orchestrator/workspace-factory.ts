@@ -16,7 +16,8 @@ import type { WorkspaceConfig } from '../config-loader.js';
 
 export interface WorkspaceOptions {
   model?: string;
-  agent?: string;
+  agent?: Record<string, unknown>;
+  default_agent?: string;
 }
 
 export interface WorkspaceInfo {
@@ -119,6 +120,9 @@ export class WorkspaceFactory {
 
     if (options?.agent) {
       opencodeConfig.agent = options.agent;
+    }
+    if (options?.default_agent) {
+      opencodeConfig.default_agent = options.default_agent;
     }
 
     writeFileSync(
