@@ -50,21 +50,43 @@ describe('WorkspaceFactory', () => {
     });
     expect(content.model).toBeUndefined();
     expect(content.agent).toBeUndefined();
+    expect(content.default_agent).toBeUndefined();
   });
 
-  it('should include model and agent in opencode.json when provided', () => {
+  it('should include model, agent and default_agent in opencode.json when provided', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
       defaultPermissions: {},
     });
 
-    factory.create('conv-003', { model: 'anthropic/claude-3-5-sonnet', agent: 'build' });
+    factory.create('conv-003', {
+      model: 'anthropic/claude-3-5-sonnet',
+      agent: { moderator: { description: 'moderator agent' } },
+      default_agent: 'moderator',
+    });
 
     const configPath = join(TEST_BASE_PATH, 'conv-003', '.opencode', 'opencode.json');
     const content = JSON.parse(readFileSync(configPath, 'utf-8'));
 
     expect(content.model).toBe('anthropic/claude-3-5-sonnet');
-    expect(content.agent).toBe('build');
+    expect(content.agent).toEqual({ moderator: { description: 'moderator agent' } });
+    expect(content.default_agent).toBe('moderator');
+  });
+
+  it('should set default_agent without agent object', () => {
+    const factory = new WorkspaceFactory({
+      basePath: 'test-workspace',
+      defaultPermissions: {},
+    });
+
+    factory.create('conv-defagent', { default_agent: 'plan' });
+
+    const configPath = join(TEST_BASE_PATH, 'conv-defagent', '.opencode', 'opencode.json');
+    const content = JSON.parse(readFileSync(configPath, 'utf-8'));
+
+    expect(content.model).toBeUndefined();
+    expect(content.agent).toBeUndefined();
+    expect(content.default_agent).toBe('plan');
   });
 
   it('should sanitize id to prevent path traversal', () => {
