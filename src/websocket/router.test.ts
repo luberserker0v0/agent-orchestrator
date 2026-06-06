@@ -137,6 +137,7 @@ describe('WSRouter', () => {
         }),
         listMessages: vi.fn().mockResolvedValue([{ id: 'msg_1', text: 'Hello' }]),
         abortSession: vi.fn().mockResolvedValue(true),
+        createSession: vi.fn().mockResolvedValue({ id: 'ses_new', title: 'custom', status: 'active', created_at: '2026-01-01', updated_at: '2026-01-01' }),
       },
       ...overrides,
     };
@@ -340,6 +341,79 @@ describe('WSRouter', () => {
       }
     });
     expect(resultCall).toBeDefined();
+  });
+
+  it('handles session.create', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 25,
+          method: 'session.create',
+          params: { title: 'custom', parentID: 'ses_1' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(instance.client.createSession).toHaveBeenCalledWith({ title: 'custom', parentID: 'ses_1' });
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 25 && parsed.result?.id === 'ses_new';
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('rejects session.create when conversation is not running', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    mockConversationState.get.mockReturnValue({ status: 'prepared' });
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 26,
+          method: 'session.create',
+          params: { title: 'custom' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(instance.client.createSession).not.toHaveBeenCalled();
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 26 && parsed.error?.message?.includes('not running');
+      } catch {
+        return false;
+      }
+    });
+    expect(errorCall).toBeDefined();
   });
 
   it('throws on unknown method', async () => {

@@ -113,7 +113,7 @@ export class WSRouter {
     }
 
     // Session-scoped methods require running instance
-    const needsRunning = ['message.send', 'message.history', 'session.abort'].includes(method);
+    const needsRunning = ['message.send', 'message.history', 'session.create', 'session.abort'].includes(method);
     if (needsRunning) {
       if (state.status !== 'running') {
         throw new Error(`Conversation is not running (status: ${state.status})`);
