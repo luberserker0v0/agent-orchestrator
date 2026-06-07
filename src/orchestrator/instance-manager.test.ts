@@ -268,28 +268,6 @@ describe('InstanceManager', () => {
       );
     });
 
-    it('stores defaultModel and defaultAgent in instance info', async () => {
-      const mockProc = createMockProc();
-      mockedSpawn.mockReturnValue(mockProc as any);
-      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
-      mockCreateSession.mockResolvedValue({
-        id: 'ses_opt',
-        title: null,
-        parent_id: null,
-        status: 'active',
-        created_at: '',
-        updated_at: '',
-      });
-
-      const info = await instanceManager.createInstance('conv-opt', {
-        model: 'anthropic/claude-3-5-sonnet',
-        agent: { build: { description: 'build agent' } },
-        default_agent: 'build',
-      });
-
-      expect(info.defaultModel).toBe('anthropic/claude-3-5-sonnet');
-      expect(info.defaultAgent).toBe('build');
-    });
   });
 
   describe('getInstance', () => {

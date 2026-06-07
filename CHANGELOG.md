@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- feat(orchestrator): remove `model`/`agent`/`default_agent` from `POST /api/conversations`; opencode.json only modified via dedicated config endpoints
+- feat(router): drop `instance.defaultModel`/`defaultAgent` fallback in `message.send`; rely on opencode.json values
+
 ### Added
 
 - feat(http-api): add dedicated AGENTS.md injection endpoints (`PUT/GET/DELETE /api/conversations/:id/agent/config`) with WS RPC (`agent.config.write/get/delete`)

@@ -131,8 +131,6 @@ describe('WSRouter', () => {
       id: 'conv-001',
       port: 30000,
       sessionId: 'ses_1',
-      defaultModel: 'anthropic/claude',
-      defaultAgent: 'build',
       client: {
         sendPrompt: vi.fn().mockResolvedValue({
           info: { id: 'msg_1' },
@@ -246,7 +244,7 @@ describe('WSRouter', () => {
     expect(parsed.result.text).toBe('Hello');
   });
 
-  it('handles message.send with instance defaults', async () => {
+  it('handles message.send without model/agent params', async () => {
     const mockWs = createMockWebSocket();
     const instance = createMockInstance();
     mockInstanceManager.getInstance.mockReturnValue(instance);
@@ -269,8 +267,8 @@ describe('WSRouter', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(instance.client.sendPrompt).toHaveBeenCalledWith('ses_1', {
-      model: { providerID: 'anthropic', modelID: 'claude' },
-      agent: 'build',
+      model: undefined,
+      agent: undefined,
       parts: [{ type: 'text', text: 'Hello' }],
     });
   });
