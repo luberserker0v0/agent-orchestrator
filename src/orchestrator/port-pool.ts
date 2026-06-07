@@ -1,5 +1,16 @@
+import { createServer } from 'node:net';
 import { logger } from '../utils/logger.js';
 import { portPoolAvailable } from '../metrics/registry.js';
+
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.on('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
 
 export class PortPool {
   private available: number[];
@@ -14,15 +25,19 @@ export class PortPool {
     logger.info(`PortPool initialized: ${start}-${end} (${this.available.length} ports)`);
   }
 
-  allocate(): number | null {
-    const port = this.available.shift();
-    if (port === undefined) {
-      return null;
+  async allocate(): Promise<number | null> {
+    while (this.available.length > 0) {
+      const port = this.available.shift()!;
+      if (await isPortFree(port)) {
+        this.inUse.add(port);
+        portPoolAvailable.set(this.available.length);
+        logger.info(`Port allocated: ${port} (available: ${this.available.length})`);
+        return port;
+      }
+      // Port is in use by another process, skip it permanently
+      logger.warn(`Port ${port} is already in use, skipping`);
     }
-    this.inUse.add(port);
-    portPoolAvailable.set(this.available.length);
-    logger.info(`Port allocated: ${port} (available: ${this.available.length})`);
-    return port;
+    return null;
   }
 
   release(port: number): void {
