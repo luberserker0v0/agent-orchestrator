@@ -40,6 +40,8 @@ Event Stream (WebSocket push via conversationState.subscribe):
   conversation.prepared
   conversation.starting
   conversation.running
+  conversation.ready
+  conversation.readyLost
   conversation.stopped
   conversation.restarting
   conversation.destroyed
@@ -143,18 +145,35 @@ AgentOrchestrator
       ▼
 ┌───────────┐     ┌──────────┐     ┌─────────────┐     ┌──────────┐
 │ Starting  │────▶│ Spawning │────▶│ Health Check │────▶│ Running  │
-│           │     │(spawn    │     │(poll /global │     │(session  │
+│           │     │(spawn    │     │(poll /global  │     │(session  │
 │           │     │ opencode │     │  /health)    │     │ created) │
-└─────┬─────┘     └──────────┘     └─────────────┘     └────┬─────┘
+└───────────┘     └──────────┘     └─────────────┘     └────┬─────┘
+                                                             │
+                                                startReadyCheck()
+                                                             │
+                                                             ▼
+                                                    ┌──────────────┐
+                                              ┌───▶│   Ready      │
+                                              │    │(session GET  │
+                                              │    │ succeed)     │
+                                              │    └──────────────┘
+                                              │           │
+                                              │           │ keepalive fail
+                                              │           ▼
+                                              │    ┌──────────────┐
+                                              └────│  Ready Lost  │
+                                                   │(session GET  │
+                                                   │  failed)     │
+                                                   └──────────────┘
       │                                                     │
-      │ POST /stop                                            │ POST /restart
+      │ POST /stop                                           │ POST /restart
       ▼                                                     ▼
 ┌───────────┐                                          ┌───────────┐
 │ Stopped   │                                          │ Restarting│
 │(process   │                                          │(stop old  │
-│ killed,   │                                          │ process, │
-│ workspace │                                          │ keep ws, │
-│ kept)     │                                          │ respawn) │
+│ killed,   │                                          │ process,  │
+│ workspace │                                          │ keep ws,  │
+│ kept)     │                                          │ respawn)  │
 └─────┬─────┘                                          └─────┬─────┘
       │                                                     │
       └────────────────────────┬────────────────────────────┘
@@ -189,8 +208,11 @@ AgentOrchestrator
 | `subscribe(id, callback)` | WebSocket 訂閱事件流；回傳 unsubscribe 函式 |
 | `getRecentEvents(id)` | 取得最近 100 條事件（供 REST `GET /events` 與重連時回放） |
 | `emitEvent(id, type, payload?)` | 內部發射事件並寫入歷史 |
+| `startReadyCheck(id)` | 啟動 `isReady` 輪詢：透過 `GET /session/{id}` 確認 OpenCode 已就緒；成功後 emit `conversation.ready`，後續 keepalive 失敗時 emit `conversation.readyLost` |
 
 **`ConversationStatus`**：`prepared` → `starting` → `running` → `stopped` / `restarting` → `destroyed`
+
+**額外欄位**：`ready`（boolean）－表示 OpenCode 實例是否已通過就緒檢查。`message.send` 需要 `ready === true` 才能執行。
 
 ---
 
