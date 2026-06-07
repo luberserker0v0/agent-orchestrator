@@ -81,4 +81,74 @@ describe('validateConfig', () => {
     });
     expect(() => validateConfig(config)).toThrow('shutdownTimeoutMs must be a positive integer');
   });
+
+  it('rejects negative server.port', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, port: -1 },
+    });
+    expect(() => validateConfig(config)).toThrow('server.port must be a non-negative integer');
+  });
+
+  it('rejects non-integer server.port', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, port: 1.5 },
+    });
+    expect(() => validateConfig(config)).toThrow('server.port must be a non-negative integer');
+  });
+
+  it('rejects empty server.host', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, host: '' },
+    });
+    expect(() => validateConfig(config)).toThrow('server.host must be a non-empty string');
+  });
+
+  it('rejects non-positive websocket.heartbeatIntervalMs', () => {
+    const config = createValidConfig({
+      websocket: { ...createValidConfig().websocket, heartbeatIntervalMs: 0 },
+    });
+    expect(() => validateConfig(config)).toThrow('heartbeatIntervalMs must be positive');
+  });
+
+  it('rejects non-positive websocket.idleTimeoutMs', () => {
+    const config = createValidConfig({
+      websocket: { ...createValidConfig().websocket, idleTimeoutMs: 0 },
+    });
+    expect(() => validateConfig(config)).toThrow('idleTimeoutMs must be positive');
+  });
+
+  it('rejects non-positive orchestrator.portRange.start', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, portRange: { start: 0, end: 100 } },
+    });
+    expect(() => validateConfig(config)).toThrow('portRange.start must be a positive integer');
+  });
+
+  it('rejects non-positive orchestrator.portRange.end', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, portRange: { start: 100, end: 0 } },
+    });
+    expect(() => validateConfig(config)).toThrow('portRange.end must be a positive integer');
+  });
+
+  it('rejects non-positive healthCheck.retries', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 0, intervalMs: 500 } },
+    });
+    expect(() => validateConfig(config)).toThrow('healthCheck.retries must be a positive integer');
+  });
+
+  it('rejects non-positive healthCheck.intervalMs', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 10, intervalMs: 0 } },
+    });
+    expect(() => validateConfig(config)).toThrow('healthCheck.intervalMs must be positive');
+  });
+
+  it('rejects empty workspace.basePath', () => {
+    const config = createValidConfig({
+      workspace: { basePath: '', defaultPermissions: {} },
+    });
+    expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
+  });
 });

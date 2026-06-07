@@ -141,4 +141,47 @@ describe('WSConnection', () => {
     vi.advanceTimersByTime(10000);
     expect(mockWs.close).toHaveBeenCalledWith(1000, 'Idle timeout');
   });
+
+  it('sends error for non-Error handler throw', async () => {
+    handler.mockRejectedValue('string error message');
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'fail' })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWs.send).toHaveBeenCalledWith(
+      JSON.stringify({ jsonrpc: '2.0', id: 5, error: { code: -32000, message: 'string error message' } })
+    );
+  });
+
+  it('does not send error response for notification that throws', async () => {
+    handler.mockRejectedValue(new Error('no id for you'));
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({ jsonrpc: '2.0', method: 'fail' })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const calls = mockWs.send.mock.calls as string[][];
+    const hasError = calls.some((c) => {
+      try { const p = JSON.parse(c[0]); return p.error !== undefined; } catch { return false; }
+    });
+    expect(hasError).toBe(false);
+  });
+
+  it('sendEvent() does nothing when socket is not OPEN', () => {
+    mockWs.readyState = 2;
+    connection.sendEvent('typing', { active: true });
+    expect(mockWs.send).not.toHaveBeenCalled();
+  });
+
+  it('close() works with CONNECTING state', () => {
+    mockWs.readyState = 0;
+    connection.close(1001, 'Going away');
+    expect(mockWs.close).toHaveBeenCalledWith(1001, 'Going away');
+  });
+
+  it('close() twice does not throw', () => {
+    connection.close();
+    expect(() => connection.close()).not.toThrow();
+  });
 });
