@@ -22,7 +22,6 @@ export interface InstanceInfo {
   client: OpenCodeClient;
   sessionId: string;
   lastUsedAt: number;
-  isReady: boolean;
 }
 
 export class InstanceManager {
@@ -50,11 +49,11 @@ export class InstanceManager {
     }
 
     // Try allocate; if exhausted, evict LRU and retry once
-    let port = this.portPool.allocate();
+    let port = await this.portPool.allocate();
     if (port === null) {
       if (this.instances.size > 0) {
         await this.evictLRU();
-        port = this.portPool.allocate();
+        port = await this.portPool.allocate();
       }
       if (port === null) {
         throw new Error('No available ports in pool');
@@ -150,7 +149,6 @@ export class InstanceManager {
       client,
       sessionId,
       lastUsedAt: Date.now(),
-      isReady: true,
     };
 
     this.instances.set(id, instance);
@@ -172,12 +170,11 @@ export class InstanceManager {
     await this.cleanupInstance(id, true);
   }
 
-  listInstances(): Pick<InstanceInfo, 'id' | 'port' | 'lastUsedAt' | 'isReady'>[] {
+  listInstances(): Pick<InstanceInfo, 'id' | 'port' | 'lastUsedAt'>[] {
     return Array.from(this.instances.values()).map((inst) => ({
       id: inst.id,
       port: inst.port,
       lastUsedAt: inst.lastUsedAt,
-      isReady: inst.isReady,
     }));
   }
 

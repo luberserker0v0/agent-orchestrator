@@ -142,9 +142,11 @@ export function createHttpServer(
         port: instance.port,
         sessionId: instance.sessionId,
       });
+      conversationState.startReadyCheck(id);
       res.json({
         id,
         status: 'running',
+        ready: false,
         port: instance.port,
         sessionId: instance.sessionId,
         wsUrl: state.wsUrl,
@@ -216,9 +218,11 @@ export function createHttpServer(
         port: instance.port,
         sessionId: instance.sessionId,
       });
+      conversationState.startReadyCheck(id);
       res.json({
         id,
         status: 'running',
+        ready: false,
         port: instance.port,
         sessionId: instance.sessionId,
         wsUrl: state.wsUrl,
@@ -255,6 +259,7 @@ export function createHttpServer(
     const conversations = conversationState.list().map((s) => ({
       id: s.id,
       status: s.status,
+      ready: s.ready,
       needsRestart: s.needsRestart,
       port: s.port,
       sessionId: s.sessionId,
@@ -263,6 +268,24 @@ export function createHttpServer(
       updatedAt: s.updatedAt,
     }));
     res.json(conversations);
+  });
+
+  // Get single conversation
+  app.get('/api/conversations/:id', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+    const s = conversationState.get(id)!;
+    res.json({
+      id: s.id,
+      status: s.status,
+      ready: s.ready,
+      needsRestart: s.needsRestart,
+      port: s.port,
+      sessionId: s.sessionId,
+      wsUrl: s.wsUrl,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    });
   });
 
   // Get conversation events
@@ -559,9 +582,19 @@ export function createHttpServer(
     return true;
   }
 
+  function ensureReady(res: Response, id: string): boolean {
+    if (!ensureRunning(res, id)) return false;
+    const state = conversationState.get(id)!;
+    if (!state.ready) {
+      res.status(409).json({ error: 'Instance is not ready yet. OpenCode is still initializing.' });
+      return false;
+    }
+    return true;
+  }
+
   app.post('/api/conversations/:id/sessions', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureRunning(res, id)) return;
+    if (!ensureReady(res, id)) return;
 
     try {
       const instance = instanceManager.getInstance(id);
@@ -581,7 +614,7 @@ export function createHttpServer(
 
   app.get('/api/conversations/:id/sessions', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureRunning(res, id)) return;
+    if (!ensureReady(res, id)) return;
 
     try {
       const instance = instanceManager.getInstance(id);
@@ -598,7 +631,7 @@ export function createHttpServer(
 
   app.get('/api/conversations/:id/sessions/:sid', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureRunning(res, id)) return;
+    if (!ensureReady(res, id)) return;
 
     try {
       const instance = instanceManager.getInstance(id);
@@ -615,7 +648,7 @@ export function createHttpServer(
 
   app.get('/api/conversations/:id/sessions/:sid/children', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureRunning(res, id)) return;
+    if (!ensureReady(res, id)) return;
 
     try {
       const instance = instanceManager.getInstance(id);
@@ -632,7 +665,7 @@ export function createHttpServer(
 
   app.post('/api/conversations/:id/sessions/:sid/fork', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureRunning(res, id)) return;
+    if (!ensureReady(res, id)) return;
 
     try {
       const instance = instanceManager.getInstance(id);
@@ -649,7 +682,7 @@ export function createHttpServer(
 
   app.delete('/api/conversations/:id/sessions/:sid', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureRunning(res, id)) return;
+    if (!ensureReady(res, id)) return;
 
     try {
       const instance = instanceManager.getInstance(id);
@@ -668,7 +701,7 @@ export function createHttpServer(
 
   app.post('/api/conversations/:id/message', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureRunning(res, id)) return;
+    if (!ensureReady(res, id)) return;
 
     const { text, model: rawModel, agent: rawAgent } = req.body as { text?: string; model?: string; agent?: string };
     if (!text || typeof text !== 'string') {

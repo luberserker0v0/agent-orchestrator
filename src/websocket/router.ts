@@ -118,6 +118,9 @@ export class WSRouter {
       if (state.status !== 'running') {
         throw new Error(`Conversation is not running (status: ${state.status})`);
       }
+      if (method === 'message.send' && !state.ready) {
+        throw new Error('Instance not ready yet');
+      }
     }
 
     const instance = this.instanceManager.getInstance(conversationId);
