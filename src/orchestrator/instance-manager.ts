@@ -7,7 +7,7 @@ import { logger } from '../utils/logger.js';
 import { OpenCodeClient } from '../opencode-http/client.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { PortPool } from './port-pool.js';
-import { WorkspaceFactory, type WorkspaceInfo, type WorkspaceOptions } from './workspace-factory.js';
+import { WorkspaceFactory, type WorkspaceInfo } from './workspace-factory.js';
 import { instancesActive, instancesTotalCreated } from '../metrics/registry.js';
 
 function generatePassword(): string {
@@ -23,8 +23,6 @@ export interface InstanceInfo {
   sessionId: string;
   lastUsedAt: number;
   isReady: boolean;
-  defaultModel?: string;
-  defaultAgent?: string;
 }
 
 export class InstanceManager {
@@ -41,7 +39,7 @@ export class InstanceManager {
     this.startIdleSweep();
   }
 
-  async createInstance(id: string, options?: WorkspaceOptions): Promise<InstanceInfo> {
+  async createInstance(id: string): Promise<InstanceInfo> {
     if (this.instances.has(id)) {
       throw new Error(`Instance already exists: ${id}`);
     }
@@ -68,7 +66,7 @@ export class InstanceManager {
       if (this.workspaceFactory.hasWorkspace(id)) {
         workspace = this.workspaceFactory.ensure(id);
       } else {
-        workspace = this.workspaceFactory.create(id, options);
+        workspace = this.workspaceFactory.create(id);
       }
     } catch (err) {
       this.portPool.release(port);
@@ -153,8 +151,6 @@ export class InstanceManager {
       sessionId,
       lastUsedAt: Date.now(),
       isReady: true,
-      defaultModel: options?.model,
-      defaultAgent: options?.default_agent,
     };
 
     this.instances.set(id, instance);

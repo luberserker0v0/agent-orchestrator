@@ -24,14 +24,10 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 **請求**：
 ```json
 {
-  "id": "my-conversation-001",
-  "model": "anthropic/claude-3-5-sonnet",
-  "agent": "build"
+  "id": "my-conversation-001"
 }
 ```
 - `id`：可省略，由系統自動生成 UUID
-- `model`（可選）：指定該對話的預設模型，格式為 `providerID/modelID`，寫入 `opencode.json`
-- `agent`（可選）：指定該對話的預設代理
 
 **回應**（`201 Created`）：
 ```json

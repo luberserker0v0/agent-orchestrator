@@ -110,10 +110,9 @@ npm run lint
 ### 範例
 
 ```
-feat(orchestrator): add model selection per conversation
+feat(http-api): add config endpoints for opencode.json injection
 
-Support specifying default model and agent when creating a conversation.
-The model string is written to workspace/{id}/.opencode/opencode.json.
+Support writing workspace opencode.json via dedicated REST endpoints.
 
 fix(websocket): resolve model fallback logic in message.send
 

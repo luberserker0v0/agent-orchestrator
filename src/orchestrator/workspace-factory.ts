@@ -14,12 +14,6 @@ import { randomUUID, createHash } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { WorkspaceConfig } from '../config-loader.js';
 
-export interface WorkspaceOptions {
-  model?: string;
-  agent?: Record<string, unknown>;
-  default_agent?: string;
-}
-
 export interface WorkspaceInfo {
   id: string;
   path: string;
@@ -102,7 +96,7 @@ export class WorkspaceFactory {
     ];
   }
 
-  create(id?: string, options?: WorkspaceOptions): WorkspaceInfo {
+  create(id?: string): WorkspaceInfo {
     const wsId = id ? sanitizeId(id) : randomUUID();
     const wsPath = join(this.basePath, wsId);
     const opencodeDir = join(wsPath, '.opencode');
@@ -113,17 +107,6 @@ export class WorkspaceFactory {
       $schema: 'https://opencode.ai/config.json',
       permission: this.defaultPermissions,
     };
-
-    if (options?.model) {
-      opencodeConfig.model = options.model;
-    }
-
-    if (options?.agent) {
-      opencodeConfig.agent = options.agent;
-    }
-    if (options?.default_agent) {
-      opencodeConfig.default_agent = options.default_agent;
-    }
 
     writeFileSync(
       join(opencodeDir, 'opencode.json'),
