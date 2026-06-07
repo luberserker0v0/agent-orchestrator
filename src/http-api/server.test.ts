@@ -653,6 +653,83 @@ describe('HTTP API Server', () => {
     expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md deleted');
   });
 
+  it('POST /api/conversations/:id/message sends text and returns result', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    const sendPrompt = vi.fn().mockResolvedValue({
+      info: { id: 'msg_1', role: 'assistant', session_id: 'ses_1', created_at: '', updated_at: '' },
+      parts: [{ type: 'text', text: 'Hello back!' }],
+    });
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: { sendPrompt } });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/message')
+      .send({ text: 'Hello' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.messageId).toBe('msg_1');
+    expect(res.body.text).toBe('Hello back!');
+    expect(res.body.parts).toEqual([{ type: 'text', text: 'Hello back!' }]);
+    expect(sendPrompt).toHaveBeenCalledWith('ses_1', {
+      model: undefined,
+      agent: undefined,
+      parts: [{ type: 'text', text: 'Hello' }],
+    });
+  });
+
+  it('POST /api/conversations/:id/message passes model and agent to OpenCode', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    const sendPrompt = vi.fn().mockResolvedValue({
+      info: { id: 'msg_2', role: 'assistant', session_id: 'ses_1', created_at: '', updated_at: '' },
+      parts: [{ type: 'text', text: 'Done' }],
+    });
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: { sendPrompt } });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/message')
+      .send({ text: 'Build it', model: 'google/gemini-2.0', agent: 'build' });
+
+    expect(res.status).toBe(200);
+    expect(sendPrompt).toHaveBeenCalledWith('ses_1', {
+      model: { providerID: 'google', modelID: 'gemini-2.0' },
+      agent: 'build',
+      parts: [{ type: 'text', text: 'Build it' }],
+    });
+  });
+
+  it('POST /api/conversations/:id/message returns 400 for missing text', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/message')
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('text');
+  });
+
+  it('POST /api/conversations/:id/message returns 409 when not running', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/message')
+      .send({ text: 'Hi' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('not running');
+  });
+
+  it('POST /api/conversations/:id/message returns 500 when instance reference lost', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockInstanceManager.getInstance.mockReturnValue(undefined);
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/message')
+      .send({ text: 'Hi' });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('Instance reference lost');
+  });
+
   it('closeWebSockets does not throw', () => {
     expect(() => httpServer.closeWebSockets()).not.toThrow();
   });

@@ -664,6 +664,52 @@ export function createHttpServer(
     }
   });
 
+  // ─── Message ───────────────────────────────────────────
+
+  app.post('/api/conversations/:id/message', async (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureRunning(res, id)) return;
+
+    const { text, model: rawModel, agent: rawAgent } = req.body as { text?: string; model?: string; agent?: string };
+    if (!text || typeof text !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid text field' });
+      return;
+    }
+
+    try {
+      const instance = instanceManager.getInstance(id);
+      if (!instance) {
+        res.status(500).json({ error: 'Instance reference lost' });
+        return;
+      }
+
+      let model: { providerID: string; modelID: string } | undefined;
+      if (rawModel && typeof rawModel === 'string') {
+        const parts = rawModel.split('/');
+        if (parts.length >= 2) {
+          model = { providerID: parts[0], modelID: parts.slice(1).join('/') };
+        }
+      }
+
+      const agent = typeof rawAgent === 'string' ? rawAgent : undefined;
+
+      const response = await instance.client.sendPrompt(instance.sessionId, {
+        model,
+        agent,
+        parts: [{ type: 'text', text }],
+      });
+
+      const texts = response.parts
+        .filter((p) => p.type === 'text')
+        .map((p) => (p as { text: string }).text)
+        .join('');
+
+      res.json({ messageId: response.info.id, text: texts, parts: response.parts });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // ─── Skills ────────────────────────────────────────────
 
   // Upload skill as zip archive
