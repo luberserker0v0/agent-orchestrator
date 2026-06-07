@@ -312,6 +312,27 @@ export function createHttpServer(
     }
   });
 
+  // POST config (write raw JSON as full opencode.json replacement)
+  app.post('/api/conversations/:id/config', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    try {
+      const config = req.body;
+      if (typeof config !== 'object' || config === null) {
+        res.status(400).json({ error: 'Request body must be a JSON object' });
+        return;
+      }
+      workspaceFactory.writeConfig(id, config);
+      markNeedsRestartIfRunning(id, 'opencode.json changed');
+      conversationState.emitEvent(id, 'conversation.configChanged', { changedFiles: ['.opencode/opencode.json'] });
+      res.status(204).send();
+    } catch (err) {
+      logger.error(`Failed to write config for ${id}:`, err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // ─── Agents ────────────────────────────────────────────
 
   app.put('/api/conversations/:id/agents', (req: Request, res: Response) => {
@@ -375,6 +396,60 @@ export function createHttpServer(
       });
       res.status(204).send();
     } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─── AGENTS.md ─────────────────────────────────────────
+
+  app.put('/api/conversations/:id/agent/config', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    const content = typeof req.body.content === 'string' ? req.body.content : undefined;
+    if (content === undefined) {
+      res.status(400).json({ error: 'Missing content' });
+      return;
+    }
+
+    try {
+      workspaceFactory.writeAgentsMd(id, content);
+      markNeedsRestartIfRunning(id, 'AGENTS.md updated');
+      conversationState.emitEvent(id, 'conversation.configChanged', {
+        changedFiles: ['AGENTS.md'],
+      });
+      res.status(204).send();
+    } catch (err) {
+      logger.error(`Failed to write AGENTS.md for ${id}:`, err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/conversations/:id/agent/config', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    try {
+      const content = workspaceFactory.readAgentsMd(id);
+      res.json({ content });
+    } catch (err) {
+      res.status(404).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete('/api/conversations/:id/agent/config', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    try {
+      workspaceFactory.deleteAgentsMd(id);
+      markNeedsRestartIfRunning(id, 'AGENTS.md deleted');
+      conversationState.emitEvent(id, 'conversation.configChanged', {
+        changedFiles: ['AGENTS.md'],
+      });
+      res.status(204).send();
+    } catch (err) {
+      logger.error(`Failed to delete AGENTS.md for ${id}:`, err);
       res.status(500).json({ error: (err as Error).message });
     }
   });
@@ -824,7 +899,8 @@ export function createHttpServer(
   // Global error handler
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error('HTTP error:', err);
-    res.status(500).json({ error: err.message });
+    const status = (err as any).status ?? (err as any).statusCode ?? 500;
+    res.status(status).json({ error: err.message });
   });
 
   // ─── HTTP & WebSocket Server ───────────────────────────

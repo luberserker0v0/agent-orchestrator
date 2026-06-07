@@ -223,6 +223,36 @@ export class WSRouter {
         return { deleted: name };
       }
 
+      // ─── AGENTS.md ─────────────────────────────────────────
+
+      case 'agent.config.write': {
+        const { content } = params as { content: string };
+        if (content === undefined) throw new Error('Missing content');
+        this.workspaceFactory.writeAgentsMd(conversationId, content);
+        if (state.status === 'running') {
+          this.conversationState.markNeedsRestart(conversationId, 'AGENTS.md updated');
+        }
+        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
+          changedFiles: ['AGENTS.md'],
+        });
+        return { written: true };
+      }
+
+      case 'agent.config.get': {
+        return this.workspaceFactory.readAgentsMd(conversationId);
+      }
+
+      case 'agent.config.delete': {
+        this.workspaceFactory.deleteAgentsMd(conversationId);
+        if (state.status === 'running') {
+          this.conversationState.markNeedsRestart(conversationId, 'AGENTS.md deleted');
+        }
+        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
+          changedFiles: ['AGENTS.md'],
+        });
+        return { deleted: true };
+      }
+
       // ─── Files ───────────────────────────────────────────
 
       case 'file.write': {
