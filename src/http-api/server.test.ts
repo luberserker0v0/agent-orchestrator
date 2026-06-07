@@ -736,6 +736,12 @@ describe('HTTP API Server', () => {
     expect(() => httpServer.closeWebSockets()).not.toThrow();
   });
 
+  it('destroys socket for non-WS upgrade request', () => {
+    const mockSocket = { destroy: vi.fn() };
+    server.emit('upgrade', { url: '/api/test' } as any, mockSocket as any, Buffer.alloc(0));
+    expect(mockSocket.destroy).toHaveBeenCalled();
+  });
+
   // ─── Conversation already exists ──────────────────────
 
   it('POST /api/conversations returns 409 when conversation already exists', async () => {

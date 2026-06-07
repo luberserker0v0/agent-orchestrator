@@ -152,3 +152,11 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
   });
 });
+
+describe('loadConfig with env overrides', () => {
+  it('preserves original config when no env override', () => {
+    const config = loadConfig();
+    expect(config.server.port).toBe(0);
+    expect(config.orchestrator.maxInstances).toBe(10);
+  });
+});

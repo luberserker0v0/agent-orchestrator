@@ -184,4 +184,10 @@ describe('WSConnection', () => {
     connection.close();
     expect(() => connection.close()).not.toThrow();
   });
+
+  it('does not close socket when already CLOSED', () => {
+    mockWs.readyState = 3;
+    connection.close(1000, 'Already closed');
+    expect(mockWs.close).not.toHaveBeenCalled();
+  });
 });
