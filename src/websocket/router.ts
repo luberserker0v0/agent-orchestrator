@@ -129,7 +129,7 @@ export class WSRouter {
         if (!text) throw new Error('Missing text parameter');
 
         let model: { providerID: string; modelID: string } | undefined;
-        const modelStr = rawModel ?? instance.defaultModel;
+        const modelStr = rawModel;
         if (modelStr) {
           const parts = modelStr.split('/');
           if (parts.length >= 2) {
@@ -137,7 +137,7 @@ export class WSRouter {
           }
         }
 
-        const agent = rawAgent ?? instance.defaultAgent;
+        const agent = rawAgent;
 
         const response = await instance.client.sendPrompt(instance.sessionId, {
           model,

@@ -99,10 +99,7 @@ export function createHttpServer(
         return;
       }
 
-      const model = typeof req.body.model === 'string' ? req.body.model : undefined;
-      const agent = typeof req.body.agent === 'object' && req.body.agent !== null ? req.body.agent as Record<string, unknown> : undefined;
-      const defaultAgent = typeof req.body.default_agent === 'string' ? req.body.default_agent : undefined;
-      workspaceFactory.create(id, { model, agent, default_agent: defaultAgent });
+      workspaceFactory.create(id);
 
       const wsUrl = `ws://${serverConfig.host}:${serverConfig.port}/ws/${id}`;
       const state = conversationState.create(id, wsUrl);

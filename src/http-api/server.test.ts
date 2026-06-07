@@ -95,7 +95,7 @@ describe('HTTP API Server', () => {
 
     const res = await request(server)
       .post('/api/conversations')
-      .send({ id: 'conv-001', model: 'anthropic/claude', agent: 'build' });
+      .send({ id: 'conv-001' });
 
     expect(res.status).toBe(201);
     expect(res.body.id).toBe('conv-001');
