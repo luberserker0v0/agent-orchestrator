@@ -17,6 +17,23 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 ---
 
+### `GET /metrics`
+
+Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指標。
+
+**回應**（`text/plain`）：Prometheus exposition format
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `agentorchestrator_instances_active` | Gauge | 目前活躍的 OpenCode 實例數 |
+| `agentorchestrator_instances_total_created` | Counter | 啟動以來建立的總實例數 |
+| `agentorchestrator_port_pool_available` | Gauge | 動態端口池中可用端口數 |
+| `agentorchestrator_websocket_connections_active` | Gauge | 活躍的 WebSocket 連線數 |
+| `agentorchestrator_http_requests_total` | Counter | 總 HTTP 請求數（labels: method, status） |
+| `nodejs_*` | Various | Node.js 程序指標（memory, CPU, GC, event loop） |
+
+---
+
 ### `POST /api/conversations`
 
 準備新對話。僅建立 workspace，**不啟動** OpenCode 實例。
@@ -55,10 +72,13 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 ```json
 {
   "status": "running",
+  "ready": false,
   "port": 30000,
   "sessionId": "ses_171df93daffektj6tWpV4EBEmz"
 }
 ```
+
+> `ready` 初始為 `false`，表示 OpenCode 尚未完成初始化。監聽 `conversation.ready` 事件以獲得就緒通知。
 
 **錯誤**：
 - `404`：對話不存在
@@ -565,6 +585,13 @@ references/capabilities.md
 **錯誤**：
 - `400`：缺少 `text`
 - `409`：對話未在 `running` 狀態
+  ```json
+  { "error": "Conversation is not running (status: prepared)" }
+  ```
+- `409`：OpenCode 尚未就緒（仍在初始化中）
+  ```json
+  { "error": "Instance is not ready yet. OpenCode is still initializing." }
+  ```
 - `500`：OpenCode 實例錯誤
 
 ---
@@ -632,11 +659,40 @@ references/capabilities.md
 [
   {
     "id": "my-conversation-001",
+    "status": "running",
+    "ready": false,
     "port": 30000,
-    "lastUsedAt": 1780500965587,
-    "isReady": true
+    "sessionId": "ses_xxx",
+    "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001",
+    "createdAt": 1780500965587,
+    "updatedAt": 1780500965587
   }
 ]
+```
+
+---
+
+### `GET /api/conversations/:id`
+
+取得單一對話的詳細資訊。
+
+**回應**：
+```json
+{
+  "id": "my-conversation-001",
+  "status": "running",
+  "ready": false,
+  "port": 30000,
+  "sessionId": "ses_xxx",
+  "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001",
+  "createdAt": 1780500965587,
+  "updatedAt": 1780500965587
+}
+```
+
+**錯誤**（`404`）：
+```json
+{ "error": "Conversation not found" }
 ```
 
 ---
@@ -781,6 +837,15 @@ references/capabilities.md
   "jsonrpc": "2.0",
   "id": 4,
   "error": { "code": -32001, "message": "Conversation not running" }
+}
+```
+
+**錯誤**（`-32000` server error，OpenCode 尚未就緒）：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "error": { "code": -32000, "message": "Instance not ready yet" }
 }
 ```
 
@@ -1417,11 +1482,13 @@ references/capabilities.md
 | `conversation.prepared` | `POST /api/conversations` 完成 | `{ id }` |
 | `conversation.starting` | `POST /start` 開始 spawn | `{ id }` |
 | `conversation.running` | OpenCode 健康檢查通過 | `{ id, port }` |
+| `conversation.ready` | OpenCode Session 首次可查詢（ready poll 成功） | `{ id }` |
+| `conversation.readyLost` | OpenCode Session 失聯（ready keepalive 失敗） | `{ id }` |
 | `conversation.stopped` | `POST /stop` 完成 | `{ id }` |
 | `conversation.restarting` | `POST /restart` 開始 | `{ id }` |
 | `conversation.destroyed` | `DELETE /:id` 完成 | `{ id }` |
 
-**使用範例**：前端可在收到 `conversation.running` 後才啟用聊天輸入框，確保 OpenCode 已就緒。
+**使用範例**：前端可在收到 `conversation.ready` 後才啟用聊天輸入框，確保 OpenCode 已完全就緒。
 
 ---
 
