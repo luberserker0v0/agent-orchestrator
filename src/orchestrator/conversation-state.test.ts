@@ -101,4 +101,22 @@ describe('ConversationState', () => {
     state.remove('conv-009');
     expect(state.get('conv-009')).toBeUndefined();
   });
+
+  it('should have ready=false for new conversations', () => {
+    const state = new ConversationState();
+    const data = state.create('conv-010');
+    expect(data.ready).toBe(false);
+  });
+
+  it('should cancel ready check on remove', () => {
+    const state = new ConversationState();
+    state.create('conv-011');
+    const mockClient = { getSession: vi.fn() };
+    state.setRunningInstance('conv-011', { process: {} as any, client: mockClient as any });
+    state.setInstanceInfo('conv-011', { sessionId: 'ses_1' });
+    state.startReadyCheck('conv-011');
+    expect(state.get('conv-011')?.ready).toBe(false);
+    state.remove('conv-011');
+    expect(state.get('conv-011')).toBeUndefined();
+  });
 });

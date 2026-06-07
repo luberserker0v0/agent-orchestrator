@@ -20,6 +20,7 @@ export interface ConversationEvent {
 export interface ConversationStateData {
   id: string;
   status: ConversationStatus;
+  ready: boolean;
   needsRestart: boolean;
   port?: number;
   sessionId?: string;
@@ -37,15 +38,25 @@ export interface RunningInstanceInfo {
 
 const MAX_EVENTS = 100;
 
+interface ReadyCheckToken {
+  cancel: () => void;
+}
+
+const READY_CHECK_INTERVAL_MS = 500;
+const READY_CHECK_MAX_RETRIES = 120; // ~60s
+const READY_CHECK_KEEPALIVE_INTERVAL_MS = 5000; // After ready=true, keep alive every 5s
+
 export class ConversationState {
   private states = new Map<string, ConversationStateData>();
   private instances = new Map<string, RunningInstanceInfo>();
   private listeners = new Map<string, Set<(event: ConversationEvent) => void>>();
+  private readyTokens = new Map<string, ReadyCheckToken>();
 
   create(id: string, wsUrl?: string): ConversationStateData {
     const state: ConversationStateData = {
       id,
       status: 'prepared',
+      ready: false,
       needsRestart: false,
       wsUrl,
       events: [],
@@ -70,6 +81,7 @@ export class ConversationState {
   }
 
   remove(id: string): void {
+    this.cancelReadyCheck(id);
     this.states.delete(id);
     this.instances.delete(id);
     this.listeners.delete(id);
@@ -119,6 +131,80 @@ export class ConversationState {
     if (!state) return;
     state.needsRestart = false;
     state.updatedAt = Date.now();
+  }
+
+  cancelReadyCheck(id: string): void {
+    const token = this.readyTokens.get(id);
+    if (token) {
+      token.cancel();
+      this.readyTokens.delete(id);
+    }
+  }
+
+  startReadyCheck(id: string): void {
+    const info = this.instances.get(id);
+    if (!info || !info.client) return;
+
+    let stopped = false;
+    let timer: NodeJS.Timeout | null = null;
+    let retries = 0;
+
+    const scheduleNext = (fn: () => void, ms: number) => {
+      if (!stopped) timer = setTimeout(fn, ms);
+    };
+
+    const poll = async () => {
+      if (stopped) return;
+      retries++;
+
+      try {
+        const sessionId = this.states.get(id)?.sessionId;
+        if (!sessionId) {
+          // sessionId not yet set, retry
+          return scheduleNext(poll, READY_CHECK_INTERVAL_MS);
+        }
+        await info.client!.getSession(sessionId);
+        const state = this.states.get(id);
+        if (state && !stopped) {
+          state.ready = true;
+          state.updatedAt = Date.now();
+          this.emitEvent(id, 'conversation.ready', {});
+          scheduleNext(pollKeepalive, READY_CHECK_KEEPALIVE_INTERVAL_MS);
+        }
+      } catch {
+        if (retries >= READY_CHECK_MAX_RETRIES && !stopped) {
+          this.transition(id, 'error', { error: 'Instance failed to become ready' });
+          return;
+        }
+        scheduleNext(poll, READY_CHECK_INTERVAL_MS);
+      }
+    };
+
+    const pollKeepalive = async () => {
+      if (stopped) return;
+      try {
+        const sessionId = this.states.get(id)?.sessionId;
+        if (!sessionId) return;
+        await info.client!.getSession(sessionId);
+        scheduleNext(pollKeepalive, READY_CHECK_KEEPALIVE_INTERVAL_MS);
+      } catch {
+        const state = this.states.get(id);
+        if (state && !stopped) {
+          state.ready = false;
+          state.updatedAt = Date.now();
+          this.emitEvent(id, 'conversation.readyLost', {});
+        }
+      }
+    };
+
+    timer = setTimeout(poll, READY_CHECK_INTERVAL_MS);
+
+    this.readyTokens.set(id, {
+      cancel: () => {
+        stopped = true;
+        if (timer) clearTimeout(timer);
+      },
+    });
   }
 
   setInstanceInfo(id: string, info: { port?: number; sessionId?: string; wsUrl?: string }): void {

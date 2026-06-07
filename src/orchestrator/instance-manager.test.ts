@@ -145,7 +145,6 @@ describe('InstanceManager', () => {
       expect(info.id).toBe('conv-001');
       expect(info.port).toBe(30000);
       expect(info.sessionId).toBe('ses_test');
-      expect(info.isReady).toBe(true);
       expect(existsSync(info.workspacePath)).toBe(true);
     });
 
@@ -345,7 +344,6 @@ describe('InstanceManager', () => {
       expect(list[0]).toHaveProperty('id', 'conv-list');
       expect(list[0]).toHaveProperty('port');
       expect(list[0]).toHaveProperty('lastUsedAt');
-      expect(list[0]).toHaveProperty('isReady');
       expect(list[0]).not.toHaveProperty('workspacePath');
       expect(list[0]).not.toHaveProperty('process');
     });

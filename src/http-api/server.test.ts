@@ -49,8 +49,8 @@ describe('HTTP API Server', () => {
     };
 
     mockConversationState = {
-      create: vi.fn().mockImplementation((id: string) => ({ id, status: 'prepared', wsUrl: `ws://localhost/ws/${id}` })),
-      get: vi.fn().mockReturnValue({ id: 'test-id', status: 'prepared' }),
+      create: vi.fn().mockImplementation((id: string) => ({ id, status: 'prepared', wsUrl: `ws://localhost/ws/${id}`, ready: false })),
+      get: vi.fn().mockReturnValue({ id: 'test-id', status: 'prepared', ready: false }),
       has: vi.fn().mockReturnValue(true),
       list: vi.fn().mockReturnValue([]),
       remove: vi.fn(),
@@ -63,6 +63,8 @@ describe('HTTP API Server', () => {
       getRecentEvents: vi.fn().mockReturnValue([]),
       subscribe: vi.fn().mockReturnValue(() => {}),
       emitEvent: vi.fn(),
+      startReadyCheck: vi.fn(),
+      cancelReadyCheck: vi.fn(),
     };
 
     mockListModels = vi.fn();
@@ -254,7 +256,7 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/sessions creates a session', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
     const mockClient = { createSession: vi.fn().mockResolvedValue({ id: 'ses_new', title: 'test', status: 'active', created_at: '2026-01-01', updated_at: '2026-01-01' }) };
     mockInstanceManager.getInstance.mockReturnValue({ client: mockClient });
 
@@ -288,7 +290,7 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/sessions returns 500 when instance reference lost', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
     mockInstanceManager.getInstance.mockReturnValue(undefined);
 
     const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
@@ -654,7 +656,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/message sends text and returns result', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
     const sendPrompt = vi.fn().mockResolvedValue({
       info: { id: 'msg_1', role: 'assistant', session_id: 'ses_1', created_at: '', updated_at: '' },
       parts: [{ type: 'text', text: 'Hello back!' }],
@@ -677,7 +679,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/message passes model and agent to OpenCode', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
     const sendPrompt = vi.fn().mockResolvedValue({
       info: { id: 'msg_2', role: 'assistant', session_id: 'ses_1', created_at: '', updated_at: '' },
       parts: [{ type: 'text', text: 'Done' }],
@@ -697,7 +699,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/message returns 400 for missing text', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/message')
@@ -719,7 +721,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/message returns 500 when instance reference lost', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
     mockInstanceManager.getInstance.mockReturnValue(undefined);
 
     const res = await request(server)

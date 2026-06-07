@@ -100,7 +100,7 @@ describe('WSRouter', () => {
 
     mockConversationState = {
       has: vi.fn().mockReturnValue(true),
-      get: vi.fn().mockReturnValue({ status: 'running' }),
+      get: vi.fn().mockReturnValue({ status: 'running', ready: true }),
       markNeedsRestart: vi.fn(),
       emitEvent: vi.fn(),
       subscribe: vi.fn().mockReturnValue(() => {}),
