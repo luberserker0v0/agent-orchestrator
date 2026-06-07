@@ -93,6 +93,9 @@ describe('WSRouter', () => {
       readSkill: vi.fn(),
       getSkillInfo: vi.fn(),
       deleteSkill: vi.fn(),
+      writeAgentsMd: vi.fn(),
+      readAgentsMd: vi.fn(),
+      deleteAgentsMd: vi.fn(),
     };
 
     mockConversationState = {
@@ -860,6 +863,157 @@ describe('WSRouter', () => {
       try {
         const parsed = JSON.parse(call[0]);
         return parsed.id === 27 && parsed.error?.message?.includes('Invalid skill name');
+      } catch {
+        return false;
+      }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles agent.config.write', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 30,
+          method: 'agent.config.write',
+          params: { content: '# Agents\nDesigner agent.' },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.writeAgentsMd).toHaveBeenCalledWith('conv-001', '# Agents\nDesigner agent.');
+    expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md updated');
+    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.configChanged', {
+      changedFiles: ['AGENTS.md'],
+    });
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 30 && parsed.result;
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result).toEqual({ written: true });
+  });
+
+  it('handles agent.config.get', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.readAgentsMd.mockReturnValue('# Agents content');
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 31,
+          method: 'agent.config.get',
+          params: {},
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 31 && parsed.result;
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result).toBe('# Agents content');
+  });
+
+  it('handles agent.config.delete', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 32,
+          method: 'agent.config.delete',
+          params: {},
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.deleteAgentsMd).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md deleted');
+    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.configChanged', {
+      changedFiles: ['AGENTS.md'],
+    });
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 32 && parsed.result;
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result).toEqual({ deleted: true });
+  });
+
+  it('handles agent.config.write with missing content', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 33,
+          method: 'agent.config.write',
+          params: {},
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 33 && parsed.error?.message?.includes('Missing content');
       } catch {
         return false;
       }

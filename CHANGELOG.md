@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(http-api): add dedicated AGENTS.md injection endpoints (`PUT/GET/DELETE /api/conversations/:id/agent/config`) with WS RPC (`agent.config.write/get/delete`)
+- feat(http-api): add `POST /api/conversations/:id/config` for raw JSON opencode.json replacement
 - feat(orchestrator): `ConversationState` with event-driven lifecycle (`prepared` → `starting` → `running` → `stopped`/`restarting` → `destroyed`), subscription model, and recent event replay (max 100).
 - feat(orchestrator): `WorkspaceFactory` workspace reuse (`hasWorkspace`, `ensure`), config/agent/file CRUD, `copyFromLocal` with allowed-source validation, 50MB quota enforcement, and path-traversal blocking.
 - feat(opencode-http): `listSessions()`, `getSessionChildren()`, `forkSession()` for OpenCode session tree traversal.

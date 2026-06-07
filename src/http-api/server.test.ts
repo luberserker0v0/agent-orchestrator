@@ -41,6 +41,9 @@ describe('HTTP API Server', () => {
       readSkill: vi.fn(),
       getSkillInfo: vi.fn(),
       deleteSkill: vi.fn(),
+      writeAgentsMd: vi.fn(),
+      readAgentsMd: vi.fn(),
+      deleteAgentsMd: vi.fn(),
       resolveWorkspacePath: vi.fn().mockReturnValue('/tmp/workspace'),
       assertQuota: vi.fn(),
     };
@@ -576,6 +579,78 @@ describe('HTTP API Server', () => {
       .send(zip.toBuffer());
 
     expect(res.status).toBe(204);
+  });
+
+  it('POST /api/conversations/:id/config writes raw JSON as opencode.json', async () => {
+    const res = await request(server)
+      .post('/api/conversations/conv-001/config')
+      .send({ model: 'test/model', permission: { bash: { '*': 'deny' } } });
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith('conv-001', {
+      model: 'test/model',
+      permission: { bash: { '*': 'deny' } },
+    });
+  });
+
+  it('POST /api/conversations/:id/config returns 400 for non-object body', async () => {
+    const res = await request(server)
+      .post('/api/conversations/conv-001/config')
+      .set('Content-Type', 'application/json')
+      .send('null');
+
+    expect(res.status).toBe(400);
+  });
+
+  it('PUT /api/conversations/:id/agent/config writes AGENTS.md', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+
+    const res = await request(server)
+      .put('/api/conversations/conv-001/agent/config')
+      .send({ content: '# Project Agents\n\nDesigner agent.' });
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.writeAgentsMd).toHaveBeenCalledWith('conv-001', '# Project Agents\n\nDesigner agent.');
+    expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md updated');
+  });
+
+  it('PUT /api/conversations/:id/agent/config returns 400 for missing content', async () => {
+    const res = await request(server)
+      .put('/api/conversations/conv-001/agent/config')
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('content');
+  });
+
+  it('GET /api/conversations/:id/agent/config reads AGENTS.md', async () => {
+    mockWorkspaceFactory.readAgentsMd.mockReturnValue('# Agents');
+
+    const res = await request(server)
+      .get('/api/conversations/conv-001/agent/config');
+
+    expect(res.status).toBe(200);
+    expect(res.body.content).toBe('# Agents');
+  });
+
+  it('GET /api/conversations/:id/agent/config returns 404 when missing', async () => {
+    mockWorkspaceFactory.readAgentsMd.mockImplementation(() => { throw new Error('AGENTS.md not found'); });
+
+    const res = await request(server)
+      .get('/api/conversations/conv-001/agent/config');
+
+    expect(res.status).toBe(404);
+  });
+
+  it('DELETE /api/conversations/:id/agent/config deletes AGENTS.md', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+
+    const res = await request(server)
+      .delete('/api/conversations/conv-001/agent/config');
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.deleteAgentsMd).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md deleted');
   });
 
   it('closeWebSockets does not throw', () => {
