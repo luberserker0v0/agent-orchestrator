@@ -535,6 +535,40 @@ references/capabilities.md
 
 ---
 
+### `POST /api/conversations/:id/message`
+
+發送訊息給正在執行的對話。
+
+**請求**：
+```json
+{
+  "text": "Hello",
+  "model": "anthropic/claude-3-5-sonnet",
+  "agent": "build"
+}
+```
+- `text`（必填）：訊息文字
+- `model`（可選）：指定模型，格式為 `providerID/modelID`
+- `agent`（可選）：指定 agent
+
+**回應**（`200 OK`）：
+```json
+{
+  "messageId": "msg_xxx",
+  "text": "Hi, how can I help?",
+  "parts": [
+    { "type": "text", "text": "Hi, how can I help?" }
+  ]
+}
+```
+
+**錯誤**：
+- `400`：缺少 `text`
+- `409`：對話未在 `running` 狀態
+- `500`：OpenCode 實例錯誤
+
+---
+
 ### `GET /api/conversations/:id/events`
 
 取得對話最近 100 條事件。適用於 WebSocket 重連時的事件回放。
