@@ -7,15 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- feat(orchestrator): remove `model`/`agent`/`default_agent` from `POST /api/conversations`; opencode.json only modified via dedicated config endpoints
-- feat(router): drop `instance.defaultModel`/`defaultAgent` fallback in `message.send`; rely on opencode.json values
-
 ### Added
 
+- feat(conversation-state): add `isReady` state, `startReadyCheck()` polling mechanism, and `conversation.ready`/`conversation.readyLost` events
 - feat(http-api): add `POST /api/conversations/:id/message` for sending text via HTTP REST
-
 - feat(http-api): add dedicated AGENTS.md injection endpoints (`PUT/GET/DELETE /api/conversations/:id/agent/config`) with WS RPC (`agent.config.write/get/delete`)
 - feat(http-api): add `POST /api/conversations/:id/config` for raw JSON opencode.json replacement
 - feat(orchestrator): `ConversationState` with event-driven lifecycle (`prepared` → `starting` → `running` → `stopped`/`restarting` → `destroyed`), subscription model, and recent event replay (max 100).
@@ -25,10 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(websocket): 20+ JSON-RPC methods, event pushing via `conversationState.subscribe()`, prepared-phase connection handling, no auto-create on WS connect.
 - feat(instance-manager): reuse existing workspaces on `createInstance` to preserve pre-configured agents/files across restarts.
 - feat(skills): Skill CRUD API with `POST /skills/upload` (zip archive), `POST /skills/import` (local directory), `GET /skills`, `GET /skills/:name`, `GET /skills/:name/info` (structure + sha256 hash), and `DELETE /skills/:name`. Skills stored as `.opencode/skills/{name}/` directories.
-- test: 149 total tests including new coverage for `conversation-state`, `workspace-factory` CRUD, `client` session tree, `server`/`router` mocks, and skill CRUD.
+- feat(coverage): add vitest coverage config with v8 provider and thresholds (lines 70%, functions 75%, branches 55%, statements 65%)
+- test: 340 total tests including expanded coverage for `router`, `server`, `connection`, `config-loader`, `client`, and `conversation-state`
 
 ### Changed
 
+- feat(orchestrator): remove `model`/`agent`/`default_agent` from `POST /api/conversations`; opencode.json only modified via dedicated config endpoints
+- feat(router): drop `instance.defaultModel`/`defaultAgent` fallback in `message.send`; rely on opencode.json values
 - `POST /api/conversations` now prepares workspace only; `POST /:id/start` spawns the OpenCode process, enabling pre-configuration of agents and files before launch.
 - `message.send` remains conversation-scoped via WebSocket; session-scoped operations (list, fork, delete) moved to HTTP REST endpoints.
 - Skill API now returns more precise 400/403/404/413 errors.
