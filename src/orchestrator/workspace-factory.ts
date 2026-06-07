@@ -221,6 +221,37 @@ export class WorkspaceFactory {
       .map((f) => basename(f, '.md'));
   }
 
+  // ─── AGENTS.md ─────────────────────────────────────────
+
+  writeAgentsMd(id: string, content: string): void {
+    const wsPath = this.resolveWorkspacePath(id);
+    const filePath = join(wsPath, 'AGENTS.md');
+
+    const size = Buffer.byteLength(content, 'utf-8');
+    this.assertQuota(wsPath, size);
+
+    writeFileSync(filePath, content, 'utf-8');
+    logger.info(`AGENTS.md written: ${filePath}`);
+  }
+
+  readAgentsMd(id: string): string {
+    const wsPath = this.resolveWorkspacePath(id);
+    const filePath = join(wsPath, 'AGENTS.md');
+    if (!existsSync(filePath)) {
+      throw new Error('AGENTS.md not found');
+    }
+    return readFileSync(filePath, 'utf-8');
+  }
+
+  deleteAgentsMd(id: string): void {
+    const wsPath = this.resolveWorkspacePath(id);
+    const filePath = join(wsPath, 'AGENTS.md');
+    if (existsSync(filePath)) {
+      rmSync(filePath, { force: true });
+      logger.info(`AGENTS.md deleted: ${filePath}`);
+    }
+  }
+
   // ─── Generic Files ───────────────────────────────────────
 
   writeFile(id: string, relativePath: string, content: string): void {

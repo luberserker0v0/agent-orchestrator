@@ -233,6 +233,83 @@ describe('WorkspaceFactory', () => {
     });
   });
 
+  describe('AGENTS.md CRUD', () => {
+    it('should write and read AGENTS.md', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agentsmd');
+
+      factory.writeAgentsMd('conv-agentsmd', '# Project Context\nThis is a test project.');
+      const content = factory.readAgentsMd('conv-agentsmd');
+      expect(content).toBe('# Project Context\nThis is a test project.');
+    });
+
+    it('should read AGENTS.md at workspace root', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agentsmd-root');
+
+      factory.writeAgentsMd('conv-agentsmd-root', '# Agents Config');
+      const content = factory.readAgentsMd('conv-agentsmd-root');
+
+      // Verify it's at workspace root, not inside .opencode
+      const wsPath = join(TEST_BASE_PATH, 'conv-agentsmd-root');
+      expect(existsSync(join(wsPath, 'AGENTS.md'))).toBe(true);
+      expect(content).toBe('# Agents Config');
+    });
+
+    it('should overwrite existing AGENTS.md', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agentsmd-over');
+
+      factory.writeAgentsMd('conv-agentsmd-over', 'v1 content');
+      factory.writeAgentsMd('conv-agentsmd-over', 'v2 content');
+
+      const content = factory.readAgentsMd('conv-agentsmd-over');
+      expect(content).toBe('v2 content');
+    });
+
+    it('should delete AGENTS.md', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agentsmd-del');
+
+      factory.writeAgentsMd('conv-agentsmd-del', 'to be deleted');
+      factory.deleteAgentsMd('conv-agentsmd-del');
+
+      expect(() => factory.readAgentsMd('conv-agentsmd-del')).toThrow('AGENTS.md not found');
+    });
+
+    it('should throw when reading non-existent AGENTS.md', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agentsmd-miss');
+
+      expect(() => factory.readAgentsMd('conv-agentsmd-miss')).toThrow('AGENTS.md not found');
+    });
+
+    it('should not throw when deleting non-existent AGENTS.md', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-agentsmd-nop');
+
+      expect(() => factory.deleteAgentsMd('conv-agentsmd-nop')).not.toThrow();
+    });
+  });
+
   // ─── Generic Files ───────────────────────────────────────
 
   describe('file CRUD', () => {
