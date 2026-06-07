@@ -735,4 +735,499 @@ describe('HTTP API Server', () => {
   it('closeWebSockets does not throw', () => {
     expect(() => httpServer.closeWebSockets()).not.toThrow();
   });
+
+  it('destroys socket for non-WS upgrade request', () => {
+    const mockSocket = { destroy: vi.fn() };
+    server.emit('upgrade', { url: '/api/test' } as any, mockSocket as any, Buffer.alloc(0));
+    expect(mockSocket.destroy).toHaveBeenCalled();
+  });
+
+  // ─── Conversation already exists ──────────────────────
+
+  it('POST /api/conversations returns 409 when conversation already exists', async () => {
+    mockConversationState.has.mockReturnValue(true);
+
+    const res = await request(server)
+      .post('/api/conversations')
+      .send({ id: 'conv-001' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('already exists');
+  });
+
+  // ─── Stop ──────────────────────────────────────────────
+
+  it('POST /api/conversations/:id/stop stops a running conversation', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+
+    const res = await request(server).post('/api/conversations/conv-001/stop');
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('stopped');
+    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationState.removeRunningInstance).toHaveBeenCalledWith('conv-001');
+  });
+
+  it('POST /api/conversations/:id/stop returns 409 when in prepared status', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+
+    const res = await request(server).post('/api/conversations/conv-001/stop');
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('Cannot stop');
+  });
+
+  it('POST /api/conversations/:id/stop returns 500 on instance destruction failure', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockInstanceManager.destroyInstance.mockRejectedValue(new Error('kill failed'));
+
+    const res = await request(server).post('/api/conversations/conv-001/stop');
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('kill failed');
+  });
+
+  // ─── Restart ───────────────────────────────────────────
+
+  it('POST /api/conversations/:id/restart restarts from stopped status', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30001, sessionId: 'ses_new', process: {}, client: {} });
+
+    const res = await request(server).post('/api/conversations/conv-001/restart');
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('running');
+    expect(mockConversationState.clearNeedsRestart).toHaveBeenCalledWith('conv-001');
+  });
+
+  it('POST /api/conversations/:id/restart restarts from running status', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30002, sessionId: 'ses_new2', process: {}, client: {} });
+
+    const res = await request(server).post('/api/conversations/conv-001/restart');
+
+    expect(res.status).toBe(200);
+    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
+  });
+
+  it('POST /api/conversations/:id/restart returns 409 when in prepared status', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+
+    const res = await request(server).post('/api/conversations/conv-001/restart');
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('Cannot restart');
+  });
+
+  it('POST /api/conversations/:id/restart returns 500 on instance creation failure', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
+    mockInstanceManager.createInstance.mockRejectedValue(new Error('port busy'));
+
+    const res = await request(server).post('/api/conversations/conv-001/restart');
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('port busy');
+  });
+
+  // ─── Single conversation GET ───────────────────────────
+
+  it('GET /api/conversations/:id returns conversation', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://localhost/ws/conv-001', createdAt: 100, updatedAt: 200 });
+
+    const res = await request(server).get('/api/conversations/conv-001');
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe('conv-001');
+    expect(res.body.status).toBe('running');
+    expect(res.body.ready).toBe(true);
+  });
+
+  it('GET /api/conversations/:id returns 404 when not found', async () => {
+    mockConversationState.has.mockReturnValue(false);
+
+    const res = await request(server).get('/api/conversations/conv-001');
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('Conversation not found');
+  });
+
+  // ─── Events ────────────────────────────────────────────
+
+  it('GET /api/conversations/:id/events returns events', async () => {
+    mockConversationState.getRecentEvents.mockReturnValue([
+      { type: 'conversation.started', timestamp: 100 },
+    ]);
+
+    const res = await request(server).get('/api/conversations/conv-001/events');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+  });
+
+  it('GET /api/conversations/:id/events returns 404 when not found', async () => {
+    mockConversationState.has.mockReturnValue(false);
+
+    const res = await request(server).get('/api/conversations/conv-001/events');
+
+    expect(res.status).toBe(404);
+  });
+
+  // ─── Config PATCH ──────────────────────────────────────
+
+  it('PATCH /api/conversations/:id/config updates config', async () => {
+    const res = await request(server)
+      .patch('/api/conversations/conv-001/config')
+      .send({ config: { model: 'new/model' } });
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith('conv-001', { model: 'new/model' });
+  });
+
+  it('PATCH /api/conversations/:id/config returns 400 for missing config', async () => {
+    const res = await request(server)
+      .patch('/api/conversations/conv-001/config')
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing or invalid config');
+  });
+
+  // ─── Config GET ────────────────────────────────────────
+
+  it('GET /api/conversations/:id/config reads config', async () => {
+    mockWorkspaceFactory.readConfig.mockReturnValue({ model: 'test/model' });
+
+    const res = await request(server).get('/api/conversations/conv-001/config');
+
+    expect(res.status).toBe(200);
+    expect(res.body.model).toBe('test/model');
+  });
+
+  it('GET /api/conversations/:id/config returns 500 on read error', async () => {
+    mockWorkspaceFactory.readConfig.mockImplementation(() => { throw new Error('read error'); });
+
+    const res = await request(server).get('/api/conversations/conv-001/config');
+
+    expect(res.status).toBe(500);
+  });
+
+  // ─── POST Config 500 ───────────────────────────────────
+
+  it('POST /api/conversations/:id/config returns 500 on write error', async () => {
+    mockWorkspaceFactory.writeConfig.mockImplementation(() => { throw new Error('write failed'); });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/config')
+      .send({ model: 'test' });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('write failed');
+  });
+
+  // ─── Agents ────────────────────────────────────────────
+
+  it('PUT /api/conversations/:id/agents registers an agent', async () => {
+    const res = await request(server)
+      .put('/api/conversations/conv-001/agents')
+      .send({ name: 'designer', content: 'Designer agent' });
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.writeAgent).toHaveBeenCalledWith('conv-001', 'designer', 'Designer agent');
+  });
+
+  it('PUT /api/conversations/:id/agents returns 400 for missing name or content', async () => {
+    const res = await request(server)
+      .put('/api/conversations/conv-001/agents')
+      .send({ name: 'designer' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing name or content');
+  });
+
+  it('PUT /api/conversations/:id/agents returns 500 on write error', async () => {
+    mockWorkspaceFactory.writeAgent.mockImplementation(() => { throw new Error('write failed'); });
+
+    const res = await request(server)
+      .put('/api/conversations/conv-001/agents')
+      .send({ name: 'designer', content: 'Content' });
+
+    expect(res.status).toBe(500);
+  });
+
+  it('GET /api/conversations/:id/agents lists agents', async () => {
+    mockWorkspaceFactory.listAgents.mockReturnValue(['designer', 'coder']);
+
+    const res = await request(server).get('/api/conversations/conv-001/agents');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(['designer', 'coder']);
+  });
+
+  it('GET /api/conversations/:id/agents/:name reads agent', async () => {
+    mockWorkspaceFactory.readAgent.mockReturnValue('Designer agent content');
+
+    const res = await request(server).get('/api/conversations/conv-001/agents/designer');
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('designer');
+    expect(res.body.content).toBe('Designer agent content');
+  });
+
+  it('GET /api/conversations/:id/agents/:name returns 404 when missing', async () => {
+    mockWorkspaceFactory.readAgent.mockImplementation(() => { throw new Error('Agent not found'); });
+
+    const res = await request(server).get('/api/conversations/conv-001/agents/missing');
+
+    expect(res.status).toBe(404);
+  });
+
+  it('DELETE /api/conversations/:id/agents/:name deletes agent', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+
+    const res = await request(server).delete('/api/conversations/conv-001/agents/designer');
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.deleteAgent).toHaveBeenCalledWith('conv-001', 'designer');
+  });
+
+  it('DELETE /api/conversations/:id/agents/:name returns 500 on error', async () => {
+    mockWorkspaceFactory.deleteAgent.mockImplementation(() => { throw new Error('delete failed'); });
+
+    const res = await request(server).delete('/api/conversations/conv-001/agents/designer');
+
+    expect(res.status).toBe(500);
+  });
+
+  // ─── Files ─────────────────────────────────────────────
+
+  it('PUT /api/conversations/:id/files writes a file', async () => {
+    const res = await request(server)
+      .put('/api/conversations/conv-001/files')
+      .send({ path: 'test.txt', content: 'hello' });
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.writeFile).toHaveBeenCalledWith('conv-001', 'test.txt', 'hello');
+  });
+
+  it('PUT /api/conversations/:id/files returns 400 for missing path or content', async () => {
+    const res = await request(server)
+      .put('/api/conversations/conv-001/files')
+      .send({ path: 'test.txt' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing path or content');
+  });
+
+  it('PUT /api/conversations/:id/files returns 500 on write error', async () => {
+    mockWorkspaceFactory.writeFile.mockImplementation(() => { throw new Error('write failed'); });
+
+    const res = await request(server)
+      .put('/api/conversations/conv-001/files')
+      .send({ path: 'test.txt', content: 'hello' });
+
+    expect(res.status).toBe(500);
+  });
+
+  it('GET /api/conversations/:id/files reads a file', async () => {
+    mockWorkspaceFactory.readFile.mockReturnValue('file content');
+
+    const res = await request(server)
+      .get('/api/conversations/conv-001/files')
+      .send({ path: 'test.txt' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.content).toBe('file content');
+  });
+
+  it('GET /api/conversations/:id/files returns 400 for missing path', async () => {
+    const res = await request(server)
+      .get('/api/conversations/conv-001/files')
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing path');
+  });
+
+  it('GET /api/conversations/:id/files returns 404 when file not found', async () => {
+    mockWorkspaceFactory.readFile.mockImplementation(() => { throw new Error('File not found'); });
+
+    const res = await request(server)
+      .get('/api/conversations/conv-001/files')
+      .send({ path: 'missing.txt' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('DELETE /api/conversations/:id/files deletes a file', async () => {
+    const res = await request(server)
+      .delete('/api/conversations/conv-001/files')
+      .send({ path: 'test.txt' });
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.deleteFile).toHaveBeenCalledWith('conv-001', 'test.txt');
+  });
+
+  it('DELETE /api/conversations/:id/files returns 400 for missing path', async () => {
+    const res = await request(server)
+      .delete('/api/conversations/conv-001/files')
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing path');
+  });
+
+  it('DELETE /api/conversations/:id/files returns 500 on error', async () => {
+    mockWorkspaceFactory.deleteFile.mockImplementation(() => { throw new Error('delete failed'); });
+
+    const res = await request(server)
+      .delete('/api/conversations/conv-001/files')
+      .send({ path: 'test.txt' });
+
+    expect(res.status).toBe(500);
+  });
+
+  it('POST /api/conversations/:id/files/copy copies a file', async () => {
+    const res = await request(server)
+      .post('/api/conversations/conv-001/files/copy')
+      .send({ source: 'src.txt', dest: 'dst.txt' });
+
+    expect(res.status).toBe(204);
+    expect(mockWorkspaceFactory.copyFromLocal).toHaveBeenCalledWith('conv-001', 'src.txt', 'dst.txt');
+  });
+
+  it('POST /api/conversations/:id/files/copy returns 400 for missing source or dest', async () => {
+    const res = await request(server)
+      .post('/api/conversations/conv-001/files/copy')
+      .send({ source: 'src.txt' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Missing source or dest');
+  });
+
+  it('POST /api/conversations/:id/files/copy returns 500 on error', async () => {
+    mockWorkspaceFactory.copyFromLocal.mockImplementation(() => { throw new Error('copy failed'); });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/files/copy')
+      .send({ source: 'src.txt', dest: 'dst.txt' });
+
+    expect(res.status).toBe(500);
+  });
+
+  it('GET /api/conversations/:id/files/list lists files', async () => {
+    mockWorkspaceFactory.listFiles.mockReturnValue(['file1.txt', 'file2.txt']);
+
+    const res = await request(server)
+      .get('/api/conversations/conv-001/files/list')
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.files).toEqual(['file1.txt', 'file2.txt']);
+  });
+
+  // ─── Helpers ──────────────────────────────────────────
+
+  it('ensureConversation returns 404 when conversation not found', async () => {
+    mockConversationState.has.mockReturnValue(false);
+
+    const res = await request(server).post('/api/conversations/conv-001/message').send({ text: 'hi' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('Conversation not found');
+  });
+
+  it('ensureRunning returns 409 when not running for message endpoint', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared', ready: false });
+
+    const res = await request(server).post('/api/conversations/conv-001/message').send({ text: 'hi' });
+
+    expect(res.status).toBe(409);
+  });
+
+  it('ensureReady returns 409 when not ready', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: false });
+
+    const res = await request(server).post('/api/conversations/conv-001/message').send({ text: 'hi' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('not ready');
+  });
+
+  // ─── Session endpoints ─────────────────────────────────
+
+  it('GET /api/conversations/:id/sessions lists sessions', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
+    const mockClient = { listSessions: vi.fn().mockResolvedValue([{ id: 'ses_1' }]) };
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+
+    const res = await request(server).get('/api/conversations/conv-001/sessions');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ id: 'ses_1' }]);
+  });
+
+  it('GET /api/conversations/:id/sessions/:sid gets a session', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
+    const mockClient = { getSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) };
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+
+    const res = await request(server).get('/api/conversations/conv-001/sessions/ses_1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe('ses_1');
+  });
+
+  it('GET /api/conversations/:id/sessions/:sid/children lists session children', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
+    const mockClient = { getSessionChildren: vi.fn().mockResolvedValue([{ id: 'child_1' }]) };
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+
+    const res = await request(server).get('/api/conversations/conv-001/sessions/ses_1/children');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ id: 'child_1' }]);
+  });
+
+  it('POST /api/conversations/:id/sessions/:sid/fork forks a session', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
+    const mockClient = { forkSession: vi.fn().mockResolvedValue({ id: 'forked_ses' }) };
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/sessions/ses_1/fork')
+      .send({ messageID: 'msg_1' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.id).toBe('forked_ses');
+  });
+
+  it('DELETE /api/conversations/:id/sessions/:sid deletes a session', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
+    const mockClient = { deleteSession: vi.fn().mockResolvedValue(undefined) };
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+
+    const res = await request(server).delete('/api/conversations/conv-001/sessions/ses_1');
+
+    expect(res.status).toBe(204);
+  });
+
+  it('DELETE /api/conversations/:id destroys instance when running', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+
+    const res = await request(server).delete('/api/conversations/conv-001');
+
+    expect(res.status).toBe(204);
+    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
+  });
+
+  // ─── Global error handler ──────────────────────────────
+
+  it('global error handler returns 500 on malformed request body', async () => {
+    const res = await request(server)
+      .post('/api/conversations')
+      .set('Content-Type', 'application/json')
+      .send('not json');
+
+    expect(res.status).toBe(400);
+  });
 });

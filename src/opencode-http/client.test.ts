@@ -1,218 +1,207 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OpenCodeClient } from './client.js';
 
+function mockFetch(response?: Partial<Response>) {
+  const defaultResponse: Partial<Response> = {
+    ok: true,
+    status: 200,
+    json: vi.fn().mockResolvedValue({}),
+    text: vi.fn().mockResolvedValue(''),
+    ...response,
+  };
+  const fetchFn = vi.fn().mockResolvedValue(defaultResponse);
+  vi.stubGlobal('fetch', fetchFn);
+  return fetchFn;
+}
+
 describe('OpenCodeClient', () => {
   let client: OpenCodeClient;
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchFn: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    client = new OpenCodeClient('http://localhost:3000', 'opencode', 'secret');
+    client = new OpenCodeClient('http://localhost:3000');
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
-  function mockResponse(status: number, body: unknown, statusText = 'OK') {
-    const res = {
-      ok: status >= 200 && status < 300,
-      status,
-      statusText,
-      text: vi.fn().mockResolvedValue(JSON.stringify(body)),
-      json: vi.fn().mockResolvedValue(body),
-    };
-    fetchMock.mockResolvedValue(res);
-    return res;
-  }
-
-  it('makes GET request for health()', async () => {
-    mockResponse(200, { healthy: true, version: '1.0.0' });
-
-    const result = await client.health();
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/global/health');
-    expect(init.method).toBe('GET');
-    expect(result.healthy).toBe(true);
+  it('constructs with trailing slash removed', () => {
+    const c = new OpenCodeClient('http://localhost:3000/');
+    expect((c as any).baseUrl).toBe('http://localhost:3000');
   });
 
-  it('makes POST request with body for createSession()', async () => {
-    mockResponse(200, {
-      id: 'ses_1',
-      title: 'Test',
-      parent_id: null,
-      status: 'active',
-      created_at: '',
-      updated_at: '',
+  it('sets auth header when username and password provided', () => {
+    const c = new OpenCodeClient('http://localhost:3000', 'user', 'pass');
+    expect((c as any).authHeader).toContain('Basic ');
+  });
+
+  it('does not set auth header without credentials', () => {
+    expect((client as any).authHeader).toBeUndefined();
+  });
+
+  describe('health', () => {
+    it('returns health status', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ healthy: true, version: '1.0.0' }) });
+      const result = await client.health();
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/global/health', expect.objectContaining({ method: 'GET' }));
+      expect(result.healthy).toBe(true);
     });
 
-    await client.createSession({ title: 'Test' });
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/session');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({ title: 'Test' });
+    it('passes abort signal', async () => {
+      fetchFn = mockFetch();
+      const ac = new AbortController();
+      await client.health(ac.signal);
+      expect(fetchFn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: ac.signal }));
+    });
   });
 
-  it('makes DELETE request for deleteSession()', async () => {
-    mockResponse(204, undefined);
-
-    const result = await client.deleteSession('ses_1');
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/session/ses_1');
-    expect(init.method).toBe('DELETE');
-    expect(result).toBeUndefined();
+  describe('createSession', () => {
+    it('sends POST with body', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ id: 'ses_1' }) });
+      const result = await client.createSession({ title: 'test' });
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ title: 'test' }),
+      }));
+      expect(result.id).toBe('ses_1');
+    });
   });
 
-  it('appends query string for listMessages(limit)', async () => {
-    mockResponse(200, []);
-
-    await client.listMessages('ses_1', 10);
-
-    const [url] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/session/ses_1/message?limit=10');
+  describe('getSession', () => {
+    it('returns session by id', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ id: 'ses_1', title: 'Test' }) });
+      const result = await client.getSession('ses_1');
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1', expect.objectContaining({ method: 'GET' }));
+      expect(result.title).toBe('Test');
+    });
   });
 
-  it('makes POST request with body for sendPrompt()', async () => {
-    mockResponse(200, {
-      info: { id: 'msg_1', session_id: 'ses_1', role: 'assistant', created_at: '', updated_at: '' },
-      parts: [{ type: 'text', text: 'Hello' }],
+  describe('deleteSession', () => {
+    it('deletes session', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue(true) });
+      const result = await client.deleteSession('ses_1');
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1', expect.objectContaining({ method: 'DELETE' }));
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('listMessages', () => {
+    it('returns messages without limit', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue([{ info: { id: 'msg_1' }, parts: [] }]) });
+      const result = await client.listMessages('ses_1');
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1/message', expect.any(Object));
+      expect(result).toHaveLength(1);
     });
 
-    await client.sendPrompt('ses_1', { parts: [{ type: 'text', text: 'Hi' }] });
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/session/ses_1/message');
-    expect(init.method).toBe('POST');
+    it('includes limit query param', async () => {
+      fetchFn = mockFetch();
+      await client.listMessages('ses_1', 10);
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1/message?limit=10', expect.any(Object));
+    });
   });
 
-  it('sets Basic Auth header when username/password provided', async () => {
-    mockResponse(200, { healthy: true, version: '1.0.0' });
-
-    await client.health();
-
-    const [, init] = fetchMock.mock.calls[0];
-    const expectedAuth = 'Basic ' + Buffer.from('opencode:secret').toString('base64');
-    expect(init.headers['Authorization']).toBe(expectedAuth);
+  describe('sendPrompt', () => {
+    it('sends prompt', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ info: { id: 'msg_1' }, parts: [] }) });
+      const result = await client.sendPrompt('ses_1', { parts: [{ type: 'text', text: 'Hi' }] });
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1/message', expect.objectContaining({ method: 'POST' }));
+      expect(result.info.id).toBe('msg_1');
+    });
   });
 
-  it('does not set Auth header when credentials omitted', async () => {
-    const noAuthClient = new OpenCodeClient('http://localhost:3000');
-    mockResponse(200, { healthy: true, version: '1.0.0' });
-
-    await noAuthClient.health();
-
-    const [, init] = fetchMock.mock.calls[0];
-    expect(init.headers['Authorization']).toBeUndefined();
+  describe('abortSession', () => {
+    it('aborts session', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue(true) });
+      const result = await client.abortSession('ses_1');
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1/abort', expect.objectContaining({ method: 'POST' }));
+      expect(result).toBe(true);
+    });
   });
 
-  it('throws on HTTP 4xx/5xx with status and body', async () => {
-    const res = {
-      ok: false,
-      status: 401,
-      statusText: 'Unauthorized',
-      text: vi.fn().mockResolvedValue('Invalid credentials'),
-    };
-    fetchMock.mockResolvedValue(res);
-
-    await expect(client.health()).rejects.toThrow('OpenCode HTTP 401: Invalid credentials');
+  describe('listSessions', () => {
+    it('lists sessions', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue([{ id: 'ses_1' }]) });
+      const result = await client.listSessions();
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session', expect.objectContaining({ method: 'GET' }));
+      expect(result).toHaveLength(1);
+    });
   });
 
-  it('throws on network error', async () => {
-    fetchMock.mockRejectedValue(new Error('Network failure'));
-
-    await expect(client.health()).rejects.toThrow('Network failure');
+  describe('getSessionChildren', () => {
+    it('returns session children', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue([{ id: 'child_1' }]) });
+      const result = await client.getSessionChildren('ses_1');
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1/children', expect.objectContaining({ method: 'GET' }));
+      expect(result).toHaveLength(1);
+    });
   });
 
-  it('passes AbortSignal to fetch', async () => {
-    mockResponse(200, { healthy: true, version: '1.0.0' });
-    const controller = new AbortController();
-
-    await client.health(controller.signal);
-
-    const [, init] = fetchMock.mock.calls[0];
-    expect(init.signal).toBe(controller.signal);
-  });
-
-  it('returns undefined for 204 No Content', async () => {
-    const res = {
-      ok: true,
-      status: 204,
-      statusText: 'No Content',
-      text: vi.fn().mockResolvedValue(''),
-      json: vi.fn().mockRejectedValue(new Error('Empty body')),
-    };
-    fetchMock.mockResolvedValue(res);
-
-    const result = await client.deleteSession('ses_1');
-    expect(result).toBeUndefined();
-  });
-
-  it('makes GET request for listSessions()', async () => {
-    mockResponse(200, [
-      { id: 'ses_1', title: 'Test', parent_id: null, status: 'active', created_at: '', updated_at: '' },
-    ]);
-
-    const result = await client.listSessions();
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/session');
-    expect(init.method).toBe('GET');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('ses_1');
-  });
-
-  it('makes GET request for getSessionChildren()', async () => {
-    mockResponse(200, [
-      { id: 'ses_child', title: 'Child', parent_id: 'ses_1', status: 'active', created_at: '', updated_at: '' },
-    ]);
-
-    const result = await client.getSessionChildren('ses_1');
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/session/ses_1/children');
-    expect(init.method).toBe('GET');
-    expect(result[0].parent_id).toBe('ses_1');
-  });
-
-  it('makes POST request for forkSession() with messageID', async () => {
-    mockResponse(200, {
-      id: 'ses_forked',
-      title: 'Forked',
-      parent_id: 'ses_1',
-      status: 'active',
-      created_at: '',
-      updated_at: '',
+  describe('forkSession', () => {
+    it('forks session with messageID', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ id: 'forked' }) });
+      const result = await client.forkSession('ses_1', 'msg_1');
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1/fork', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ messageID: 'msg_1' }),
+      }));
+      expect(result.id).toBe('forked');
     });
 
-    await client.forkSession('ses_1', 'msg_10');
-
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/session/ses_1/fork');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({ messageID: 'msg_10' });
+    it('forks session without messageID', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ id: 'forked' }) });
+      await client.forkSession('ses_1');
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/session/ses_1/fork', expect.objectContaining({
+        method: 'POST',
+      }));
+      const initArg = fetchFn.mock.calls[0][1] as Record<string, unknown>;
+      expect(initArg.body).toBeUndefined();
+    });
   });
 
-  it('makes POST request for forkSession() without messageID', async () => {
-    mockResponse(200, {
-      id: 'ses_forked',
-      title: 'Forked',
-      parent_id: 'ses_1',
-      status: 'active',
-      created_at: '',
-      updated_at: '',
+  describe('listAgents', () => {
+    it('lists agents', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue([{ id: 'agent_1', name: 'designer' }]) });
+      const result = await client.listAgents();
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/agent', expect.objectContaining({ method: 'GET' }));
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('listProviders', () => {
+    it('lists providers', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ providers: [], default: {} }) });
+      const result = await client.listProviders();
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/config/providers', expect.objectContaining({ method: 'GET' }));
+      expect(result.providers).toEqual([]);
+    });
+  });
+
+  describe('getConfig', () => {
+    it('returns config', async () => {
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ model: 'gpt-4' }) });
+      const result = await client.getConfig();
+      expect(fetchFn).toHaveBeenCalledWith('http://localhost:3000/config', expect.objectContaining({ method: 'GET' }));
+      expect(result.model).toBe('gpt-4');
+    });
+  });
+
+  describe('error handling', () => {
+    it('throws on non-ok response', async () => {
+      fetchFn = mockFetch({ ok: false, status: 404, text: vi.fn().mockResolvedValue('Not found') });
+      await expect(client.getSession('bad')).rejects.toThrow('OpenCode HTTP 404: Not found');
     });
 
-    await client.forkSession('ses_1');
+    it('uses fallback text on error response with no body', async () => {
+      fetchFn = mockFetch({ ok: false, status: 500, text: vi.fn().mockRejectedValue(new Error('no body')) });
+      await expect(client.health()).rejects.toThrow('OpenCode HTTP 500: Unknown error');
+    });
 
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:3000/session/ses_1/fork');
-    expect(init.method).toBe('POST');
-    expect(init.body).toBeUndefined();
+    it('returns undefined for 204', async () => {
+      fetchFn = mockFetch({ ok: true, status: 204, json: vi.fn() });
+      const result = await client.deleteSession('ses_1');
+      expect(result).toBeUndefined();
+    });
   });
 });

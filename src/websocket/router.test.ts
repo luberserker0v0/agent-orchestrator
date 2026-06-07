@@ -139,6 +139,11 @@ describe('WSRouter', () => {
         listMessages: vi.fn().mockResolvedValue([{ id: 'msg_1', text: 'Hello' }]),
         abortSession: vi.fn().mockResolvedValue(true),
         createSession: vi.fn().mockResolvedValue({ id: 'ses_new', title: 'custom', status: 'active', created_at: '2026-01-01', updated_at: '2026-01-01' }),
+        listSessions: vi.fn().mockResolvedValue([]),
+        getSession: vi.fn().mockResolvedValue({ id: 'ses_1' }),
+        getSessionChildren: vi.fn().mockResolvedValue([]),
+        forkSession: vi.fn().mockResolvedValue({ id: 'forked' }),
+        deleteSession: vi.fn().mockResolvedValue(undefined),
       },
       ...overrides,
     };
@@ -1030,5 +1035,618 @@ describe('WSRouter', () => {
 
     expect(mockWs.close).toHaveBeenCalledWith(1001, 'Server shutting down');
     expect(mockWss.close).toHaveBeenCalled();
+  });
+
+  // ─── Config methods ─────────────────────────────────────
+
+  it('handles config.patch', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 40, method: 'config.patch',
+      params: { config: { model: 'new/model' } },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith('conv-001', { model: 'new/model' });
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 40 && p.result?.patched === true; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles config.patch with missing config', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 41, method: 'config.patch',
+      params: {},
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 41 && p.error; } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles config.get', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.readConfig.mockReturnValue({ model: 'test/model' });
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 42, method: 'config.get',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 42 && p.result?.model === 'test/model'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  // ─── Agent methods ─────────────────────────────────────
+
+  it('handles agent.register', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 50, method: 'agent.register',
+      params: { name: 'designer', content: 'Designer agent' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.writeAgent).toHaveBeenCalledWith('conv-001', 'designer', 'Designer agent');
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 50 && p.result?.registered === 'designer'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles agent.register with missing name or content', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 51, method: 'agent.register',
+      params: { name: 'designer' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 51 && p.error; } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles agent.list', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.listAgents.mockReturnValue(['designer', 'coder']);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 52, method: 'agent.list',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 52 && p.result; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result).toEqual(['designer', 'coder']);
+  });
+
+  it('handles agent.get', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.readAgent.mockReturnValue('Designer agent content');
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 53, method: 'agent.get',
+      params: { name: 'designer' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 53 && p.result === 'Designer agent content'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles agent.get with missing name', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 54, method: 'agent.get',
+      params: {},
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 54 && p.error?.message?.includes('Missing name'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles agent.delete', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 55, method: 'agent.delete',
+      params: { name: 'designer' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.deleteAgent).toHaveBeenCalledWith('conv-001', 'designer');
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 55 && p.result?.deleted === 'designer'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles agent.delete with missing name', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 56, method: 'agent.delete',
+      params: {},
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 56 && p.error?.message?.includes('Missing name'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  // ─── File methods ──────────────────────────────────────
+
+  it('handles file.write', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 60, method: 'file.write',
+      params: { path: 'test.txt', content: 'hello' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.writeFile).toHaveBeenCalledWith('conv-001', 'test.txt', 'hello');
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 60 && p.result?.written === 'test.txt'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles file.write with missing path or content', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 61, method: 'file.write',
+      params: { path: 'test.txt' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 61 && p.error?.message?.includes('Missing path or content'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles file.read', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.readFile.mockReturnValue('file content');
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 62, method: 'file.read',
+      params: { path: 'test.txt' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 62 && p.result === 'file content'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles file.read with missing path', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 63, method: 'file.read',
+      params: {},
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 63 && p.error?.message?.includes('Missing path'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles file.delete', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 64, method: 'file.delete',
+      params: { path: 'test.txt' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.deleteFile).toHaveBeenCalledWith('conv-001', 'test.txt');
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 64 && p.result?.deleted === 'test.txt'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles file.delete with missing path', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 65, method: 'file.delete',
+      params: {},
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 65 && p.error?.message?.includes('Missing path'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles file.list', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockWorkspaceFactory.listFiles.mockReturnValue(['a.txt', 'b.txt']);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 66, method: 'file.list',
+      params: { path: '.' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 66 && p.result; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles file.copy', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 67, method: 'file.copy',
+      params: { source: 'src.txt', dest: 'dst.txt' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.copyFromLocal).toHaveBeenCalledWith('conv-001', 'src.txt', 'dst.txt');
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 67 && p.result?.copied === 'dst.txt'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles file.copy with missing source or dest', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 68, method: 'file.copy',
+      params: { source: 'src.txt' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 68 && p.error?.message?.includes('Missing source or dest'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  // ─── Session WS methods ────────────────────────────────
+
+  it('handles session.list', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    instance.client.listSessions = vi.fn().mockResolvedValue([{ id: 'ses_1' }]);
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 70, method: 'session.list',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(instance.client.listSessions).toHaveBeenCalled();
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 70; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles session.get', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    instance.client.getSession = vi.fn().mockResolvedValue({ id: 'ses_1' });
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 71, method: 'session.get',
+      params: { sessionId: 'ses_1' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(instance.client.getSession).toHaveBeenCalledWith('ses_1');
+  });
+
+  it('handles session.get with missing sessionId', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 72, method: 'session.get',
+      params: {},
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 72 && p.error?.message?.includes('Missing sessionId'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles session.children', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    instance.client.getSessionChildren = vi.fn().mockResolvedValue([{ id: 'child_1' }]);
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 73, method: 'session.children',
+      params: { sessionId: 'ses_1' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(instance.client.getSessionChildren).toHaveBeenCalledWith('ses_1');
+  });
+
+  it('handles session.fork', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    instance.client.forkSession = vi.fn().mockResolvedValue({ id: 'forked' });
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 74, method: 'session.fork',
+      params: { sessionId: 'ses_1', messageID: 'msg_1' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(instance.client.forkSession).toHaveBeenCalledWith('ses_1', 'msg_1');
+  });
+
+  it('handles session.delete', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    instance.client.deleteSession = vi.fn().mockResolvedValue(undefined);
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 75, method: 'session.delete',
+      params: { sessionId: 'ses_1' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(instance.client.deleteSession).toHaveBeenCalledWith('ses_1');
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 75 && p.result?.deleted === 'ses_1'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  // ─── Ready guard ───────────────────────────────────────
+
+  it('rejects message.send when ready=false', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: false });
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 80, method: 'message.send',
+      params: { text: 'Hi' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 80 && p.error?.message?.includes('not ready'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  // ─── Skills import success path ────────────────────────
+
+  it('handles skills.import success', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 90, method: 'skills.import',
+      params: { source: 'skills/test', name: 'test-skill' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockWorkspaceFactory.importSkillFromLocal).toHaveBeenCalledWith('conv-001', 'skills/test', 'test-skill');
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 90 && p.result?.imported === 'test-skill'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('handles skills.import with missing source or name', async () => {
+    const mockWs = createMockWebSocket();
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 91, method: 'skills.import',
+      params: { source: 'skills/test' },
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 91 && p.error?.message?.includes('Missing source or name'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
   });
 });
