@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(e2e): add e2e test framework with 4 scenario files (conversation lifecycle, ready-state, file CRUD, agent CRUD) — 28 tests using real OpenCode instances
 - feat(conversation-state): add `isReady` state, `startReadyCheck()` polling mechanism, and `conversation.ready`/`conversation.readyLost` events
 - feat(http-api): add `POST /api/conversations/:id/message` for sending text via HTTP REST
 - feat(http-api): add dedicated AGENTS.md injection endpoints (`PUT/GET/DELETE /api/conversations/:id/agent/config`) with WS RPC (`agent.config.write/get/delete`)
@@ -34,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- fix(http-api): call `cancelReadyCheck` in start and restart handlers to prevent stale ready polling after instance restart
+- fix(http-api): change GET/DELETE file endpoints from `req.body` to `req.query` (REST semantics — GET/DELETE requests don't have body)
+- fix(http-api): path traversal errors now return 400 instead of 500 for file write, read, and delete endpoints
+- fix(orchestrator): use `path.resolve()` instead of `path.join()` for workspace basePath to handle absolute Windows paths correctly
 - Path parameters for file APIs moved to request body to avoid URL encoding/special-char issues and path-traversal risks in routing.
 - Hardened skill zip upload against zip slip and unsafe skill names.
 - Rejected malformed skill archives without root SKILL.md.

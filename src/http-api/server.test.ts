@@ -138,8 +138,8 @@ describe('HTTP API Server', () => {
     const res = await request(server).delete('/api/conversations/conv-001');
 
     expect(res.status).toBe(204);
-    // When stopped, instance should already be destroyed, so destroyInstance is not called again
-    expect(mockInstanceManager.destroyInstance).not.toHaveBeenCalled();
+    // destroyInstance is always called (no-op if already destroyed)
+    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
     expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith('conv-001');
     expect(mockConversationState.remove).toHaveBeenCalledWith('conv-001');
   });
@@ -1033,7 +1033,7 @@ describe('HTTP API Server', () => {
 
     const res = await request(server)
       .get('/api/conversations/conv-001/files')
-      .send({ path: 'test.txt' });
+      .query({ path: 'test.txt' });
 
     expect(res.status).toBe(200);
     expect(res.body.content).toBe('file content');
@@ -1041,8 +1041,7 @@ describe('HTTP API Server', () => {
 
   it('GET /api/conversations/:id/files returns 400 for missing path', async () => {
     const res = await request(server)
-      .get('/api/conversations/conv-001/files')
-      .send({});
+      .get('/api/conversations/conv-001/files');
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Missing path');
@@ -1053,7 +1052,7 @@ describe('HTTP API Server', () => {
 
     const res = await request(server)
       .get('/api/conversations/conv-001/files')
-      .send({ path: 'missing.txt' });
+      .query({ path: 'missing.txt' });
 
     expect(res.status).toBe(404);
   });
@@ -1061,7 +1060,7 @@ describe('HTTP API Server', () => {
   it('DELETE /api/conversations/:id/files deletes a file', async () => {
     const res = await request(server)
       .delete('/api/conversations/conv-001/files')
-      .send({ path: 'test.txt' });
+      .query({ path: 'test.txt' });
 
     expect(res.status).toBe(204);
     expect(mockWorkspaceFactory.deleteFile).toHaveBeenCalledWith('conv-001', 'test.txt');
@@ -1069,8 +1068,7 @@ describe('HTTP API Server', () => {
 
   it('DELETE /api/conversations/:id/files returns 400 for missing path', async () => {
     const res = await request(server)
-      .delete('/api/conversations/conv-001/files')
-      .send({});
+      .delete('/api/conversations/conv-001/files');
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Missing path');
@@ -1081,7 +1079,7 @@ describe('HTTP API Server', () => {
 
     const res = await request(server)
       .delete('/api/conversations/conv-001/files')
-      .send({ path: 'test.txt' });
+      .query({ path: 'test.txt' });
 
     expect(res.status).toBe(500);
   });

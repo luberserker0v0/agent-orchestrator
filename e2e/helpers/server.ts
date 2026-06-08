@@ -55,6 +55,7 @@ export function startServer(): Promise<E2EServer> {
         return;
       }
       const port = addr.port;
+      serverConfig.port = port;
 
       const cleanup = async () => {
         instanceManager.destroy();

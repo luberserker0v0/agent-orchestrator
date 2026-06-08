@@ -26,7 +26,7 @@ describe('Agent CRUD (E2E)', () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: 'tester.md',
+        name: 'tester',
         content: '---\nname: Tester\n---\nYou are a tester.',
       }),
     });
@@ -34,10 +34,10 @@ describe('Agent CRUD (E2E)', () => {
   });
 
   it('reads agent content', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-agents/agents/tester.md`);
+    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-agents/agents/tester`);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.name).toBe('tester.md');
+    expect(body.name).toBe('tester');
     expect(body.content).toContain('You are a tester.');
   });
 
@@ -51,18 +51,18 @@ describe('Agent CRUD (E2E)', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(Array.isArray(body)).toBe(true);
-    expect(body.some((a: any) => a.name === 'tester.md')).toBe(true);
+    expect(body.some((a: string) => a === 'tester')).toBe(true);
   });
 
   it('deletes agent', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-agents/agents/tester.md`, {
+    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-agents/agents/tester`, {
       method: 'DELETE',
     });
     expect(res.status).toBe(204);
   });
 
   it('returns 404 after deletion', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-agents/agents/tester.md`);
+    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-agents/agents/tester`);
     expect(res.status).toBe(404);
   });
 });

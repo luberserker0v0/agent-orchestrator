@@ -126,6 +126,7 @@ export function createHttpServer(
       return;
     }
 
+    conversationState.cancelReadyCheck(id);
     conversationState.transition(id, 'starting');
 
     try {
@@ -196,6 +197,7 @@ export function createHttpServer(
     try {
       // Stop existing instance if running
       if (state.status === 'running' || state.status === 'error') {
+        conversationState.cancelReadyCheck(id);
         try {
           await instanceManager.destroyInstance(id);
         } catch {
@@ -240,11 +242,18 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      const state = conversationState.get(id)!;
-      if (state.status === 'running' || state.status === 'starting') {
+      // Always try to destroy the instance (no-op if none running)
+      try {
         await instanceManager.destroyInstance(id);
+      } catch {
+        // ignore if no instance or already cleaned up
       }
-      workspaceFactory.destroy(id);
+      // Always try to remove the workspace (no-op if already gone)
+      try {
+        workspaceFactory.destroy(id);
+      } catch (wsErr) {
+        logger.warn(`Failed to remove workspace for ${id}:`, wsErr);
+      }
       conversationState.transition(id, 'destroyed');
       conversationState.remove(id);
       res.status(204).send();
@@ -493,8 +502,13 @@ export function createHttpServer(
       markNeedsRestartIfRunning(id, `file ${path} updated`);
       res.status(204).send();
     } catch (err) {
-      logger.error(`Failed to write file ${path} for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      const msg = (err as Error).message;
+      if (msg.includes('path traversal') || msg.includes('Invalid path')) {
+        res.status(400).json({ error: msg });
+      } else {
+        logger.error(`Failed to write file ${path} for ${id}:`, err);
+        res.status(500).json({ error: msg });
+      }
     }
   });
 
@@ -502,9 +516,9 @@ export function createHttpServer(
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
-    const path = typeof req.body.path === 'string' ? req.body.path : undefined;
-    if (path === undefined) {
-      res.status(400).json({ error: 'Missing path in body' });
+    const path = typeof req.query.path === 'string' ? req.query.path : undefined;
+    if (!path) {
+      res.status(400).json({ error: 'Missing path query parameter' });
       return;
     }
 
@@ -520,9 +534,9 @@ export function createHttpServer(
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
-    const path = typeof req.body.path === 'string' ? req.body.path : undefined;
-    if (path === undefined) {
-      res.status(400).json({ error: 'Missing path in body' });
+    const path = typeof req.query.path === 'string' ? req.query.path : undefined;
+    if (!path) {
+      res.status(400).json({ error: 'Missing path query parameter' });
       return;
     }
 
@@ -530,6 +544,7 @@ export function createHttpServer(
       workspaceFactory.deleteFile(id, path);
       res.status(204).send();
     } catch (err) {
+      logger.error(`Failed to delete file ${path} for ${id}:`, err);
       res.status(500).json({ error: (err as Error).message });
     }
   });
@@ -560,10 +575,10 @@ export function createHttpServer(
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
-    const path = typeof req.body.path === 'string' ? req.body.path : '';
+    const path = typeof req.query.path === 'string' ? req.query.path : undefined;
 
     try {
-      const files = workspaceFactory.listFiles(id, path || undefined);
+      const files = workspaceFactory.listFiles(id, path);
       res.json({ path: path || '.', files });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });

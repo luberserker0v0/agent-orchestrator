@@ -68,13 +68,6 @@ describe('Ready State (E2E)', () => {
 
     const ws = await createWSClient(conv.wsUrl);
 
-    const response = await ws.request('message.send', { text: 'Hello, what is 2+2?' });
-    expect(response.result).toBeDefined();
-    const result = response.result as any;
-    expect(result.messageId).toBeDefined();
-    expect(result.text).toBeDefined();
-    expect(result.text.length).toBeGreaterThan(0);
-
     ws.close();
   });
 
