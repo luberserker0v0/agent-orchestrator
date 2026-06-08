@@ -14,6 +14,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:e2e": "vitest run --config e2e/vitest.config.e2e.ts",
+    "test:e2e:watch": "vitest --config e2e/vitest.config.e2e.ts",
     "preflight": "npm run lint && npm run test && npm run build"
   },
   "keywords": [
