@@ -498,7 +498,7 @@ export function createHttpServer(
     }
   });
 
-  app.get('/api/conversations/:id/files', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/files/read', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -516,7 +516,7 @@ export function createHttpServer(
     }
   });
 
-  app.delete('/api/conversations/:id/files', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/files/delete', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -556,7 +556,7 @@ export function createHttpServer(
     }
   });
 
-  app.get('/api/conversations/:id/files/list', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/files/list', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
