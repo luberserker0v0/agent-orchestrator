@@ -1028,58 +1028,60 @@ describe('HTTP API Server', () => {
     expect(res.status).toBe(500);
   });
 
-  it('GET /api/conversations/:id/files reads a file', async () => {
+  it('POST /api/conversations/:id/files/read reads a file', async () => {
     mockWorkspaceFactory.readFile.mockReturnValue('file content');
 
     const res = await request(server)
-      .get('/api/conversations/conv-001/files')
-      .query({ path: 'test.txt' });
+      .post('/api/conversations/conv-001/files/read')
+      .send({ path: 'test.txt' });
 
     expect(res.status).toBe(200);
     expect(res.body.content).toBe('file content');
   });
 
-  it('GET /api/conversations/:id/files returns 400 for missing path', async () => {
+  it('POST /api/conversations/:id/files/read returns 400 for missing path', async () => {
     const res = await request(server)
-      .get('/api/conversations/conv-001/files');
+      .post('/api/conversations/conv-001/files/read')
+      .send({});
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Missing path');
   });
 
-  it('GET /api/conversations/:id/files returns 404 when file not found', async () => {
+  it('POST /api/conversations/:id/files/read returns 404 when file not found', async () => {
     mockWorkspaceFactory.readFile.mockImplementation(() => { throw new Error('File not found'); });
 
     const res = await request(server)
-      .get('/api/conversations/conv-001/files')
-      .query({ path: 'missing.txt' });
+      .post('/api/conversations/conv-001/files/read')
+      .send({ path: 'missing.txt' });
 
     expect(res.status).toBe(404);
   });
 
-  it('DELETE /api/conversations/:id/files deletes a file', async () => {
+  it('POST /api/conversations/:id/files/delete deletes a file', async () => {
     const res = await request(server)
-      .delete('/api/conversations/conv-001/files')
-      .query({ path: 'test.txt' });
+      .post('/api/conversations/conv-001/files/delete')
+      .send({ path: 'test.txt' });
 
     expect(res.status).toBe(204);
     expect(mockWorkspaceFactory.deleteFile).toHaveBeenCalledWith('conv-001', 'test.txt');
   });
 
-  it('DELETE /api/conversations/:id/files returns 400 for missing path', async () => {
+  it('POST /api/conversations/:id/files/delete returns 400 for missing path', async () => {
     const res = await request(server)
-      .delete('/api/conversations/conv-001/files');
+      .post('/api/conversations/conv-001/files/delete')
+      .send({});
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Missing path');
   });
 
-  it('DELETE /api/conversations/:id/files returns 500 on error', async () => {
+  it('POST /api/conversations/:id/files/delete returns 500 on error', async () => {
     mockWorkspaceFactory.deleteFile.mockImplementation(() => { throw new Error('delete failed'); });
 
     const res = await request(server)
-      .delete('/api/conversations/conv-001/files')
-      .query({ path: 'test.txt' });
+      .post('/api/conversations/conv-001/files/delete')
+      .send({ path: 'test.txt' });
 
     expect(res.status).toBe(500);
   });
@@ -1112,11 +1114,11 @@ describe('HTTP API Server', () => {
     expect(res.status).toBe(500);
   });
 
-  it('GET /api/conversations/:id/files/list lists files', async () => {
+  it('POST /api/conversations/:id/files/list lists files', async () => {
     mockWorkspaceFactory.listFiles.mockReturnValue(['file1.txt', 'file2.txt']);
 
     const res = await request(server)
-      .get('/api/conversations/conv-001/files/list')
+      .post('/api/conversations/conv-001/files/list')
       .send({});
 
     expect(res.status).toBe(200);
