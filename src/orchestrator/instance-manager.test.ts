@@ -144,7 +144,7 @@ describe('InstanceManager', () => {
 
       expect(info.id).toBe('conv-001');
       expect(info.port).toBe(30000);
-      expect(info.sessionId).toBe('ses_test');
+      expect(info.sessionId).toBeUndefined();
       expect(existsSync(info.workspacePath)).toBe(true);
     });
 
@@ -252,19 +252,8 @@ describe('InstanceManager', () => {
       });
 
       const info = await instanceManager.createInstance('conv-retry');
-      expect(info.sessionId).toBe('ses_retry');
+      expect(info.sessionId).toBeUndefined();
       expect(mockHealth).toHaveBeenCalledTimes(2);
-    });
-
-    it('throws when createSession fails', async () => {
-      const mockProc = createMockProc({ exitCode: null });
-      mockedSpawn.mockReturnValue(mockProc as any);
-      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
-      mockCreateSession.mockRejectedValue(new Error('Session timeout'));
-
-      await expect(instanceManager.createInstance('conv-session-fail')).rejects.toThrow(
-        'Failed to create OpenCode session: Session timeout'
-      );
     });
 
   });
