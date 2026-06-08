@@ -516,9 +516,9 @@ export function createHttpServer(
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
-    const path = typeof req.query.path === 'string' ? req.query.path : undefined;
+    const path = typeof req.body.path === 'string' ? req.body.path : undefined;
     if (!path) {
-      res.status(400).json({ error: 'Missing path query parameter' });
+      res.status(400).json({ error: 'Missing path' });
       return;
     }
 
@@ -534,9 +534,9 @@ export function createHttpServer(
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
-    const path = typeof req.query.path === 'string' ? req.query.path : undefined;
+    const path = typeof req.body.path === 'string' ? req.body.path : undefined;
     if (!path) {
-      res.status(400).json({ error: 'Missing path query parameter' });
+      res.status(400).json({ error: 'Missing path' });
       return;
     }
 
@@ -575,7 +575,7 @@ export function createHttpServer(
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
-    const path = typeof req.query.path === 'string' ? req.query.path : undefined;
+    const path = typeof req.body.path === 'string' ? req.body.path : undefined;
 
     try {
       const files = workspaceFactory.listFiles(id, path);
