@@ -146,7 +146,7 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `GET/PUT` | `/api/conversations/:id/config` | 讀取 / 覆寫 `opencode.json` |
 | `GET/PUT/GET/DELETE` | `/api/conversations/:id/agents` / `/:name` | Agent CRUD（自動發現） |
 | `POST/GET/GET/GET/DELETE` | `/api/conversations/:id/skills/upload` / `/import` / `/:name` / `/:name/info` | Skill 上傳（zip）/ 導入 / 讀取 / 資訊（結構+hash）/ 刪除 |
-| `GET/PUT/GET/DELETE` | `/api/conversations/:id/files` | 通用檔案 CRUD |
+| `PUT/POST/POST/POST` | `/api/conversations/:id/files` (write/read/delete/list) | 通用檔案 CRUD |
 | `GET/GET/POST` | `/api/conversations/:id/sessions` / `/:sid/children` / `/:sid/fork` | 會話樹查詢與分支 |
 | `GET` | `/api/conversations/:id/events` | 取得最近 100 條事件 |
 | `GET` | `/api/models` | 查詢可用模型列表 |
