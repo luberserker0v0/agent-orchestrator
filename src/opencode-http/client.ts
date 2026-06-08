@@ -4,9 +4,11 @@ import type { GlobalHealth, Session, CreateSessionBody, PromptBody, PromptRespon
 export class OpenCodeClient {
   private baseUrl: string;
   private authHeader?: string;
+  private timeoutMs: number;
 
-  constructor(baseUrl: string, username?: string, password?: string) {
+  constructor(baseUrl: string, username?: string, password?: string, timeoutMs = 30000) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.timeoutMs = timeoutMs;
     if (username && password) {
       this.authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
     }
@@ -23,28 +25,37 @@ export class OpenCodeClient {
     if (this.authHeader) {
       headers['Authorization'] = this.authHeader;
     }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(new Error('Request timed out')), this.timeoutMs);
+    if (signal) {
+      signal.addEventListener('abort', () => controller.abort(signal.reason));
+    }
     const init: RequestInit = {
       method,
       headers,
-      signal,
+      signal: controller.signal,
     };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
 
     logger.info(`[OpenCode HTTP] ${method} ${path}`);
-    const res = await fetch(url, init);
+    try {
+      const res = await fetch(url, init);
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => 'Unknown error');
-      throw new Error(`OpenCode HTTP ${res.status}: ${text}`);
+      if (!res.ok) {
+        const text = await res.text().catch(() => 'Unknown error');
+        throw new Error(`OpenCode HTTP ${res.status}: ${text}`);
+      }
+
+      if (res.status === 204) {
+        return undefined as unknown as T;
+      }
+
+      return (await res.json()) as T;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    if (res.status === 204) {
-      return undefined as unknown as T;
-    }
-
-    return (await res.json()) as T;
   }
 
   async health(signal?: AbortSignal): Promise<GlobalHealth> {

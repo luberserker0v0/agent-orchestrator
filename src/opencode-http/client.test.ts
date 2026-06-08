@@ -53,7 +53,8 @@ describe('OpenCodeClient', () => {
       fetchFn = mockFetch();
       const ac = new AbortController();
       await client.health(ac.signal);
-      expect(fetchFn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: ac.signal }));
+      const [, opts] = fetchFn.mock.calls[0] as [string, RequestInit];
+      expect(opts.signal).toBeInstanceOf(AbortSignal);
     });
   });
 

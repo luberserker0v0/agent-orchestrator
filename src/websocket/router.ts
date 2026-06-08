@@ -128,6 +128,7 @@ export class WSRouter {
     switch (method) {
       case 'message.send': {
         if (!instance) throw new Error('Instance not available');
+        if (!instance.sessionId) throw new Error('Session not ready yet');
         const { text, model: rawModel, agent: rawAgent } = params as { text: string; model?: string; agent?: string };
         if (!text) throw new Error('Missing text parameter');
 
@@ -156,6 +157,7 @@ export class WSRouter {
 
       case 'message.history': {
         if (!instance) throw new Error('Instance not available');
+        if (!instance.sessionId) throw new Error('Session not ready yet');
         const { limit } = params as { limit?: number };
         const messages = await instance.client.listMessages(instance.sessionId, limit);
         return messages;
@@ -163,6 +165,7 @@ export class WSRouter {
 
       case 'session.abort': {
         if (!instance) throw new Error('Instance not available');
+        if (!instance.sessionId) throw new Error('Session not ready yet');
         const result = await instance.client.abortSession(instance.sessionId);
         return { aborted: result };
       }

@@ -20,7 +20,7 @@ export interface InstanceInfo {
   workspacePath: string;
   process: ChildProcess;
   client: OpenCodeClient;
-  sessionId: string;
+  sessionId?: string;
   lastUsedAt: number;
 }
 
@@ -103,12 +103,13 @@ export class InstanceManager {
       this.cleanupInstance(id, false);
     });
 
-    // Wait for health check
+    // Wait for health check (use short timeout for polling)
+    const healthClient = new OpenCodeClient(baseUrl, 'opencode', password, 5000);
     let healthy = false;
     for (let i = 0; i < this.config.healthCheck.retries; i++) {
       await this.delay(this.config.healthCheck.intervalMs);
       try {
-        const result = await client.health();
+        const result = await healthClient.health();
         if (result.healthy) {
           healthy = true;
           logger.info(`[OpenCode ${id}] health check passed (version ${result.version})`);
@@ -128,26 +129,12 @@ export class InstanceManager {
       throw new Error(`OpenCode instance failed health check after ${this.config.healthCheck.retries} retries`);
     }
 
-    // Create initial session
-    let sessionId: string;
-    try {
-      const session = await client.createSession({ title: `AgentOrchestrator-${id}` });
-      sessionId = session.id;
-      logger.info(`[OpenCode ${id}] session created: ${sessionId}`);
-    } catch (err) {
-      this.safeKill(proc);
-      this.portPool.release(port);
-      try { rmSync(workspace.path, { recursive: true, force: true }); } catch { /* ignore cleanup errors */ }
-      throw new Error(`Failed to create OpenCode session: ${(err as Error).message}`, { cause: err });
-    }
-
     const instance: InstanceInfo = {
       id,
       port,
       workspacePath: workspace.path,
       process: proc,
       client,
-      sessionId,
       lastUsedAt: Date.now(),
     };
 
@@ -164,6 +151,13 @@ export class InstanceManager {
       inst.lastUsedAt = Date.now();
     }
     return inst;
+  }
+
+  setSessionId(id: string, sessionId: string): void {
+    const inst = this.instances.get(id);
+    if (inst) {
+      inst.sessionId = sessionId;
+    }
   }
 
   async destroyInstance(id: string): Promise<void> {

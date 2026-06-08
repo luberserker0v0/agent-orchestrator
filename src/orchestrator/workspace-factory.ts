@@ -87,7 +87,7 @@ export class WorkspaceFactory {
   private allowedCopySources: string[];
 
   constructor(config: WorkspaceConfig) {
-    this.basePath = join(process.cwd(), config.basePath);
+    this.basePath = resolve(process.cwd(), config.basePath);
     this.defaultPermissions = config.defaultPermissions;
     this.allowedCopySources = [
       join(process.cwd(), 'assets'),

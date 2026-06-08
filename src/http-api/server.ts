@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
+import type { OpenCodeClient } from '../opencode-http/client.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { listModels } from '../opencode-cli/models.js';
@@ -77,6 +78,20 @@ export function createHttpServer(
     }
   }
 
+  function createSessionInBackground(id: string, client: OpenCodeClient): void {
+    client.createSession({ title: `AgentOrchestrator-${id}` })
+      .then((session) => {
+        conversationState.setInstanceInfo(id, { sessionId: session.id });
+        instanceManager.setSessionId(id, session.id);
+        logger.info(`[OpenCode ${id}] session created: ${session.id}`);
+      })
+      .catch((err) => {
+        logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
+        conversationState.transition(id, 'error', { error: `Session creation failed: ${(err as Error).message}` });
+        instanceManager.destroyInstance(id).catch(() => {});
+      });
+  }
+
   // ─── Health & Metrics ────────────────────────────────────
 
   app.get('/health', (_req: Request, res: Response) => {
@@ -126,31 +141,28 @@ export function createHttpServer(
       return;
     }
 
+    conversationState.cancelReadyCheck(id);
     conversationState.transition(id, 'starting');
 
     try {
       const instance = await instanceManager.createInstance(id);
-      conversationState.setInstanceInfo(id, {
-        port: instance.port,
-        sessionId: instance.sessionId,
-      });
+      conversationState.setInstanceInfo(id, { port: instance.port });
       conversationState.setRunningInstance(id, {
         process: instance.process,
         client: instance.client,
       });
-      conversationState.transition(id, 'running', {
-        port: instance.port,
-        sessionId: instance.sessionId,
-      });
+      conversationState.transition(id, 'running');
       conversationState.startReadyCheck(id);
       res.json({
         id,
         status: 'running',
         ready: false,
         port: instance.port,
-        sessionId: instance.sessionId,
         wsUrl: state.wsUrl,
+        sessionId: state.sessionId,
       });
+
+      createSessionInBackground(id, instance.client);
     } catch (err) {
       conversationState.transition(id, 'error', { error: (err as Error).message });
       logger.error(`Failed to start conversation ${id}:`, err);
@@ -196,6 +208,7 @@ export function createHttpServer(
     try {
       // Stop existing instance if running
       if (state.status === 'running' || state.status === 'error') {
+        conversationState.cancelReadyCheck(id);
         try {
           await instanceManager.destroyInstance(id);
         } catch {
@@ -206,27 +219,23 @@ export function createHttpServer(
 
       conversationState.clearNeedsRestart(id);
       const instance = await instanceManager.createInstance(id);
-      conversationState.setInstanceInfo(id, {
-        port: instance.port,
-        sessionId: instance.sessionId,
-      });
+      conversationState.setInstanceInfo(id, { port: instance.port });
       conversationState.setRunningInstance(id, {
         process: instance.process,
         client: instance.client,
       });
-      conversationState.transition(id, 'running', {
-        port: instance.port,
-        sessionId: instance.sessionId,
-      });
+      conversationState.transition(id, 'running');
       conversationState.startReadyCheck(id);
       res.json({
         id,
         status: 'running',
         ready: false,
         port: instance.port,
-        sessionId: instance.sessionId,
         wsUrl: state.wsUrl,
+        sessionId: state.sessionId,
       });
+
+      createSessionInBackground(id, instance.client);
     } catch (err) {
       conversationState.transition(id, 'error', { error: (err as Error).message });
       logger.error(`Failed to restart conversation ${id}:`, err);
@@ -240,11 +249,18 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      const state = conversationState.get(id)!;
-      if (state.status === 'running' || state.status === 'starting') {
+      // Always try to destroy the instance (no-op if none running)
+      try {
         await instanceManager.destroyInstance(id);
+      } catch {
+        // ignore if no instance or already cleaned up
       }
-      workspaceFactory.destroy(id);
+      // Always try to remove the workspace (no-op if already gone)
+      try {
+        workspaceFactory.destroy(id);
+      } catch (wsErr) {
+        logger.warn(`Failed to remove workspace for ${id}:`, wsErr);
+      }
       conversationState.transition(id, 'destroyed');
       conversationState.remove(id);
       res.status(204).send();
@@ -493,8 +509,13 @@ export function createHttpServer(
       markNeedsRestartIfRunning(id, `file ${path} updated`);
       res.status(204).send();
     } catch (err) {
-      logger.error(`Failed to write file ${path} for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      const msg = (err as Error).message;
+      if (msg.includes('path traversal') || msg.includes('Invalid path')) {
+        res.status(400).json({ error: msg });
+      } else {
+        logger.error(`Failed to write file ${path} for ${id}:`, err);
+        res.status(500).json({ error: msg });
+      }
     }
   });
 
@@ -503,8 +524,8 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     const path = typeof req.body.path === 'string' ? req.body.path : undefined;
-    if (path === undefined) {
-      res.status(400).json({ error: 'Missing path in body' });
+    if (!path) {
+      res.status(400).json({ error: 'Missing path' });
       return;
     }
 
@@ -521,8 +542,8 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     const path = typeof req.body.path === 'string' ? req.body.path : undefined;
-    if (path === undefined) {
-      res.status(400).json({ error: 'Missing path in body' });
+    if (!path) {
+      res.status(400).json({ error: 'Missing path' });
       return;
     }
 
@@ -530,6 +551,7 @@ export function createHttpServer(
       workspaceFactory.deleteFile(id, path);
       res.status(204).send();
     } catch (err) {
+      logger.error(`Failed to delete file ${path} for ${id}:`, err);
       res.status(500).json({ error: (err as Error).message });
     }
   });
@@ -560,10 +582,10 @@ export function createHttpServer(
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
-    const path = typeof req.body.path === 'string' ? req.body.path : '';
+    const path = typeof req.body.path === 'string' ? req.body.path : undefined;
 
     try {
-      const files = workspaceFactory.listFiles(id, path || undefined);
+      const files = workspaceFactory.listFiles(id, path);
       res.json({ path: path || '.', files });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -726,10 +748,15 @@ export function createHttpServer(
 
       const agent = typeof rawAgent === 'string' ? rawAgent : undefined;
 
+      if (!instance.sessionId) {
+        res.status(503).json({ error: 'Session not ready yet' });
+        return;
+      }
+
       const response = await instance.client.sendPrompt(instance.sessionId, {
         model,
         agent,
-        parts: [{ type: 'text', text }],
+        parts: [{ type: 'text', text: text }],
       });
 
       const texts = response.parts

@@ -14,9 +14,10 @@ describe('HTTP API Server', () => {
   beforeEach(() => {
     mockInstanceManager = {
       createInstance: vi.fn(),
-      destroyInstance: vi.fn(),
+      destroyInstance: vi.fn().mockResolvedValue(undefined),
       listInstances: vi.fn(),
       getInstance: vi.fn(),
+      setSessionId: vi.fn(),
     };
 
     mockWorkspaceFactory = {
@@ -138,8 +139,8 @@ describe('HTTP API Server', () => {
     const res = await request(server).delete('/api/conversations/conv-001');
 
     expect(res.status).toBe(204);
-    // When stopped, instance should already be destroyed, so destroyInstance is not called again
-    expect(mockInstanceManager.destroyInstance).not.toHaveBeenCalled();
+    // destroyInstance is always called (no-op if already destroyed)
+    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
     expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith('conv-001');
     expect(mockConversationState.remove).toHaveBeenCalledWith('conv-001');
   });
@@ -185,7 +186,7 @@ describe('HTTP API Server', () => {
 
   it('waitForRequests resolves after active requests finish', async () => {
     mockInstanceManager.createInstance.mockImplementation(
-      () => new Promise((resolve) => setTimeout(() => resolve({ id: 'conv-001', port: 30000, sessionId: 'ses_1' }), 200))
+      () => new Promise((resolve) => setTimeout(() => resolve({ id: 'conv-001', port: 30000, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } }), 200))
     );
 
     const reqPromise = request(server).post('/api/conversations').send({});
@@ -220,14 +221,14 @@ describe('HTTP API Server', () => {
   it('POST /api/conversations/:id/start returns 200 and transitions to running', async () => {
     mockConversationState.has.mockReturnValue(true);
     mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
-    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30000, sessionId: 'ses_1', process: {}, client: {} });
+    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30000, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
 
     const res = await request(server).post('/api/conversations/conv-001/start');
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('running');
     expect(res.body.port).toBe(30000);
-    expect(res.body.sessionId).toBe('ses_1');
+    expect(res.body.sessionId).toBeUndefined();
     expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001');
   });
 
@@ -791,7 +792,7 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/restart restarts from stopped status', async () => {
     mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30001, sessionId: 'ses_new', process: {}, client: {} });
+    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30001, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
 
     const res = await request(server).post('/api/conversations/conv-001/restart');
 
@@ -802,7 +803,7 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/restart restarts from running status', async () => {
     mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
-    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30002, sessionId: 'ses_new2', process: {}, client: {} });
+    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30002, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
 
     const res = await request(server).post('/api/conversations/conv-001/restart');
 

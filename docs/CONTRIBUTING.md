@@ -183,6 +183,20 @@ describe('PortPool', () => {
 });
 ```
 
+### E2E 測試
+
+端到端測試位於 `e2e/` 目錄，使用真實的 OpenCode 實例（不 mocking）。執行前請確認 `opencode` CLI 已安裝：
+
+```bash
+npm run test:e2e
+```
+
+E2E 測試注意事項：
+- 每個測試檔案獨立啟動 AgentOrchestrator server（port 0 auto-assign）
+- 測試耗時較長（60 秒 timeout），因需 spawn 真實 OpenCode 進程
+- 測試完成後自動 cleanup：關閉 server、kill 進程、刪除暫存 workspace
+- **不包含在 `preflight` 內**，需手動執行 `npm run test:e2e`
+
 ### 測試覆蓋率
 
 建議維持核心模組的測試覆蓋率 > 80%。執行：
