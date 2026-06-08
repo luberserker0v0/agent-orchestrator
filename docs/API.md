@@ -432,20 +432,6 @@ references/capabilities.md
 
 ---
 
-### `GET /api/conversations/:id/files`
-
-列出對話 workspace 中的所有檔案。
-
-**回應**：
-```json
-[
-  { "path": "templates/spec.md", "size": 1024 },
-  { "path": "assets/logo.png", "size": 4096 }
-]
-```
-
----
-
 ### `PUT /api/conversations/:id/files`
 
 寫入檔案。路徑放於 request body，避免 URL 特殊字元問題。
@@ -467,11 +453,16 @@ references/capabilities.md
 
 ---
 
-### `GET /api/conversations/:id/files/content`
+### `POST /api/conversations/:id/files/read`
 
-讀取指定檔案內容。路徑放於 query string。
+讀取指定檔案內容。路徑放於 request body。
 
-**Query**：`?path=templates/spec.md`
+**請求**：
+```json
+{
+  "path": "templates/spec.md"
+}
+```
 
 **回應**：
 ```json
@@ -483,18 +474,49 @@ references/capabilities.md
 
 **錯誤**（`400`）：
 ```json
-{ "error": "Missing path query parameter" }
+{ "error": "Missing path in body" }
 ```
 
 ---
 
-### `DELETE /api/conversations/:id/files`
+### `POST /api/conversations/:id/files/delete`
 
-刪除指定檔案。路徑放於 query string。
+刪除指定檔案。路徑放於 request body。
 
-**Query**：`?path=templates/spec.md`
+**請求**：
+```json
+{
+  "path": "templates/spec.md"
+}
+```
 
 **回應**（`204 No Content`）
+
+---
+
+### `POST /api/conversations/:id/files/list`
+
+列出指定目錄下的所有檔案與子目錄（僅一層，不遞迴）。路徑放於 request body，不指定 path 則列出 workspace 根目錄。
+
+**請求**（可選 path）：
+```json
+{
+  "path": "templates"
+}
+```
+
+不帶 path（列出根目錄）：
+```json
+{}
+```
+
+**回應**：
+```json
+{
+  "path": "templates",
+  "files": ["spec.md", "README.md", "assets"]
+}
+```
 
 ---
 
