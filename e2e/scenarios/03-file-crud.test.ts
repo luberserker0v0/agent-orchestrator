@@ -31,7 +31,11 @@ describe('File CRUD (E2E)', () => {
   });
 
   it('reads file content', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files?path=test/hello.txt`);
+    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'test/hello.txt' }),
+    });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.path).toBe('test/hello.txt');
@@ -39,12 +43,20 @@ describe('File CRUD (E2E)', () => {
   });
 
   it('returns 404 for missing file', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files?path=nonexistent.txt`);
+    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'nonexistent.txt' }),
+    });
     expect(res.status).toBe(404);
   });
 
   it('lists files', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files/list`);
+    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files/list`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.files).toBeDefined();
@@ -61,14 +73,20 @@ describe('File CRUD (E2E)', () => {
   });
 
   it('deletes file', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files?path=test/hello.txt`, {
-      method: 'DELETE',
+    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'test/hello.txt' }),
     });
     expect(res.status).toBe(204);
   });
 
   it('returns 404 after deletion', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files?path=test/hello.txt`);
+    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-files/files/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'test/hello.txt' }),
+    });
     expect(res.status).toBe(404);
   });
 });
