@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
+import type { OpenCodeClient } from '../opencode-http/client.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { listModels } from '../opencode-cli/models.js';
@@ -77,6 +78,20 @@ export function createHttpServer(
     }
   }
 
+  function createSessionInBackground(id: string, client: OpenCodeClient): void {
+    client.createSession({ title: `AgentOrchestrator-${id}` })
+      .then((session) => {
+        conversationState.setInstanceInfo(id, { sessionId: session.id });
+        instanceManager.setSessionId(id, session.id);
+        logger.info(`[OpenCode ${id}] session created: ${session.id}`);
+      })
+      .catch((err) => {
+        logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
+        conversationState.transition(id, 'error', { error: `Session creation failed: ${(err as Error).message}` });
+        instanceManager.destroyInstance(id).catch(() => {});
+      });
+  }
+
   // ─── Health & Metrics ────────────────────────────────────
 
   app.get('/health', (_req: Request, res: Response) => {
@@ -131,27 +146,23 @@ export function createHttpServer(
 
     try {
       const instance = await instanceManager.createInstance(id);
-      conversationState.setInstanceInfo(id, {
-        port: instance.port,
-        sessionId: instance.sessionId,
-      });
+      conversationState.setInstanceInfo(id, { port: instance.port });
       conversationState.setRunningInstance(id, {
         process: instance.process,
         client: instance.client,
       });
-      conversationState.transition(id, 'running', {
-        port: instance.port,
-        sessionId: instance.sessionId,
-      });
+      conversationState.transition(id, 'running');
       conversationState.startReadyCheck(id);
       res.json({
         id,
         status: 'running',
         ready: false,
         port: instance.port,
-        sessionId: instance.sessionId,
         wsUrl: state.wsUrl,
+        sessionId: state.sessionId,
       });
+
+      createSessionInBackground(id, instance.client);
     } catch (err) {
       conversationState.transition(id, 'error', { error: (err as Error).message });
       logger.error(`Failed to start conversation ${id}:`, err);
@@ -208,27 +219,23 @@ export function createHttpServer(
 
       conversationState.clearNeedsRestart(id);
       const instance = await instanceManager.createInstance(id);
-      conversationState.setInstanceInfo(id, {
-        port: instance.port,
-        sessionId: instance.sessionId,
-      });
+      conversationState.setInstanceInfo(id, { port: instance.port });
       conversationState.setRunningInstance(id, {
         process: instance.process,
         client: instance.client,
       });
-      conversationState.transition(id, 'running', {
-        port: instance.port,
-        sessionId: instance.sessionId,
-      });
+      conversationState.transition(id, 'running');
       conversationState.startReadyCheck(id);
       res.json({
         id,
         status: 'running',
         ready: false,
         port: instance.port,
-        sessionId: instance.sessionId,
         wsUrl: state.wsUrl,
+        sessionId: state.sessionId,
       });
+
+      createSessionInBackground(id, instance.client);
     } catch (err) {
       conversationState.transition(id, 'error', { error: (err as Error).message });
       logger.error(`Failed to restart conversation ${id}:`, err);
@@ -741,10 +748,15 @@ export function createHttpServer(
 
       const agent = typeof rawAgent === 'string' ? rawAgent : undefined;
 
+      if (!instance.sessionId) {
+        res.status(503).json({ error: 'Session not ready yet' });
+        return;
+      }
+
       const response = await instance.client.sendPrompt(instance.sessionId, {
         model,
         agent,
-        parts: [{ type: 'text', text }],
+        parts: [{ type: 'text', text: text }],
       });
 
       const texts = response.parts

@@ -62,7 +62,7 @@ describe('Conversation Lifecycle (E2E)', () => {
     expect(body.status).toBe('running');
     expect(body.ready).toBe(false);
     expect(typeof body.port).toBe('number');
-    expect(typeof body.sessionId).toBe('string');
+    expect(body.sessionId).toBeUndefined();
     expect(body.wsUrl).toContain('/ws/e2e-lifecycle');
   });
 
