@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseJSONC } from 'jsonc-parser';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { loadConfig, validateConfig } from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
 
@@ -225,9 +225,73 @@ describe('example config file', () => {
 });
 
 describe('loadConfig with env overrides', () => {
+  const ORIGINAL_ENV = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
   it('preserves original config when no env override', () => {
     const config = loadConfig();
     expect(config.server.port).toBe(0);
     expect(config.orchestrator.maxInstances).toBe(10);
+  });
+
+  it('overrides simple numeric field via env var', () => {
+    process.env.AGENTORCHESTRATOR_SERVER_PORT = '9090';
+    const config = loadConfig();
+    expect(config.server.port).toBe(9090);
+  });
+
+  it('preserves string values for non-numeric env vars', () => {
+    process.env.AGENTORCHESTRATOR_SERVER_HOST = '0.0.0.0';
+    const config = loadConfig();
+    expect(config.server.host).toBe('0.0.0.0');
+  });
+
+  it('overrides multiple fields via env vars simultaneously', () => {
+    process.env.AGENTORCHESTRATOR_SERVER_PORT = '7070';
+    process.env.AGENTORCHESTRATOR_SERVER_HOST = '0.0.0.0';
+    const config = loadConfig();
+    expect(config.server.port).toBe(7070);
+    expect(config.server.host).toBe('0.0.0.0');
+  });
+});
+
+describe('loadConfig fallback paths', () => {
+  const CONFIG_DIR = join(process.cwd(), 'config');
+  const CONFIG_PATH = join(CONFIG_DIR, 'agentorchestrator.json');
+  const EXAMPLE_PATH = join(CONFIG_DIR, 'agentorchestrator.example.json');
+  // Hidden backups stay in same directory to avoid cross-device rename errors
+  const BAK_JSON = join(CONFIG_DIR, '.agentorchestrator.json.bak');
+  const BAK_EXAMPLE = join(CONFIG_DIR, '.agentorchestrator.example.json.bak');
+
+  afterEach(() => {
+    if (existsSync(BAK_JSON)) {
+      renameSync(BAK_JSON, CONFIG_PATH);
+    }
+    if (existsSync(BAK_EXAMPLE)) {
+      renameSync(BAK_EXAMPLE, EXAMPLE_PATH);
+    }
+  });
+
+  it('falls back to example.json when agentorchestrator.json is missing', () => {
+    if (existsSync(CONFIG_PATH)) {
+      renameSync(CONFIG_PATH, BAK_JSON);
+    }
+    const config = loadConfig();
+    expect(config.server).toBeDefined();
+    expect(config.orchestrator).toBeDefined();
+    expect(config.workspace).toBeDefined();
+  });
+
+  it('throws when both config files are missing', () => {
+    if (existsSync(CONFIG_PATH)) {
+      renameSync(CONFIG_PATH, BAK_JSON);
+    }
+    if (existsSync(EXAMPLE_PATH)) {
+      renameSync(EXAMPLE_PATH, BAK_EXAMPLE);
+    }
+    expect(() => loadConfig()).toThrow('Config file not found');
   });
 });

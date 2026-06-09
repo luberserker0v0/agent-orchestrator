@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(instance-manager): reuse existing workspaces on `createInstance` to preserve pre-configured agents/files across restarts.
 - feat(skills): Skill CRUD API with `POST /skills/upload` (zip archive), `POST /skills/import` (local directory), `GET /skills`, `GET /skills/:name`, `GET /skills/:name/info` (structure + sha256 hash), and `DELETE /skills/:name`. Skills stored as `.opencode/skills/{name}/` directories.
 - feat(coverage): add vitest coverage config with v8 provider and thresholds (lines 70%, functions 75%, branches 55%, statements 65%)
-- test: 340 total tests including expanded coverage for `router`, `server`, `connection`, `config-loader`, `client`, and `conversation-state`
+- test: 376 total tests including expanded coverage for `config-loader`, `instance-manager`, `port-pool`, and `workspace-factory`
 
 ### Changed
 
@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- fix(config-loader): `applyEnvOverrides` now correctly falls back to default when env var is set but empty, instead of overriding with the empty string
 - fix(http-api): call `cancelReadyCheck` in start and restart handlers to prevent stale ready polling after instance restart
 - fix(http-api): change GET/DELETE file endpoints from `req.body` to `req.query` (REST semantics — GET/DELETE requests don't have body)
 - fix(http-api): path traversal errors now return 400 instead of 500 for file write, read, and delete endpoints

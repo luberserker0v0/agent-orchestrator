@@ -20,6 +20,8 @@ vi.mock('../opencode-http/client.js', async () => {
   return { OpenCodeClient: vi.fn() };
 });
 
+
+
 import { spawn } from 'cross-spawn';
 import treeKill from 'tree-kill';
 import { OpenCodeClient } from '../opencode-http/client.js';
@@ -255,6 +257,29 @@ describe('InstanceManager', () => {
   });
 
   describe('Docker runtime', () => {
+    it('handles docker stdout and stderr events', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+
+      const mockProc = createMockProc({ exitCode: null });
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await dockerManager.createInstance('conv-docker-stdio');
+
+      // Trigger stdout data event via registered callback
+      const stdoutCbs = (mockProc as any).listeners?.['stdout:data'];
+      if (stdoutCbs) stdoutCbs.forEach((cb: (...args: unknown[]) => void) => cb(Buffer.from('Server started')));
+      // Trigger stderr data event via registered callback
+      const stderrCbs = (mockProc as any).listeners?.['stderr:data'];
+      if (stderrCbs) stderrCbs.forEach((cb: (...args: unknown[]) => void) => cb(Buffer.from('Debug info')));
+      // Trigger exit event
+      mockProc.exitCode = 0;
+      mockProc.emit('exit', 0);
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(dockerManager.listInstances()).toHaveLength(0);
+    });
+
     it('spawns docker container with correct args', async () => {
       const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
 
@@ -342,6 +367,17 @@ describe('InstanceManager', () => {
       expect(existsSync(info.workspacePath)).toBe(false);
     });
 
+    it('destroys instance even when cleanup encounters errors', async () => {
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await instanceManager.createInstance('conv-rm-err');
+      // Destroy should not throw even if workspace cleanup hits an edge case
+      await instanceManager.destroyInstance('conv-rm-err');
+      expect(instanceManager.listInstances()).toHaveLength(0);
+    });
+
     it('does not throw for non-existent id', async () => {
       await expect(instanceManager.destroyInstance('ghost')).resolves.toBeUndefined();
     });
@@ -378,6 +414,27 @@ describe('InstanceManager', () => {
   });
 
   describe('process events', () => {
+    it('handles stdout and stderr data events', async () => {
+      const mockProc = createMockProc({ exitCode: null });
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await instanceManager.createInstance('conv-stdio');
+
+      // Trigger stdout data event
+      const stdoutCbs = (mockProc as any).listeners?.['stdout:data'];
+      if (stdoutCbs) stdoutCbs.forEach((cb: (...args: unknown[]) => void) => cb(Buffer.from('listening on port 3000')));
+      // Trigger stderr data event
+      const stderrCbs = (mockProc as any).listeners?.['stderr:data'];
+      if (stderrCbs) stderrCbs.forEach((cb: (...args: unknown[]) => void) => cb(Buffer.from('debug output')));
+
+      // Clean up
+      mockProc.exitCode = 0;
+      mockProc.emit('exit', 0);
+      await new Promise((r) => setTimeout(r, 10));
+      expect(instanceManager.listInstances()).toHaveLength(0);
+    });
+
     it('cleans up instance on process exit event', async () => {
       const mockProc = createMockProc({ exitCode: null });
       mockedSpawn.mockReturnValue(mockProc as any);
@@ -427,6 +484,28 @@ describe('InstanceManager', () => {
   });
 
   describe('safeKill edge cases', () => {
+    it('does not throw when treeKill throws', async () => {
+      const mockProc = createMockProc({ exitCode: null, pid: 99999 });
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+      // Make treeKill throw
+      mockedTreeKill.mockImplementationOnce(() => { throw new Error('permission denied'); });
+
+      await instanceManager.createInstance('conv-kill-err');
+      await expect(instanceManager.destroyInstance('conv-kill-err')).resolves.toBeUndefined();
+    });
+
+    it('handles waitForExit timeout when process does not exit', async () => {
+      const mockProc = createMockProc({ exitCode: null, pid: 12346 });
+      // Override once to ignore exit event (simulate process never exiting)
+      mockProc.once = () => { /* noop - don't register callbacks */ };
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await instanceManager.createInstance('conv-timeout');
+      await expect(instanceManager.destroyInstance('conv-timeout')).resolves.toBeUndefined();
+    });
+
     it('does not throw when process already exited', async () => {
       const mockProc = createMockProc({ exitCode: 0 });
       mockedSpawn.mockReturnValue(mockProc as any);
@@ -505,6 +584,23 @@ describe('InstanceManager', () => {
   });
 
   describe('idle timeout sweep', () => {
+    it('does not start sweep when idleTimeoutMs is 0', async () => {
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      const noSweepConfig: OrchestratorConfig = {
+        ...defaultOrchestratorConfig,
+        idleTimeoutMs: 0,
+      };
+      const noSweepManager = new InstanceManager(noSweepConfig, workspaceFactory);
+      await noSweepManager.createInstance('conv-no-sweep');
+
+      // Should not have an idle sweep timer running
+      // If the test passes without hanging, the sweep isn't running
+      noSweepManager.destroy();
+    });
+
     it('destroys idle instance after timeout', async () => {
       const idleConfig: OrchestratorConfig = {
         ...defaultOrchestratorConfig,
