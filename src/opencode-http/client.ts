@@ -6,7 +6,7 @@ export class OpenCodeClient {
   private authHeader?: string;
   private timeoutMs: number;
 
-  constructor(baseUrl: string, username?: string, password?: string, timeoutMs = 30000) {
+  constructor(baseUrl: string, username?: string, password?: string, timeoutMs = 600000) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.timeoutMs = timeoutMs;
     if (username && password) {

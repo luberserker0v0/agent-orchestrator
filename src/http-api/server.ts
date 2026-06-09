@@ -991,7 +991,11 @@ export function createHttpServer(
 
   app.get('/api/models', async (_req: Request, res: Response) => {
     try {
-      const models = await listModels(orchestratorConfig.opencodeBinary);
+      const models = await listModels({
+        runtime: orchestratorConfig.runtime,
+        opencodeBinary: orchestratorConfig.opencodeBinary,
+        dockerImage: orchestratorConfig.docker?.image,
+      });
       res.json(models);
     } catch (err) {
       logger.error('Failed to list models:', err);

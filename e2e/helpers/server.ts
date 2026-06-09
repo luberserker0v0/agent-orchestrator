@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { OrchestratorConfig } from '../../src/config-loader.js';
 import { createHttpServer, type HttpServer } from '../../src/http-api/server.js';
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
@@ -10,9 +11,10 @@ export interface E2EServer {
   port: number;
   baseUrl: string;
   cleanup: () => Promise<void>;
+  orchestratorConfig: OrchestratorConfig;
 }
 
-export function startServer(): Promise<E2EServer> {
+export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>): Promise<E2EServer> {
   const workspaceDir = mkdtempSync(join(tmpdir(), 'e2e-ws-'));
 
   const workspaceConfig = {
@@ -25,13 +27,15 @@ export function startServer(): Promise<E2EServer> {
 
   const serverConfig = { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 };
   const wsConfig = { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 };
-  const orchestratorConfig = {
+  const orchestratorConfig: OrchestratorConfig = {
     maxInstances: 5,
     idleTimeoutMs: 600000,
     idleSweepIntervalMs: 60000,
     portRange: { start: 30000, end: 30050 },
     opencodeBinary: 'opencode',
     healthCheck: { retries: 10, intervalMs: 500 },
+    runtime: 'direct',
+    ...orchestratorOverrides,
   };
 
   const workspaceFactory = new WorkspaceFactory(workspaceConfig);
@@ -66,7 +70,7 @@ export function startServer(): Promise<E2EServer> {
         try { rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
       };
 
-      resolve({ port, baseUrl: `http://127.0.0.1:${port}`, cleanup });
+      resolve({ port, baseUrl: `http://127.0.0.1:${port}`, cleanup, orchestratorConfig });
     });
     httpServer.server.on('error', (err) => {
       reject(err);
