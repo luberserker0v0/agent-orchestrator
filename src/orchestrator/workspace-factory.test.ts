@@ -113,6 +113,40 @@ describe('WorkspaceFactory', () => {
     expect(() => factory.destroy('non-existent')).not.toThrow();
   });
 
+  it('should ensure workspace directory exists without config', () => {
+    const factory = new WorkspaceFactory({
+      basePath: 'test-workspace',
+      defaultPermissions: {},
+    });
+
+    const info = factory.ensure('conv-ensure-no-config');
+    expect(existsSync(info.path)).toBe(true);
+    expect(existsSync(info.opencodeDir)).toBe(true);
+    // Config should NOT be written by ensure()
+    const configPath = join(info.opencodeDir, 'opencode.json');
+    expect(existsSync(configPath)).toBe(false);
+  });
+
+  it('should report whether workspace exists', () => {
+    const factory = new WorkspaceFactory({
+      basePath: 'test-workspace',
+      defaultPermissions: {},
+    });
+
+    expect(factory.hasWorkspace('non-existent')).toBe(false);
+    factory.create('conv-exists');
+    expect(factory.hasWorkspace('conv-exists')).toBe(true);
+  });
+
+  it('should return 0 size for non-existent workspace', () => {
+    const factory = new WorkspaceFactory({
+      basePath: 'test-workspace',
+      defaultPermissions: {},
+    });
+
+    expect(factory.getWorkspaceSize('ghost')).toBe(0);
+  });
+
   // ─── Config ──────────────────────────────────────────────
 
   describe('writeConfig / readConfig', () => {
@@ -194,6 +228,16 @@ describe('WorkspaceFactory', () => {
       factory.create('conv-agent-miss');
 
       expect(() => factory.readAgent('conv-agent-miss', 'missing')).toThrow('Agent not found');
+    });
+
+    it('should return empty list when agents directory does not exist', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-no-agents-dir');
+
+      expect(factory.listAgents('conv-no-agents-dir')).toEqual([]);
     });
   });
 
@@ -336,6 +380,62 @@ describe('WorkspaceFactory', () => {
 
       expect(() => factory.writeFile('conv-sec2', '/etc/passwd', 'bad')).toThrow('absolute paths');
     });
+
+    it('should block backslash-based path traversal', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-sec3');
+
+      expect(() => factory.writeFile('conv-sec3', '..\\..\\outside.txt', 'bad')).toThrow('path traversal');
+    });
+
+    it('should throw when reading non-existent file', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-read-miss');
+
+      expect(() => factory.readFile('conv-read-miss', 'no-such-file.txt')).toThrow('File not found');
+    });
+
+    it('should throw when listing files in non-existent subdirectory', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-list-miss');
+
+      expect(() => factory.listFiles('conv-list-miss', 'no-such-dir')).toThrow('Directory not found');
+    });
+
+    it('should delete directory recursively', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-dir-del');
+
+      // Create a subdirectory with a file
+      factory.writeFile('conv-dir-del', 'subdir/test.txt', 'test content');
+      expect(existsSync(join(TEST_BASE_PATH, 'conv-dir-del', 'subdir'))).toBe(true);
+
+      // Delete the directory
+      factory.deleteFile('conv-dir-del', 'subdir');
+      expect(existsSync(join(TEST_BASE_PATH, 'conv-dir-del', 'subdir'))).toBe(false);
+    });
+
+    it('should throw when deleting non-existent file', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-del-miss');
+
+      expect(() => factory.deleteFile('conv-del-miss', 'ghost.txt')).toThrow('File not found');
+    });
   });
 
   // ─── Skills ──────────────────────────────────────────────
@@ -414,6 +514,36 @@ describe('WorkspaceFactory', () => {
       factory.create('conv-skill-del-miss');
 
       expect(() => factory.deleteSkill('conv-skill-del-miss', 'missing')).toThrow('Skill not found');
+    });
+
+    it('should throw when importing non-existent source', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-skill-no-src');
+
+      expect(() =>
+        factory.importSkillFromLocal('conv-skill-no-src', join('skills', 'non-existent-dir'), 'test')
+      ).toThrow('Source not found');
+    });
+
+    it('should throw when import source is not a directory', () => {
+      const skillsDir = join(process.cwd(), 'skills');
+      mkdirSync(skillsDir, { recursive: true });
+      writeFileSync(join(skillsDir, 'not-a-dir.txt'), 'file content', 'utf-8');
+
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-skill-not-dir');
+
+      expect(() =>
+        factory.importSkillFromLocal('conv-skill-not-dir', join('skills', 'not-a-dir.txt'), 'test')
+      ).toThrow('Source must be a directory');
+
+      rmSync(skillsDir, { recursive: true, force: true });
     });
 
     it('should reject import from disallowed source', () => {
@@ -550,6 +680,18 @@ describe('WorkspaceFactory', () => {
       expect(() =>
         factory.copyFromLocal('conv-copy-denied', join('..', 'outside.txt'), 'outside.txt')
       ).toThrow('Source path not allowed');
+    });
+
+    it('should throw when copy source not found', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        defaultPermissions: {},
+      });
+      factory.create('conv-copy-no-src');
+
+      expect(() =>
+        factory.copyFromLocal('conv-copy-no-src', join('assets', 'ghost.txt'), 'ghost.txt')
+      ).toThrow('Source not found');
     });
 
     it('should reject copy from sibling prefix path skills_evil/', () => {

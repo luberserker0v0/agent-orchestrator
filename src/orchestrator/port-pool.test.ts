@@ -1,10 +1,57 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PortPool } from './port-pool.js';
 
 // Use high port range unlikely to conflict with other processes
 const BASE_PORT = 52000;
 
+// Mock the net module to control which ports appear occupied
+vi.mock('node:net', () => {
+  const occupiedPorts = new Set<number>();
+  type Cb = (...args: unknown[]) => void;
+
+  const mockServer: Record<string, unknown> = {
+    on: vi.fn((_event: string, cb: Cb) => {
+      if (_event === 'error') {
+        mockServer._errorCb = cb;
+      }
+      return mockServer;
+    }),
+    listen: vi.fn((port: number, _host: string, cb?: Cb) => {
+      if (occupiedPorts.has(port)) {
+        setImmediate(() => (mockServer._errorCb as Cb)?.(new Error('EADDRINUSE')));
+      } else {
+        setImmediate(() => cb?.());
+      }
+      return mockServer;
+    }),
+    close: vi.fn((cb?: Cb) => {
+      setImmediate(() => cb?.());
+      return mockServer;
+    }),
+    _errorCb: null as Cb | null,
+  };
+
+  return {
+    createServer: vi.fn(() => ({
+      ...mockServer,
+      listeners: {} as Record<string, Cb[]>,
+      on: vi.fn((event: string, cb: Cb) => {
+        if (event === 'error') mockServer._errorCb = cb;
+        return mockServer;
+      }),
+    })),
+    __setPortOccupied: (port: number, occupied: boolean) => {
+      if (occupied) occupiedPorts.add(port);
+      else occupiedPorts.delete(port);
+    },
+  };
+});
+
 describe('PortPool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('should allocate and release ports', async () => {
     const pool = new PortPool(BASE_PORT, BASE_PORT + 5);
     expect(pool.getUsedCount()).toBe(0);
@@ -35,19 +82,50 @@ describe('PortPool', () => {
 
   it('should skip occupied ports', async () => {
     const pool = new PortPool(BASE_PORT + 30, BASE_PORT + 32);
-    // All three ports should be free, allocation should succeed
     const port1 = await pool.allocate();
     expect(port1).not.toBeNull();
     pool.release(port1!);
   });
 
   it('should detect occupied ports via OS-level check', async () => {
-    // The isPortFree OS-level check is tested implicitly through PortPool.
-    // This test verifies the allocate() flow remains async.
     const pool = new PortPool(BASE_PORT + 40, BASE_PORT + 42);
     const allocated = await pool.allocate();
     expect(allocated).not.toBeNull();
     expect(pool.getUsedCount()).toBe(1);
     pool.release(allocated!);
+  });
+
+  it('should skip port occupied by another process', async () => {
+    const net = await import('node:net');
+    (net as any).__setPortOccupied(BASE_PORT + 50, true);
+
+    const pool = new PortPool(BASE_PORT + 50, BASE_PORT + 51);
+    const port = await pool.allocate();
+    // BASE_PORT+50 is occupied, so should get BASE_PORT+51
+    expect(port).toBe(BASE_PORT + 51);
+    pool.release(port!);
+  });
+
+  it('should return null when all ports are occupied by other processes', async () => {
+    const net = await import('node:net');
+    (net as any).__setPortOccupied(BASE_PORT + 60, true);
+    (net as any).__setPortOccupied(BASE_PORT + 61, true);
+
+    const pool = new PortPool(BASE_PORT + 60, BASE_PORT + 61);
+    const port = await pool.allocate();
+    expect(port).toBeNull();
+  });
+
+  it('should handle double release of same port', async () => {
+    const pool = new PortPool(BASE_PORT + 70, BASE_PORT + 72);
+    const port = await pool.allocate();
+    expect(pool.getUsedCount()).toBe(1);
+
+    pool.release(port!);
+    expect(pool.getUsedCount()).toBe(0);
+
+    // Second release should be no-op
+    pool.release(port!);
+    expect(pool.getUsedCount()).toBe(0);
   });
 });
