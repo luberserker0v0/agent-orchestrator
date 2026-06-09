@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { listModels } from './models.js';
+import { TEST_DOCKER_IMAGE } from '../test-fixtures/ao-configs.js';
 
 // Mock cross-spawn before importing the module under test
 vi.mock('cross-spawn', () => ({
@@ -16,6 +17,9 @@ vi.mock('../utils/logger.js', () => ({
 
 import { spawn } from 'cross-spawn';
 import { logger } from '../utils/logger.js';
+
+const directOpts = { runtime: 'direct' as const, opencodeBinary: 'opencode' };
+const dockerOpts = { runtime: 'docker' as const, opencodeBinary: 'opencode', dockerImage: TEST_DOCKER_IMAGE };
 
 function createMockProc() {
   const stdoutListeners: ((data: Buffer) => void)[] = [];
@@ -66,92 +70,128 @@ describe('listModels', () => {
     vi.useRealTimers();
   });
 
-  it('parses model list from stdout', async () => {
-    const mockProc = createMockProc();
-    (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
+  describe('direct runtime', () => {
+    it('parses model list from stdout', async () => {
+      const mockProc = createMockProc();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
 
-    const promise = listModels('opencode');
+      const promise = listModels(directOpts);
 
-    mockProc.stdout.emit('data', Buffer.from('anthropic/claude\ngoogle/gemini\n'));
-    mockProc.emitClose(0);
+      mockProc.stdout.emit('data', Buffer.from('anthropic/claude\ngoogle/gemini\n'));
+      mockProc.emitClose(0);
 
-    const result = await promise;
+      const result = await promise;
 
-    expect(result).toEqual([
-      { id: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
-      { id: 'google/gemini', provider: 'google', model: 'gemini' },
-    ]);
-    expect(spawn).toHaveBeenCalledWith('opencode', ['models'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      expect(result).toEqual([
+        { id: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
+        { id: 'google/gemini', provider: 'google', model: 'gemini' },
+      ]);
+      expect(spawn).toHaveBeenCalledWith('opencode', ['models'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    });
+
+    it('returns empty array on empty stdout', async () => {
+      const mockProc = createMockProc();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
+
+      const promise = listModels(directOpts);
+
+      mockProc.emitClose(0);
+
+      const result = await promise;
+      expect(result).toEqual([]);
+    });
+
+    it('returns empty array on non-zero exit code', async () => {
+      const mockProc = createMockProc();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
+
+      const promise = listModels(directOpts);
+
+      mockProc.stderr.emit('data', Buffer.from('some error'));
+      mockProc.emitClose(1);
+
+      const result = await promise;
+      expect(result).toEqual([]);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('exited with code 1'));
+    });
+
+    it('returns empty array and kills process on timeout', async () => {
+      const mockProc = createMockProc();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
+
+      const promise = listModels(directOpts);
+
+      vi.advanceTimersByTime(10001);
+
+      const result = await promise;
+      expect(result).toEqual([]);
+      expect(mockProc.kill).toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('timed out'));
+    });
+
+    it('returns empty array on spawn error', async () => {
+      const mockProc = createMockProc();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
+
+      const promise = listModels(directOpts);
+
+      mockProc.emitError(new Error('ENOENT'));
+
+      const result = await promise;
+      expect(result).toEqual([]);
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Failed to spawn'), 'ENOENT');
+    });
+
+    it('ignores malformed lines without slash', async () => {
+      const mockProc = createMockProc();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
+
+      const promise = listModels(directOpts);
+
+      mockProc.stdout.emit('data', Buffer.from('anthropic/claude\nbad-line\ngoogle/gemini-pro\n'));
+      mockProc.emitClose(0);
+
+      const result = await promise;
+      expect(result).toEqual([
+        { id: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
+        { id: 'google/gemini-pro', provider: 'google', model: 'gemini-pro' },
+      ]);
     });
   });
 
-  it('returns empty array on empty stdout', async () => {
-    const mockProc = createMockProc();
-    (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
+  describe('docker runtime', () => {
+    it('spawns docker run with correct args', async () => {
+      const mockProc = createMockProc();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
 
-    const promise = listModels('opencode');
+      const promise = listModels(dockerOpts);
 
-    mockProc.emitClose(0);
+      mockProc.stdout.emit('data', Buffer.from('anthropic/claude\n'));
+      mockProc.emitClose(0);
 
-    const result = await promise;
-    expect(result).toEqual([]);
-  });
+      await promise;
 
-  it('returns empty array on non-zero exit code', async () => {
-    const mockProc = createMockProc();
-    (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
+      expect(spawn).toHaveBeenCalledWith('docker', ['run', '--rm', TEST_DOCKER_IMAGE, 'models'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    });
 
-    const promise = listModels('opencode');
+    it('parses model list from docker stdout', async () => {
+      const mockProc = createMockProc();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
 
-    mockProc.stderr.emit('data', Buffer.from('some error'));
-    mockProc.emitClose(1);
+      const promise = listModels(dockerOpts);
 
-    const result = await promise;
-    expect(result).toEqual([]);
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('exited with code 1'));
-  });
+      mockProc.stdout.emit('data', Buffer.from('anthropic/claude\ngoogle/gemini\n'));
+      mockProc.emitClose(0);
 
-  it('returns empty array and kills process on timeout', async () => {
-    const mockProc = createMockProc();
-    (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
-
-    const promise = listModels('opencode');
-
-    vi.advanceTimersByTime(10001);
-
-    const result = await promise;
-    expect(result).toEqual([]);
-    expect(mockProc.kill).toHaveBeenCalled();
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('timed out'));
-  });
-
-  it('returns empty array on spawn error', async () => {
-    const mockProc = createMockProc();
-    (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
-
-    const promise = listModels('opencode');
-
-    mockProc.emitError(new Error('ENOENT'));
-
-    const result = await promise;
-    expect(result).toEqual([]);
-    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Failed to spawn'), 'ENOENT');
-  });
-
-  it('ignores malformed lines without slash', async () => {
-    const mockProc = createMockProc();
-    (spawn as ReturnType<typeof vi.fn>).mockReturnValue(mockProc);
-
-    const promise = listModels('opencode');
-
-    mockProc.stdout.emit('data', Buffer.from('anthropic/claude\nbad-line\ngoogle/gemini-pro\n'));
-    mockProc.emitClose(0);
-
-    const result = await promise;
-    expect(result).toEqual([
-      { id: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
-      { id: 'google/gemini-pro', provider: 'google', model: 'gemini-pro' },
-    ]);
+      const result = await promise;
+      expect(result).toEqual([
+        { id: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
+        { id: 'google/gemini', provider: 'google', model: 'gemini' },
+      ]);
+    });
   });
 });

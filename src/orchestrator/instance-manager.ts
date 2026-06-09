@@ -76,32 +76,12 @@ export class InstanceManager {
     const baseUrl = `http://127.0.0.1:${port}`;
     const client = new OpenCodeClient(baseUrl, 'opencode', password);
 
-    logger.info(`Spawning OpenCode instance on port ${port} at ${workspace.path} (binary: ${this.config.opencodeBinary})`);
-    const proc = spawn(this.config.opencodeBinary, ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
-      cwd: workspace.path,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: false,
-      env: {
-        ...process.env,
-        OPENCODE_SERVER_USERNAME: 'opencode',
-        OPENCODE_SERVER_PASSWORD: password,
-      },
-    });
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      logger.info(`[OpenCode ${id}] stdout: ${data.toString().trim()}`);
-    });
-    proc.stderr?.on('data', (data: Buffer) => {
-      logger.warn(`[OpenCode ${id}] stderr: ${data.toString().trim()}`);
-    });
-    proc.on('exit', (code: number | null) => {
-      logger.warn(`[OpenCode ${id}] process exited with code ${code}`);
-      this.cleanupInstance(id, false);
-    });
-    proc.on('error', (err: Error) => {
-      logger.error(`[OpenCode ${id}] process error: ${err.message}`);
-      this.cleanupInstance(id, false);
-    });
+    let proc: ChildProcess;
+    if (this.config.runtime === 'docker') {
+      proc = this._spawnDocker(id, port, workspace.path, password);
+    } else {
+      proc = this._spawnDirect(id, port, workspace.path, password);
+    }
 
     // Wait for health check (use short timeout for polling)
     const healthClient = new OpenCodeClient(baseUrl, 'opencode', password, 5000);
@@ -158,6 +138,73 @@ export class InstanceManager {
     if (inst) {
       inst.sessionId = sessionId;
     }
+  }
+
+  private _spawnDirect(id: string, port: number, workspacePath: string, password: string): ChildProcess {
+    logger.info(`Spawning OpenCode instance on port ${port} at ${workspacePath} (binary: ${this.config.opencodeBinary})`);
+    const proc = spawn(this.config.opencodeBinary, ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
+      cwd: workspacePath,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+      env: {
+        ...process.env,
+        OPENCODE_SERVER_USERNAME: 'opencode',
+        OPENCODE_SERVER_PASSWORD: password,
+      },
+    });
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      logger.info(`[OpenCode ${id}] stdout: ${data.toString().trim()}`);
+    });
+    proc.stderr?.on('data', (data: Buffer) => {
+      logger.warn(`[OpenCode ${id}] stderr: ${data.toString().trim()}`);
+    });
+    proc.on('exit', (code: number | null) => {
+      logger.warn(`[OpenCode ${id}] process exited with code ${code}`);
+      this.cleanupInstance(id, false);
+    });
+    proc.on('error', (err: Error) => {
+      logger.error(`[OpenCode ${id}] process error: ${err.message}`);
+      this.cleanupInstance(id, false);
+    });
+
+    return proc;
+  }
+
+  private _spawnDocker(id: string, port: number, workspacePath: string, password: string): ChildProcess {
+    const { image, containerPort } = this.config.docker!;
+
+    logger.info(`Spawning OpenCode container on port ${port} (image: ${image}, container port: ${containerPort})`);
+    const proc = spawn('docker', [
+      'run', '--rm',
+      '-p', `127.0.0.1:${port}:${containerPort}`,
+      '-v', `${workspacePath}:/workspace`,
+      '-w', '/workspace',
+      '-e', `OPENCODE_SERVER_USERNAME=opencode`,
+      '-e', `OPENCODE_SERVER_PASSWORD=${password}`,
+      image,
+      'serve', '--port', String(containerPort), '--hostname', '0.0.0.0',
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    });
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      logger.info(`[Docker ${id}] ${data.toString().trim()}`);
+    });
+    proc.stderr?.on('data', (data: Buffer) => {
+      logger.warn(`[Docker ${id}] ${data.toString().trim()}`);
+    });
+    proc.on('exit', (code: number | null) => {
+      logger.warn(`[OpenCode ${id}] container exited with code ${code}`);
+      this.cleanupInstance(id, false);
+    });
+    proc.on('error', (err: Error) => {
+      logger.error(`[OpenCode ${id}] container error: ${err.message}`);
+      this.cleanupInstance(id, false);
+    });
+
+    return proc;
   }
 
   async destroyInstance(id: string): Promise<void> {

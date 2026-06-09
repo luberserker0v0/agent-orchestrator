@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { InstanceManager } from './instance-manager.js';
 import { WorkspaceFactory } from './workspace-factory.js';
 import type { OrchestratorConfig, WorkspaceConfig } from '../config-loader.js';
+import { defaultOrchestratorConfig, dockerOrchestratorConfig } from '../test-fixtures/ao-configs.js';
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
@@ -76,15 +77,6 @@ function createMockProc(opts: { exitCode?: number | null; pid?: number | undefin
   };
 }
 
-const testConfig: OrchestratorConfig = {
-  maxInstances: 10,
-  idleTimeoutMs: 600000,
-  idleSweepIntervalMs: 60000,
-  portRange: { start: 30000, end: 30001 },
-  opencodeBinary: 'opencode',
-  healthCheck: { retries: 2, intervalMs: 1 },
-};
-
 const workspaceConfig: WorkspaceConfig = {
   basePath: 'test-workspace-im',
   defaultPermissions: {},
@@ -104,7 +96,7 @@ describe('InstanceManager', () => {
   beforeEach(() => {
     cleanup();
     workspaceFactory = new WorkspaceFactory(workspaceConfig);
-    instanceManager = new InstanceManager(testConfig, workspaceFactory);
+    instanceManager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory);
 
     mockedSpawn = vi.mocked(spawn);
     mockedTreeKill = vi.mocked(treeKill as any);
@@ -170,7 +162,7 @@ describe('InstanceManager', () => {
 
     it('throws when no ports available and no instances to evict', async () => {
       const emptyConfig: OrchestratorConfig = {
-        ...testConfig,
+        ...defaultOrchestratorConfig,
         portRange: { start: 30000, end: 29999 },
       };
       const emptyManager = new InstanceManager(emptyConfig, workspaceFactory);
@@ -182,7 +174,7 @@ describe('InstanceManager', () => {
 
     it('evicts LRU instance when port pool exhausted', async () => {
       const tinyConfig: OrchestratorConfig = {
-        ...testConfig,
+        ...defaultOrchestratorConfig,
         portRange: { start: 30000, end: 30000 },
       };
       const tinyManager = new InstanceManager(tinyConfig, workspaceFactory);
@@ -222,7 +214,7 @@ describe('InstanceManager', () => {
         ensure: vi.fn(),
       } as any;
 
-      const manager = new InstanceManager(testConfig, badFactory);
+      const manager = new InstanceManager(defaultOrchestratorConfig, badFactory);
       await expect(manager.createInstance('conv-fail')).rejects.toThrow('disk full');
     });
 
@@ -231,7 +223,11 @@ describe('InstanceManager', () => {
       mockedSpawn.mockReturnValue(mockProc as any);
       mockHealth.mockRejectedValue(new Error('Connection refused'));
 
-      await expect(instanceManager.createInstance('conv-health-fail')).rejects.toThrow(
+      // Use a tight healthCheck config so this test doesn't wait long
+      const fastFailConfig = { ...defaultOrchestratorConfig, healthCheck: { retries: 2, intervalMs: 1 } };
+      const fastFailManager = new InstanceManager(fastFailConfig, workspaceFactory);
+
+      await expect(fastFailManager.createInstance('conv-health-fail')).rejects.toThrow(
         'OpenCode instance failed health check after 2 retries'
       );
     });
@@ -256,6 +252,45 @@ describe('InstanceManager', () => {
       expect(mockHealth).toHaveBeenCalledTimes(2);
     });
 
+  });
+
+  describe('Docker runtime', () => {
+    it('spawns docker container with correct args', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await dockerManager.createInstance('conv-docker');
+
+      const [, args] = mockedSpawn.mock.calls[0] as [string, string[], unknown];
+      expect(args).toEqual([
+        'run', '--rm',
+        '-p', '127.0.0.1:30000:3000',
+        '-v', expect.stringMatching(/conv-docker:\/workspace$/),
+        '-w', '/workspace',
+        '-e', 'OPENCODE_SERVER_USERNAME=opencode',
+        '-e', expect.stringMatching(/^OPENCODE_SERVER_PASSWORD=[a-f0-9]{32}$/),
+        dockerOrchestratorConfig.docker!.image,
+        'serve', '--port', '3000', '--hostname', '0.0.0.0',
+      ]);
+    });
+
+    it('creates instance with correct info in docker mode', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      const info = await dockerManager.createInstance('conv-docker2');
+
+      expect(info.id).toBe('conv-docker2');
+      expect(info.port).toBe(30000);
+      expect(info.sessionId).toBeUndefined();
+      expect(existsSync(info.workspacePath)).toBe(true);
+    });
   });
 
   describe('getInstance', () => {
@@ -436,7 +471,7 @@ describe('InstanceManager', () => {
   describe('maxInstances strict enforcement', () => {
     it('evicts LRU when maxInstances is reached', async () => {
       const strictConfig: OrchestratorConfig = {
-        ...testConfig,
+        ...defaultOrchestratorConfig,
         maxInstances: 1,
         portRange: { start: 30000, end: 30001 },
       };
@@ -472,7 +507,7 @@ describe('InstanceManager', () => {
   describe('idle timeout sweep', () => {
     it('destroys idle instance after timeout', async () => {
       const idleConfig: OrchestratorConfig = {
-        ...testConfig,
+        ...defaultOrchestratorConfig,
         idleTimeoutMs: 100,
         idleSweepIntervalMs: 50,
       };
@@ -503,7 +538,7 @@ describe('InstanceManager', () => {
 
   describe('destroy', () => {
     it('clears idle sweep timer without error', () => {
-      const manager = new InstanceManager(testConfig, workspaceFactory);
+      const manager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory);
       expect(() => manager.destroy()).not.toThrow();
       // Calling destroy twice should also be safe
       expect(() => manager.destroy()).not.toThrow();

@@ -1,5 +1,6 @@
 import { spawn } from 'cross-spawn';
 import { logger } from '../utils/logger.js';
+import type { Runtime } from '../config-loader.js';
 
 export interface ModelEntry {
   id: string;
@@ -7,9 +8,37 @@ export interface ModelEntry {
   model: string;
 }
 
+export interface ListModelsOptions {
+  runtime: Runtime;
+  opencodeBinary: string;
+  dockerImage?: string;
+}
+
 const MODELS_TIMEOUT_MS = 10000;
 
-export async function listModels(opencodeBinary: string): Promise<ModelEntry[]> {
+function parseModelsOutput(stdout: string): ModelEntry[] {
+  const lines = stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const entries: ModelEntry[] = [];
+  for (const line of lines) {
+    const parts = line.split('/');
+    if (parts.length >= 2) {
+      const provider = parts[0];
+      const model = parts.slice(1).join('/');
+      entries.push({
+        id: line,
+        provider,
+        model,
+      });
+    }
+  }
+  return entries;
+}
+
+export async function listModels(options: ListModelsOptions): Promise<ModelEntry[]> {
   return new Promise((resolve) => {
     let settled = false;
     const settle = (value: ModelEntry[]) => {
@@ -19,12 +48,23 @@ export async function listModels(opencodeBinary: string): Promise<ModelEntry[]> 
     };
 
     const timer = setTimeout(() => {
-      logger.warn(`opencode models timed out after ${MODELS_TIMEOUT_MS}ms`);
+      logger.warn('opencode models timed out');
       proc.kill();
       settle([]);
     }, MODELS_TIMEOUT_MS);
 
-    const proc = spawn(opencodeBinary, ['models'], {
+    let command: string;
+    let args: string[];
+
+    if (options.runtime === 'docker') {
+      command = 'docker';
+      args = ['run', '--rm', options.dockerImage!, 'models'];
+    } else {
+      command = options.opencodeBinary;
+      args = ['models'];
+    }
+
+    const proc = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -47,26 +87,7 @@ export async function listModels(opencodeBinary: string): Promise<ModelEntry[]> 
         return;
       }
 
-      const lines = stdout
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-
-      const entries: ModelEntry[] = [];
-      for (const line of lines) {
-        const parts = line.split('/');
-        if (parts.length >= 2) {
-          const provider = parts[0];
-          const model = parts.slice(1).join('/');
-          entries.push({
-            id: line,
-            provider,
-            model,
-          });
-        }
-      }
-
-      settle(entries);
+      settle(parseModelsOutput(stdout));
     });
 
     proc.on('error', (err: Error) => {
