@@ -110,11 +110,11 @@ describe('ConversationState', () => {
   it('should cancel ready check on remove', () => {
     const state = new ConversationState();
     state.create('conv-011');
-    const mockClient = { getSession: vi.fn() };
+    const mockClient = { getSession: vi.fn(), health: vi.fn() };
     state.setRunningInstance('conv-011', { process: {} as any, client: mockClient as any });
     state.setInstanceInfo('conv-011', { sessionId: 'ses_1' });
     state.startReadyCheck('conv-011');
-    expect(state.get('conv-011')?.ready).toBe(false);
+    expect(state.get('conv-011')?.ready).toBe(true);
     state.remove('conv-011');
     expect(state.get('conv-011')).toBeUndefined();
   });
@@ -297,10 +297,11 @@ describe('ConversationState', () => {
       expect(state.get('conv-ready-ok')?.ready).toBe(true);
     });
 
-    it('should retry when getSession fails then succeeds', async () => {
+    it('should retry keepalive when getSession fails then succeeds', async () => {
       const state = new ConversationState();
       state.create('conv-retry-poll');
       const mockClient = {
+        health: vi.fn().mockResolvedValue(undefined),
         getSession: vi.fn()
           .mockRejectedValueOnce(new Error('Not ready'))
           .mockResolvedValueOnce(undefined),
@@ -309,43 +310,54 @@ describe('ConversationState', () => {
       state.setInstanceInfo('conv-retry-poll', { sessionId: 'ses_retry' });
       state.startReadyCheck('conv-retry-poll');
 
+      // ready is set immediately after health check
+      expect(state.get('conv-retry-poll')?.ready).toBe(true);
+
+      // First keepalive poll at 500ms: getSession fails
       await vi.advanceTimersByTimeAsync(500);
       expect(mockClient.getSession).toHaveBeenCalledTimes(1);
-      expect(state.get('conv-retry-poll')?.ready).toBe(false);
 
-      await vi.advanceTimersByTimeAsync(500);
+      // Second keepalive poll at 5500ms (500 + 5000): getSession succeeds
+      await vi.advanceTimersByTimeAsync(5000);
       expect(mockClient.getSession).toHaveBeenCalledTimes(2);
       expect(state.get('conv-retry-poll')?.ready).toBe(true);
     });
 
-    it('should retry when sessionId not yet set', async () => {
+    it('should retry keepalive when sessionId not yet set', async () => {
       const state = new ConversationState();
       state.create('conv-no-ses');
-      const mockClient = { getSession: vi.fn().mockResolvedValue(undefined) };
+      const mockClient = { getSession: vi.fn().mockResolvedValue(undefined), health: vi.fn().mockResolvedValue(undefined) };
       state.setRunningInstance('conv-no-ses', { process: {} as any, client: mockClient as any });
       state.startReadyCheck('conv-no-ses');
 
+      // ready is set immediately; keepalive calls health() when no sessionId
+      expect(state.get('conv-no-ses')?.ready).toBe(true);
       await vi.advanceTimersByTimeAsync(500);
-      expect(mockClient.getSession).not.toHaveBeenCalled();
+      expect(mockClient.health).toHaveBeenCalledTimes(1);
 
       state.setInstanceInfo('conv-no-ses', { sessionId: 'ses_finally' });
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(5000);
       expect(mockClient.getSession).toHaveBeenCalledWith('ses_finally');
       expect(state.get('conv-no-ses')?.ready).toBe(true);
     });
 
-    it('should transition to error after max retries', async () => {
+    it('should keep polling keepalive on session failure and mark not ready', async () => {
       const state = new ConversationState();
       state.create('conv-timeout');
-      const mockClient = { getSession: vi.fn().mockRejectedValue(new Error('Not ready')) };
+      const mockClient = { getSession: vi.fn().mockRejectedValue(new Error('Not ready')), health: vi.fn() };
       state.setRunningInstance('conv-timeout', { process: {} as any, client: mockClient as any });
       state.setInstanceInfo('conv-timeout', { sessionId: 'ses_timeout' });
       state.startReadyCheck('conv-timeout');
 
-      await vi.advanceTimersByTimeAsync(60000);
+      await vi.advanceTimersByTimeAsync(500);
 
-      expect(mockClient.getSession).toHaveBeenCalledTimes(120);
-      expect(state.get('conv-timeout')?.status).toBe('error');
+      // First keepalive poll: getSession fails -> ready=false, continues polling
+      expect(state.get('conv-timeout')?.ready).toBe(false);
+      expect(mockClient.getSession).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      // Second keepalive poll: getSession fails again, ready stays false
+      expect(mockClient.getSession).toHaveBeenCalledTimes(2);
       expect(state.get('conv-timeout')?.ready).toBe(false);
     });
 

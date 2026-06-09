@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startServer, type E2EServer } from '../helpers/server.js';
 import { createWSClient } from '../helpers/ws.js';
+import { opencodeConfigWithProvider } from '../../src/test-fixtures/user-configs.js';
+import { uploadOpencodeConfig } from '../../src/test-fixtures/helpers.js';
 
 describe('Ready State (E2E)', () => {
   let server: E2EServer;
@@ -19,6 +21,8 @@ describe('Ready State (E2E)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-ready' }),
     });
+
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-ready', opencodeConfigWithProvider);
 
     const startRes = await fetch(`${server.baseUrl}/api/conversations/e2e-ready/start`, {
       method: 'POST',
@@ -47,6 +51,8 @@ describe('Ready State (E2E)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-ready-ws' }),
     })).json();
+
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-ready-ws', opencodeConfigWithProvider);
 
     await fetch(`${server.baseUrl}/api/conversations/e2e-ready-ws/start`, {
       method: 'POST',
