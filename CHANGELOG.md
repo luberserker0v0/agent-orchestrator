@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- feat(e2e): add e2e test framework with 4 scenario files (conversation lifecycle, ready-state, file CRUD, agent CRUD) — 28 tests using real OpenCode instances
+- feat(e2e): add e2e test framework with 6 scenario files (conversation lifecycle, ready-state, file CRUD, agent CRUD, docker runtime, message-send) — tests using real OpenCode instances
+- feat(e2e): add message-send scenario with HTTP REST and WebSocket JSON-RPC paths, including error handling
 - feat(conversation-state): add `isReady` state, `startReadyCheck()` polling mechanism, and `conversation.ready`/`conversation.readyLost` events
 - feat(http-api): add `POST /api/conversations/:id/message` for sending text via HTTP REST
 - feat(http-api): add dedicated AGENTS.md injection endpoints (`PUT/GET/DELETE /api/conversations/:id/agent/config`) with WS RPC (`agent.config.write/get/delete`)
