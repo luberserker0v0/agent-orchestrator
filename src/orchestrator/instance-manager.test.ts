@@ -264,7 +264,7 @@ describe('InstanceManager', () => {
 
       await dockerManager.createInstance('conv-docker');
 
-      const [, args] = mockedSpawn.mock.calls[0] as [string, string[]];
+      const [, args] = mockedSpawn.mock.calls[0] as [string, string[], unknown];
       expect(args).toEqual([
         'run', '--rm',
         '-p', '127.0.0.1:30000:3000',

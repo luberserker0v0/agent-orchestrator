@@ -208,7 +208,7 @@ describe('example config file', () => {
   it('parses agentorchestrator.example.json as valid JSONC', () => {
     const examplePath = join(process.cwd(), 'config', 'agentorchestrator.example.json');
     const raw = readFileSync(examplePath, 'utf-8');
-    const errors: unknown[] = [];
+    const errors: any[] = [];
     const parsed = parseJSONC(raw, errors) as Record<string, unknown>;
     expect(errors).toHaveLength(0);
     expect(parsed.server).toBeDefined();
