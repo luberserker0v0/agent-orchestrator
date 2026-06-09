@@ -73,7 +73,12 @@ describe('Message Send (E2E)', () => {
     });
 
     it('returns 409 for non-running conversation', async () => {
-      const res = await fetch(`${server.baseUrl}/api/conversations/non-existent/message`, {
+      await fetch(`${server.baseUrl}/api/conversations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'e2e-msg-notrunning' }),
+      });
+      const res = await fetch(`${server.baseUrl}/api/conversations/e2e-msg-notrunning/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'hello' }),
@@ -134,7 +139,7 @@ describe('Message Send (E2E)', () => {
 
       const ws = await createWSClient(conv.wsUrl);
       try {
-        await expect(ws.request('message.send', { text: 'hello' })).rejects.toThrow('not ready');
+        await expect(ws.request('message.send', { text: 'hello' })).rejects.toThrow('Conversation is not running');
       } finally {
         ws.close();
       }
