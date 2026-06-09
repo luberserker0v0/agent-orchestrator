@@ -63,7 +63,7 @@ function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHE
       .slice(prefix.length + 1)
       .split('_')
       .map((part, index) =>
-        index === 0 ? part.toLowerCase() : part[0].toLowerCase() + part.slice(1)
+        index === 0 ? part.toLowerCase() : part[0].toLowerCase() + part.slice(1).toLowerCase()
       );
 
     let current: Record<string, unknown> = config;
