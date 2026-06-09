@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseJSONC } from 'jsonc-parser';
 import { describe, it, expect } from 'vitest';
 import { loadConfig, validateConfig } from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
@@ -11,6 +14,7 @@ function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentO
       idleTimeoutMs: 600000,
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100 },
+      runtime: 'direct',
       opencodeBinary: 'opencode',
       healthCheck: { retries: 10, intervalMs: 500 },
     },
@@ -145,11 +149,78 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('healthCheck.intervalMs must be positive');
   });
 
+  it('rejects invalid runtime value', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, runtime: 'invalid' as 'direct' },
+    });
+    expect(() => validateConfig(config)).toThrow('runtime must be "direct" or "docker"');
+  });
+
+  it('requires docker config when runtime is docker', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, runtime: 'docker', docker: undefined },
+    });
+    expect(() => validateConfig(config)).toThrow('docker config is required when runtime is "docker"');
+  });
+
+  it('accepts valid docker runtime config', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        docker: { image: 'opencode:latest', containerPort: 3000 },
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('rejects empty docker.image', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        docker: { image: '', containerPort: 3000 },
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('docker.image must be a non-empty string');
+  });
+
+  it('rejects non-positive docker.containerPort', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        docker: { image: 'opencode:latest', containerPort: 0 },
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('docker.containerPort must be a positive integer');
+  });
+
   it('rejects empty workspace.basePath', () => {
     const config = createValidConfig({
       workspace: { basePath: '', defaultPermissions: {} },
     });
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
+  });
+});
+
+describe('example config file', () => {
+  it('parses agentorchestrator.example.json as valid JSONC', () => {
+    const examplePath = join(process.cwd(), 'config', 'agentorchestrator.example.json');
+    const raw = readFileSync(examplePath, 'utf-8');
+    const errors: unknown[] = [];
+    const parsed = parseJSONC(raw, errors) as Record<string, unknown>;
+    expect(errors).toHaveLength(0);
+    expect(parsed.server).toBeDefined();
+    expect(parsed.orchestrator).toBeDefined();
+    expect(parsed.workspace).toBeDefined();
+  });
+
+  it('validates when parsed as AgentOrchestratorConfig', () => {
+    const examplePath = join(process.cwd(), 'config', 'agentorchestrator.example.json');
+    const raw = readFileSync(examplePath, 'utf-8');
+    const parsed = parseJSONC(raw) as AgentOrchestratorConfig;
+    expect(() => validateConfig(parsed)).not.toThrow();
   });
 });
 

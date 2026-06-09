@@ -25,6 +25,9 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# User runtime config (copy from agentorchestrator.example.json)
+config/agentorchestrator.json
+
 # Temporary files
 *.tmp
 *.temp

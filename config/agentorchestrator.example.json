@@ -1,0 +1,53 @@
+{
+  // ── HTTP Server ───────────────────────────────────────────────────
+  "server": {
+    "port": 0,                 // 0 = auto-assign; set to e.g. 8080 for a fixed port
+    "host": "127.0.0.1",      // Bind address (use "0.0.0.0" for all interfaces)
+    "shutdownTimeoutMs": 15000 // Max ms to wait for graceful shutdown before force exit
+  },
+
+  // ── WebSocket ─────────────────────────────────────────────────────
+  "websocket": {
+    "heartbeatIntervalMs": 30000, // Ping interval (ms); 0 = disabled
+    "idleTimeoutMs": 600000       // Connection idle timeout (ms); 0 = no timeout
+  },
+
+  // ── Orchestrator (OpenCode instance lifecycle) ────────────────────
+  "orchestrator": {
+    "maxInstances": 10,           // Strict upper limit of concurrent OpenCode instances
+    "idleTimeoutMs": 600000,      // Auto-destroy after inactivity (ms); 0 = disabled
+    "idleSweepIntervalMs": 60000, // Idle check interval (ms)
+    "portRange": {
+      "start": 30000,
+      "end": 30100               // maxInstances must not exceed portRange.end - portRange.start + 1
+    },
+
+    // "direct" = spawn opencode binary directly on the host
+    // "docker" = spawn opencode inside a Docker container
+    "runtime": "direct",
+
+    // Path to the opencode CLI binary (only used when runtime = "direct")
+    "opencodeBinary": "opencode",
+
+    // Docker settings (only used when runtime = "docker")
+    "docker": {
+      "image": "ghcr.io/anomalyco/opencode",
+      "containerPort": 3000
+    },
+
+    // Health check — how long to wait for an OpenCode instance to become ready
+    "healthCheck": {
+      "retries": 10,   // Number of health check attempts before giving up
+      "intervalMs": 500 // Delay between retries (ms)
+    }
+  },
+
+  // ── Workspace ─────────────────────────────────────────────────────
+  "workspace": {
+    "basePath": "./workspace",
+    "defaultPermissions": {
+      "external_directory": { "*": "deny" },
+      "bash": { "*": "deny" }
+    }
+  }
+}
