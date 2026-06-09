@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { parse as parseJSONC } from 'jsonc-parser';
 
 export interface ServerConfig {
   port: number;
@@ -17,6 +18,13 @@ export interface HealthCheckConfig {
   intervalMs: number;
 }
 
+export type Runtime = 'direct' | 'docker';
+
+export interface DockerConfig {
+  image: string;
+  containerPort: number;
+}
+
 export interface OrchestratorConfig {
   maxInstances: number;
   idleTimeoutMs: number;
@@ -25,7 +33,9 @@ export interface OrchestratorConfig {
     start: number;
     end: number;
   };
+  runtime: Runtime;
   opencodeBinary: string;
+  docker?: DockerConfig;
   healthCheck: HealthCheckConfig;
 }
 
@@ -41,7 +51,9 @@ export interface AgentOrchestratorConfig {
   workspace: WorkspaceConfig;
 }
 
-const CONFIG_PATH = join(process.cwd(), 'config', 'agentorchestrator.json');
+const CONFIG_DIR = join(process.cwd(), 'config');
+const CONFIG_PATH = join(CONFIG_DIR, 'agentorchestrator.json');
+const EXAMPLE_PATH = join(CONFIG_DIR, 'agentorchestrator.example.json');
 
 function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHESTRATOR'): void {
   for (const [envKey, envValue] of Object.entries(process.env)) {
@@ -131,17 +143,54 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     throw new Error(`Config validation failed: healthCheck.intervalMs must be positive, got ${orchestrator.healthCheck.intervalMs}`);
   }
 
+  // Runtime validation
+  if (orchestrator.runtime !== 'direct' && orchestrator.runtime !== 'docker') {
+    throw new Error(`Config validation failed: runtime must be "direct" or "docker", got ${orchestrator.runtime}`);
+  }
+  if (orchestrator.runtime === 'docker') {
+    if (!orchestrator.docker) {
+      throw new Error('Config validation failed: docker config is required when runtime is "docker"');
+    }
+    if (!orchestrator.docker.image || typeof orchestrator.docker.image !== 'string') {
+      throw new Error('Config validation failed: docker.image must be a non-empty string');
+    }
+    if (typeof orchestrator.docker.containerPort !== 'number' || !Number.isInteger(orchestrator.docker.containerPort) || orchestrator.docker.containerPort <= 0) {
+      throw new Error(`Config validation failed: docker.containerPort must be a positive integer, got ${orchestrator.docker.containerPort}`);
+    }
+  }
+
   // Workspace validation
   if (!config.workspace.basePath || typeof config.workspace.basePath !== 'string') {
     throw new Error('Config validation failed: workspace.basePath must be a non-empty string');
   }
 }
 
+function readJSON(path: string): Record<string, unknown> {
+  const raw = readFileSync(path, 'utf-8');
+  if (path.endsWith('.example.json')) {
+    return parseJSONC(raw) as Record<string, unknown>;
+  }
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
 export function loadConfig(): AgentOrchestratorConfig {
-  const raw = readFileSync(CONFIG_PATH, 'utf-8');
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  let configPath: string;
+
+  if (existsSync(CONFIG_PATH)) {
+    configPath = CONFIG_PATH;
+  } else if (existsSync(EXAMPLE_PATH)) {
+    console.warn(`[config-loader] ${CONFIG_PATH} not found, falling back to ${EXAMPLE_PATH}. Copy it to use as your config.`);
+    configPath = EXAMPLE_PATH;
+  } else {
+    throw new Error(
+      `Config file not found. Please copy "${EXAMPLE_PATH}" to "${CONFIG_PATH}" and customize it.`
+    );
+  }
+
+  const parsed = readJSON(configPath);
   applyEnvOverrides(parsed);
   const config = parsed as unknown as AgentOrchestratorConfig;
+  config.orchestrator.runtime = config.orchestrator.runtime || 'direct';
   validateConfig(config);
   return config;
 }
