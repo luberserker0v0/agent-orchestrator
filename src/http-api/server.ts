@@ -87,8 +87,7 @@ export function createHttpServer(
       })
       .catch((err) => {
         logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
-        conversationState.transition(id, 'error', { error: `Session creation failed: ${(err as Error).message}` });
-        instanceManager.destroyInstance(id).catch(() => {});
+        // Instance stays running — user can reconfigure provider and restart
       });
   }
 

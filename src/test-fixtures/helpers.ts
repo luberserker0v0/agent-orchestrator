@@ -8,13 +8,13 @@ export async function uploadOpencodeConfig(
   config: Record<string, unknown>,
 ): Promise<void> {
   const res = await fetch(`${baseUrl}/api/conversations/${conversationId}/config`, {
-    method: 'PUT',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
   if (res.status !== 204) {
     throw new Error(
-      `uploadOpencodeConfig failed: PUT /api/conversations/${conversationId}/config returned ${res.status}`,
+      `uploadOpencodeConfig failed: POST /api/conversations/${conversationId}/config returned ${res.status}`,
     );
   }
 }
