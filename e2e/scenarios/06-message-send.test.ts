@@ -49,13 +49,18 @@ describe('Message Send (E2E)', () => {
         body: JSON.stringify({ text: 'Say hello in one word' }),
       });
       expect(msgRes.status).toBe(200);
-      const body = await msgRes.json() as { messageId: string; text: string; parts: unknown[] };
+      const body = await msgRes.json() as { messageId: string; text: string; parts: Array<{ type: string; text?: string }> };
       expect(body).toHaveProperty('messageId');
       expect(typeof body.messageId).toBe('string');
+      expect(body.messageId).toBeTruthy();
       expect(body).toHaveProperty('text');
       expect(typeof body.text).toBe('string');
+      expect(body.text.length).toBeGreaterThan(0);
       expect(body).toHaveProperty('parts');
       expect(Array.isArray(body.parts)).toBe(true);
+      expect(body.parts.length).toBeGreaterThan(0);
+      expect(body.parts[0].type).toBe('text');
+      expect(body.parts[0].text).toBeTruthy();
     });
 
     it('returns 400 for missing text', async () => {
@@ -102,12 +107,18 @@ describe('Message Send (E2E)', () => {
         const response = await ws.request('message.send', {
           text: 'Say hello in one word',
         });
-        expect(response.result).toHaveProperty('messageId');
-        expect(typeof (response.result as Record<string, unknown>).messageId).toBe('string');
-        expect(response.result).toHaveProperty('text');
-        expect(typeof (response.result as Record<string, unknown>).text).toBe('string');
-        expect(response.result).toHaveProperty('parts');
-        expect(Array.isArray((response.result as Record<string, unknown>).parts)).toBe(true);
+        const result = response.result as { messageId: string; text: string; parts: Array<{ type: string; text?: string }> };
+        expect(result).toHaveProperty('messageId');
+        expect(typeof result.messageId).toBe('string');
+        expect(result.messageId).toBeTruthy();
+        expect(result).toHaveProperty('text');
+        expect(typeof result.text).toBe('string');
+        expect(result.text.length).toBeGreaterThan(0);
+        expect(result).toHaveProperty('parts');
+        expect(Array.isArray(result.parts)).toBe(true);
+        expect(result.parts.length).toBeGreaterThan(0);
+        expect(result.parts[0].type).toBe('text');
+        expect(result.parts[0].text).toBeTruthy();
       } finally {
         ws.close();
       }
