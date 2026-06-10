@@ -894,4 +894,100 @@ describe('InstanceManager', () => {
       expect(() => manager.destroy()).not.toThrow();
     });
   });
+
+  describe('cleanupOrphanContainers', () => {
+    it('returns immediately when runtime is direct', async () => {
+      const directManager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory);
+      await directManager.cleanupOrphanContainers();
+      expect(mockedSpawn).not.toHaveBeenCalled();
+      directManager.destroy();
+    });
+
+    it('does nothing when no orphan containers exist', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+
+      const promise = dockerManager.cleanupOrphanContainers();
+      mockProc.emit('exit', 0);
+      await promise;
+
+      expect(mockedSpawn).toHaveBeenCalledTimes(1);
+      expect(mockedSpawn).toHaveBeenCalledWith(
+        'docker',
+        ['ps', '-a', '--filter', 'name=agentorchestrator-', '--format', '{{.Names}}'],
+        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }),
+      );
+      dockerManager.destroy();
+    });
+
+    it('removes orphan containers', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      const psProc = createMockProc();
+      const rmProc1 = createMockProc();
+      const rmProc2 = createMockProc();
+
+      mockedSpawn.mockReturnValueOnce(psProc as any);
+      mockedSpawn.mockReturnValueOnce(rmProc1 as any);
+      mockedSpawn.mockReturnValueOnce(rmProc2 as any);
+
+      const promise = dockerManager.cleanupOrphanContainers();
+
+      psProc.emit('stdout:data', Buffer.from('agentorchestrator-foo\n'));
+      psProc.emit('stdout:data', Buffer.from('agentorchestrator-bar\n'));
+      psProc.emit('exit', 0);
+
+      rmProc1.emit('exit', 0);
+      rmProc2.emit('exit', 0);
+
+      await promise;
+
+      expect(mockedSpawn).toHaveBeenCalledTimes(3);
+      expect(mockedSpawn).toHaveBeenNthCalledWith(
+        1, 'docker',
+        ['ps', '-a', '--filter', 'name=agentorchestrator-', '--format', '{{.Names}}'],
+        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }),
+      );
+      expect(mockedSpawn).toHaveBeenNthCalledWith(2, 'docker', ['rm', '-f', 'agentorchestrator-foo'], expect.any(Object));
+      expect(mockedSpawn).toHaveBeenNthCalledWith(3, 'docker', ['rm', '-f', 'agentorchestrator-bar'], expect.any(Object));
+      dockerManager.destroy();
+    });
+
+    it('handles docker ps error gracefully', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+
+      const promise = dockerManager.cleanupOrphanContainers();
+      mockProc.emit('error', new Error('docker not found'));
+      await promise;
+
+      // Only the ps call was made, no rm calls
+      expect(mockedSpawn).toHaveBeenCalledTimes(1);
+      dockerManager.destroy();
+    });
+
+    it('still resolves when rm fails', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      const psProc = createMockProc();
+      const rmProc = createMockProc();
+
+      mockedSpawn.mockReturnValueOnce(psProc as any);
+      mockedSpawn.mockReturnValueOnce(rmProc as any);
+
+      const promise = dockerManager.cleanupOrphanContainers();
+
+      psProc.emit('stdout:data', Buffer.from('agentorchestrator-stubborn\n'));
+      psProc.emit('exit', 0);
+
+      // rm emits error instead of exit — code counts error as complete
+      rmProc.emit('error', new Error('permission denied'));
+
+      await promise;
+
+      expect(mockedSpawn).toHaveBeenCalledTimes(2);
+      expect(mockedSpawn).toHaveBeenNthCalledWith(2, 'docker', ['rm', '-f', 'agentorchestrator-stubborn'], expect.any(Object));
+      dockerManager.destroy();
+    });
+  });
 });
