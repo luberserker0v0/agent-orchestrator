@@ -59,7 +59,7 @@ Client → POST /api/conversations (with model, agent)
   ▼
 AgentOrchestrator
   │ 1. 產生 UUID → workspace/{id}/
-  │ 2. WorkspaceFactory.create(id, options) → 建立資料夾與 opencode.json
+  │ 2. WorkspaceFactory.create(id, options) → 建立資料夾（`opencode.json` 僅在用戶 POST 時寫入）
   │ 3. ConversationState.create(id) → status = 'prepared'
   │ 4. 註冊 wsUrl (尚未分配 port，不啟動 OpenCode)
   │
@@ -267,7 +267,7 @@ AgentOrchestrator
 
 | 方法 | 職責 |
 |------|------|
-| `create(id, options?)` | 建立 workspace 與 `opencode.json`（含沙箱權限、model、agent） |
+| `create(id, options?)` | 建立 workspace 資料夾；**不寫入** `opencode.json`（僅在用戶透過 POST 或 WS `config.update` 時才寫入） |
 | `hasWorkspace(id)` | 檢查 workspace 是否已存在 |
 | `ensure(id)` | 確保 workspace 存在（供重用時呼叫） |
 | `destroy(id)` | 移除 workspace 資料夾 |
@@ -281,6 +281,11 @@ AgentOrchestrator
 | `getSkillInfo(id, name)` | 取得 Skill 目錄結構、總大小與 SHA-256 hash |
 | `deleteSkill(id, name)` | 移除 `.opencode/skills/{name}/` 目錄；若不存在則拋出錯誤 |
 | `calculateWorkspaceSize(id)` | 計算 workspace 總大小（遞迴） |
+
+**規範配置強制合併**：
+- `config/canonical-opencode.json` 為系統預設 `opencode.json` 模板，定義 `$schema` 與 `permission` 沙箱權限
+- `enforceCanonicalConfig`（預設 `true`）：`writeConfig()` 時 deep-clone canonical 模板，僅接受使用者提供的**非 canonical keys**（如 `model`、`agent`），確保安全設定不被覆寫
+- 設定 `workspace.enforceCanonicalConfig: false` 可關閉此行為，直接寫入使用者原始內容
 
 **安全機制**：
 - `sanitizeRelativePath(path)`：拒絕包含 `..` 的相對路徑與絕對路徑（`/...` 或 `C:\...`）
@@ -335,7 +340,7 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再�
   - 會話類：`session.create`, `session.delete`, `session.list`
   - 訊息類：`message.send`, `message.history`
   - 對話控制類：`conversation.status`, `conversation.start`, `conversation.stop`, `conversation.restart`
-  - 配置類：`config.read`, `config.write`
+  - 配置類：`config.get`, `config.update`
   - Agent 類：`agent.list`, `agent.read`, `agent.write`, `agent.delete`
   - 檔案類：`file.list`, `file.read`, `file.write`, `file.delete`
   - Skill 類：`skills.import`, `skills.list`, `skills.get`, `skills.info`, `skills.delete`
@@ -353,12 +358,17 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再�
 2. `applyEnvOverrides()`：掃描 `AGENTORCHESTRATOR_*` 環境變數並覆寫對應路徑
 3. 回傳 `AgentOrchestratorConfig` 型別物件
 
+**`loadCanonicalConfig()`**：
+- 讀取 `config/canonical-opencode.json`，作為所有 workspace 的 `opencode.json` 系統預設模板
+- 內容固定包含 `$schema` 與 `permission` 沙箱權限區塊
+- 供 `WorkspaceFactory.writeConfig()` 在 `enforceCanonicalConfig=true` 時合併使用
+
 ---
 
 ## 安全設計
 
 1. **進程級隔離**：每個對話獨立 `opencode serve`，互不影響
-2. **檔案系統沙箱**：`opencode.json` 限制 `external_directory: deny`，工具只能存取 workspace 內檔案
+2. **檔案系統沙箱**：`config/canonical-opencode.json` 定義系統預設 `$schema` 與 `permission` 區塊，寫入 `opencode.json` 時強制合併（`enforceCanonicalConfig=true` 預設），確保權限設定不被使用者覆寫
 3. **動態 Basic Auth**：每個 OpenCode 實例自動生成獨立密碼，避免與使用者全域設定衝突
 4. **自動資源回收**：LRU 淘汰與刪除時的 `treeKill` + `rmSync`，防止殭屍進程與磁碟洩漏
 5. **Workspace 配額限制**：單一 workspace 上限 50 MB，超過時寫入操作被拒絕

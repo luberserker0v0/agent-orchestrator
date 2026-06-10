@@ -45,6 +45,7 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 }
 ```
 - `id`：可省略，由系統自動生成 UUID
+- **注意**：`model` 與 `agent` 不再作為請求欄位；請透過 config endpoints（`POST /:id/config` 或 WS `config.update`）設定 opencode.json
 
 **回應**（`201 Created`）：
 ```json
@@ -153,21 +154,21 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 
 ---
 
-### `PUT /api/conversations/:id/config`
+### `POST /api/conversations/:id/config`
 
-**完整覆寫**對話的 `opencode.json`。
+寫入（或更新）對話的 `opencode.json`。
+
+當 `enforceCanonicalConfig=true`（預設），伺服器會先從 `config/canonical-opencode.json` 載入系統預設值，再合併使用者提供的 keys（使用者 keys 僅在 canonical 中不存在的項目才會生效，保護 `$schema` 與 `permission` 不被覆寫）。若設為 `false`，則直接寫入使用者的原始內容。
 
 **請求**：
 ```json
 {
-  "opencode": {
-    "$schema": "https://opencode.ai/schemas/opencode.json",
-    "permission": {
-      "external_directory": { "*": "deny", "C:/Projects/**": "allow" },
-      "bash": { "*": "deny", "git *": "allow" }
-    },
-    "model": "openai/gpt-5"
-  }
+  "$schema": "https://opencode.ai/schemas/opencode.json",
+  "permission": {
+    "external_directory": { "*": "deny", "C:/Projects/**": "allow" },
+    "bash": { "*": "deny", "git *": "allow" }
+  },
+  "model": "openai/gpt-5"
 }
 ```
 
@@ -1000,7 +1001,7 @@ references/capabilities.md
 
 ### 配置類
 
-#### `config.read`
+#### `config.get`
 
 讀取 `opencode.json`。
 
@@ -1009,7 +1010,7 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 10,
-  "method": "config.read",
+  "method": "config.get",
   "params": {}
 }
 ```
@@ -1030,22 +1031,20 @@ references/capabilities.md
 
 ---
 
-#### `config.write`
+#### `config.update`
 
-覆寫 `opencode.json`。
+寫入（或更新）`opencode.json`。當 `enforceCanonicalConfig=true`（預設），僅接受 canonical 中不存在的使用者 keys，保護系統預設值不被覆寫。可透過 `workspace.enforceCanonicalConfig=false` 關閉此行為。
 
 **請求**：
 ```json
 {
   "jsonrpc": "2.0",
   "id": 11,
-  "method": "config.write",
+  "method": "config.update",
   "params": {
-    "opencode": {
-      "$schema": "https://opencode.ai/schemas/opencode.json",
-      "permission": { "external_directory": { "*": "deny" }, "bash": { "*": "deny" } },
-      "model": "openai/gpt-5"
-    }
+    "$schema": "https://opencode.ai/schemas/opencode.json",
+    "permission": { "external_directory": { "*": "deny" }, "bash": { "*": "deny" } },
+    "model": "openai/gpt-5"
   }
 }
 ```
@@ -1055,7 +1054,7 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 11,
-  "result": { "ok": true }
+  "result": { "updated": true }
 }
 ```
 
