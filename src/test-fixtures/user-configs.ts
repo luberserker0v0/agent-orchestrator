@@ -13,6 +13,7 @@ export const opencodeConfigWithProvider: Record<string, unknown> = {
   permission: {
     bash: { '*': 'deny' },
     external_directory: { '*': 'deny' },
+    question: 'deny',
   },
   provider: {
     my_local_lmstudio: {
