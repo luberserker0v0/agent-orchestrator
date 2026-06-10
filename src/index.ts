@@ -16,6 +16,10 @@ async function main() {
   const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory);
   const conversationState = new ConversationState();
 
+  // Clean up orphan resources from previous runs (e.g., after SIGKILL/crash)
+  await instanceManager.cleanupOrphanContainers();
+  workspaceFactory.cleanupOrphans();
+
   const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
