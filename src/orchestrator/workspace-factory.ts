@@ -139,7 +139,7 @@ export class WorkspaceFactory {
     if (this.enforceCanonicalConfig) {
       result = structuredClone(this.canonicalConfig);
       for (const key of Object.keys(config)) {
-        if (!(key in this.canonicalConfig)) {
+        if (!Object.hasOwn(this.canonicalConfig, key)) {
           result[key] = config[key];
         }
       }
