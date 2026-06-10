@@ -5,7 +5,7 @@ import { join, dirname, sep, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
-import { InstanceManager } from '../orchestrator/instance-manager.js';
+import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
 import type { OpenCodeClient } from '../opencode-http/client.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
@@ -197,32 +197,52 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     const state = conversationState.get(id)!;
-    if (state.status !== 'running' && state.status !== 'stopped' && state.status !== 'error') {
-      res.status(409).json({ error: `Cannot restart conversation in status: ${state.status}` });
+    const previousStatus = state.status;
+    if (previousStatus !== 'running' && previousStatus !== 'stopped' && previousStatus !== 'error') {
+      res.status(409).json({ error: `Cannot restart conversation in status: ${previousStatus}` });
       return;
     }
 
     conversationState.transition(id, 'restarting');
 
     try {
-      // Stop existing instance if running
-      if (state.status === 'running' || state.status === 'error') {
+      const hadInstance = previousStatus === 'running' || previousStatus === 'error';
+      let dockerRestarted = false;
+
+      if (hadInstance) {
         conversationState.cancelReadyCheck(id);
-        try {
-          await instanceManager.destroyInstance(id);
-        } catch {
-          // ignore errors stopping old instance
+        if (orchestratorConfig.runtime === 'docker') {
+          // Docker: try to restart the existing container in-place
+          try {
+            await instanceManager.restartInstance(id);
+            dockerRestarted = true;
+          } catch {
+            // Restart failed — fall back to kill + respawn
+            await instanceManager.stopInstance(id).catch(() => {});
+            conversationState.removeRunningInstance(id);
+          }
+        } else {
+          // Direct: kill old process
+          await instanceManager.stopInstance(id);
+          conversationState.removeRunningInstance(id);
         }
-        conversationState.removeRunningInstance(id);
       }
 
       conversationState.clearNeedsRestart(id);
-      const instance = await instanceManager.createInstance(id);
-      conversationState.setInstanceInfo(id, { port: instance.port });
-      conversationState.setRunningInstance(id, {
-        process: instance.process,
-        client: instance.client,
-      });
+
+      let instance: InstanceInfo;
+      if (dockerRestarted) {
+        // Docker restart succeeded — reuse existing instance (same port, same container)
+        instance = instanceManager.getInstance(id)!;
+      } else {
+        instance = await instanceManager.createInstance(id);
+        conversationState.setInstanceInfo(id, { port: instance.port });
+        conversationState.setRunningInstance(id, {
+          process: instance.process,
+          client: instance.client,
+        });
+      }
+
       conversationState.transition(id, 'running');
       conversationState.startReadyCheck(id);
       res.json({
@@ -315,26 +335,6 @@ export function createHttpServer(
 
   // ─── Config ──────────────────────────────────────────────
 
-  app.patch('/api/conversations/:id/config', (req: Request, res: Response) => {
-    const id = getConversationId(req);
-    if (!ensureConversation(res, id)) return;
-
-    try {
-      const config = req.body.config;
-      if (typeof config !== 'object' || config === null) {
-        res.status(400).json({ error: 'Missing or invalid config body' });
-        return;
-      }
-      workspaceFactory.writeConfig(id, config);
-      markNeedsRestartIfRunning(id, 'opencode.json changed');
-      conversationState.emitEvent(id, 'conversation.configChanged', { changedFiles: ['.opencode/opencode.json'] });
-      res.status(204).send();
-    } catch (err) {
-      logger.error(`Failed to update config for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
-    }
-  });
-
   app.get('/api/conversations/:id/config', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
@@ -347,7 +347,6 @@ export function createHttpServer(
     }
   });
 
-  // POST config (write raw JSON as full opencode.json replacement)
   app.post('/api/conversations/:id/config', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WorkspaceFactory } from './workspace-factory.js';
 
@@ -21,7 +21,7 @@ describe('WorkspaceFactory', () => {
   it('should create workspace with specified id', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: { external_directory: { '*': 'deny' } },
+      enforceCanonicalConfig: true,
     });
 
     const info = factory.create('conv-001');
@@ -31,32 +31,22 @@ describe('WorkspaceFactory', () => {
     expect(info.id).toBe('conv-001');
   });
 
-  it('should write opencode.json with correct structure', () => {
+  it('should not write opencode.json on create', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: { external_directory: { '*': 'deny' }, bash: { '*': 'deny' } },
+      enforceCanonicalConfig: true,
     });
 
     factory.create('conv-002');
 
     const configPath = join(TEST_BASE_PATH, 'conv-002', '.opencode', 'opencode.json');
-    expect(existsSync(configPath)).toBe(true);
-
-    const content = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(content.$schema).toBe('https://opencode.ai/config.json');
-    expect(content.permission).toEqual({
-      external_directory: { '*': 'deny' },
-      bash: { '*': 'deny' },
-    });
-    expect(content.model).toBeUndefined();
-    expect(content.agent).toBeUndefined();
-    expect(content.default_agent).toBeUndefined();
+    expect(existsSync(configPath)).toBe(false);
   });
 
   it('should sanitize id to prevent path traversal', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: {},
+      enforceCanonicalConfig: true,
     });
 
     const info = factory.create('../../../etc/passwd');
@@ -70,7 +60,7 @@ describe('WorkspaceFactory', () => {
   it('should generate UUID when id is not provided', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: {},
+      enforceCanonicalConfig: true,
     });
 
     const info = factory.create();
@@ -83,7 +73,7 @@ describe('WorkspaceFactory', () => {
   it('should not throw when creating existing workspace (recursive)', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: {},
+      enforceCanonicalConfig: true,
     });
 
     factory.create('conv-004');
@@ -94,7 +84,7 @@ describe('WorkspaceFactory', () => {
   it('should destroy workspace and remove files', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: {},
+      enforceCanonicalConfig: true,
     });
 
     const info = factory.create('conv-005');
@@ -107,7 +97,7 @@ describe('WorkspaceFactory', () => {
   it('should not throw when destroying non-existent workspace', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: {},
+      enforceCanonicalConfig: true,
     });
 
     expect(() => factory.destroy('non-existent')).not.toThrow();
@@ -116,7 +106,7 @@ describe('WorkspaceFactory', () => {
   it('should ensure workspace directory exists without config', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: {},
+      enforceCanonicalConfig: true,
     });
 
     const info = factory.ensure('conv-ensure-no-config');
@@ -130,7 +120,7 @@ describe('WorkspaceFactory', () => {
   it('should report whether workspace exists', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: {},
+      enforceCanonicalConfig: true,
     });
 
     expect(factory.hasWorkspace('non-existent')).toBe(false);
@@ -141,7 +131,7 @@ describe('WorkspaceFactory', () => {
   it('should return 0 size for non-existent workspace', () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
-      defaultPermissions: {},
+      enforceCanonicalConfig: true,
     });
 
     expect(factory.getWorkspaceSize('ghost')).toBe(0);
@@ -150,28 +140,51 @@ describe('WorkspaceFactory', () => {
   // ─── Config ──────────────────────────────────────────────
 
   describe('writeConfig / readConfig', () => {
-    it('should overwrite opencode.json completely', () => {
-      const factory = new WorkspaceFactory({
-        basePath: 'test-workspace',
-        defaultPermissions: {},
-      });
+    it('should allow setting non-canonical keys when enforce=true', () => {
+      const factory = new WorkspaceFactory(
+        { basePath: 'test-workspace', enforceCanonicalConfig: true },
+        { $schema: 'https://opencode.ai/config.json' }
+      );
       factory.create('conv-config');
-
       factory.writeConfig('conv-config', { model: 'gpt-4', customKey: 'value' });
 
       const config = factory.readConfig('conv-config');
+      expect(config.$schema).toBe('https://opencode.ai/config.json');
       expect(config.model).toBe('gpt-4');
       expect(config.customKey).toBe('value');
-      expect(config.$schema).toBeUndefined(); // fully overwritten
+    });
+
+    it('should protect canonical keys when enforce=true', () => {
+      const factory = new WorkspaceFactory(
+        { basePath: 'test-workspace', enforceCanonicalConfig: true },
+        { $schema: 'https://opencode.ai/config.json', permission: { bash: 'deny' } }
+      );
+      factory.create('conv-config-protect');
+      factory.writeConfig('conv-config-protect', { permission: { bash: 'allow' }, model: 'gpt-4' });
+
+      const config = factory.readConfig('conv-config-protect');
+      expect(config.permission).toEqual({ bash: 'deny' });
+      expect(config.model).toBe('gpt-4');
+    });
+
+    it('should write verbatim when enforce=false', () => {
+      const factory = new WorkspaceFactory(
+        { basePath: 'test-workspace', enforceCanonicalConfig: false },
+      );
+      factory.create('conv-config-free');
+      factory.writeConfig('conv-config-free', { model: 'gpt-4', permission: { bash: 'allow' } });
+
+      const config = factory.readConfig('conv-config-free');
+      expect(config.model).toBe('gpt-4');
+      expect(config.permission).toEqual({ bash: 'allow' });
     });
 
     it('should return empty object when config does not exist', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
-      factory.create('conv-config2');
-      rmSync(join(TEST_BASE_PATH, 'conv-config2', '.opencode', 'opencode.json'));
+      factory.ensure('conv-config2');
 
       expect(factory.readConfig('conv-config2')).toEqual({});
     });
@@ -183,7 +196,7 @@ describe('WorkspaceFactory', () => {
     it('should write and read agent markdown', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agent');
 
@@ -195,7 +208,7 @@ describe('WorkspaceFactory', () => {
     it('should list agents', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agent-list');
 
@@ -210,7 +223,7 @@ describe('WorkspaceFactory', () => {
     it('should delete agent', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agent-del');
 
@@ -223,7 +236,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when reading non-existent agent', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agent-miss');
 
@@ -233,7 +246,7 @@ describe('WorkspaceFactory', () => {
     it('should return empty list when agents directory does not exist', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-no-agents-dir');
 
@@ -245,7 +258,7 @@ describe('WorkspaceFactory', () => {
     it('should write and read AGENTS.md', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agentsmd');
 
@@ -257,7 +270,7 @@ describe('WorkspaceFactory', () => {
     it('should read AGENTS.md at workspace root', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agentsmd-root');
 
@@ -273,7 +286,7 @@ describe('WorkspaceFactory', () => {
     it('should overwrite existing AGENTS.md', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agentsmd-over');
 
@@ -287,7 +300,7 @@ describe('WorkspaceFactory', () => {
     it('should delete AGENTS.md', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agentsmd-del');
 
@@ -300,7 +313,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when reading non-existent AGENTS.md', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agentsmd-miss');
 
@@ -310,7 +323,7 @@ describe('WorkspaceFactory', () => {
     it('should not throw when deleting non-existent AGENTS.md', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-agentsmd-nop');
 
@@ -324,7 +337,7 @@ describe('WorkspaceFactory', () => {
     it('should write and read files', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-file');
 
@@ -336,7 +349,7 @@ describe('WorkspaceFactory', () => {
     it('should list files', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-file-list');
 
@@ -351,7 +364,7 @@ describe('WorkspaceFactory', () => {
     it('should delete files', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-file-del');
 
@@ -363,7 +376,7 @@ describe('WorkspaceFactory', () => {
     it('should block path traversal in file operations', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-sec');
 
@@ -374,7 +387,7 @@ describe('WorkspaceFactory', () => {
     it('should block absolute paths', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-sec2');
 
@@ -384,7 +397,7 @@ describe('WorkspaceFactory', () => {
     it('should block backslash-based path traversal', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-sec3');
 
@@ -394,7 +407,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when reading non-existent file', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-read-miss');
 
@@ -404,7 +417,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when listing files in non-existent subdirectory', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-list-miss');
 
@@ -414,7 +427,7 @@ describe('WorkspaceFactory', () => {
     it('should delete directory recursively', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-dir-del');
 
@@ -430,7 +443,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when deleting non-existent file', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-del-miss');
 
@@ -451,7 +464,7 @@ describe('WorkspaceFactory', () => {
 
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-skill');
 
@@ -477,7 +490,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when skill not found', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-skill-miss');
 
@@ -493,7 +506,7 @@ describe('WorkspaceFactory', () => {
 
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-skill-del');
 
@@ -509,7 +522,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when deleting non-existent skill', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-skill-del-miss');
 
@@ -519,7 +532,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when importing non-existent source', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-skill-no-src');
 
@@ -535,7 +548,7 @@ describe('WorkspaceFactory', () => {
 
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-skill-not-dir');
 
@@ -549,7 +562,7 @@ describe('WorkspaceFactory', () => {
     it('should reject import from disallowed source', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-skill-denied');
 
@@ -561,7 +574,7 @@ describe('WorkspaceFactory', () => {
     it('should reject invalid skill name in importSkillFromLocal', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-invalid-import');
 
@@ -573,7 +586,7 @@ describe('WorkspaceFactory', () => {
     it('should reject invalid skill name in readSkill', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-invalid-read');
 
@@ -583,7 +596,7 @@ describe('WorkspaceFactory', () => {
     it('should reject invalid skill name in getSkillInfo', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-invalid-info');
 
@@ -593,7 +606,7 @@ describe('WorkspaceFactory', () => {
     it('should reject invalid skill name in deleteSkill', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-invalid-delete');
 
@@ -603,7 +616,7 @@ describe('WorkspaceFactory', () => {
     it('should reject sibling prefix path skills_evil/', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-prefix-evil');
 
@@ -615,7 +628,7 @@ describe('WorkspaceFactory', () => {
     it('should reject sibling prefix path assets_backup/', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-prefix-assets');
 
@@ -627,7 +640,7 @@ describe('WorkspaceFactory', () => {
     it('should reject sibling prefix path templates-old/', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-prefix-tpl');
 
@@ -661,7 +674,7 @@ describe('WorkspaceFactory', () => {
     it('should copy file from allowed source', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-copy');
 
@@ -673,7 +686,7 @@ describe('WorkspaceFactory', () => {
     it('should reject copy from disallowed source', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-copy-denied');
 
@@ -685,7 +698,7 @@ describe('WorkspaceFactory', () => {
     it('should throw when copy source not found', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-copy-no-src');
 
@@ -697,7 +710,7 @@ describe('WorkspaceFactory', () => {
     it('should reject copy from sibling prefix path skills_evil/', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-copy-prefix-evil');
 
@@ -709,7 +722,7 @@ describe('WorkspaceFactory', () => {
     it('should reject copy from sibling prefix path templates_backup/', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-copy-prefix-bak');
 
@@ -725,7 +738,7 @@ describe('WorkspaceFactory', () => {
     it('should enforce 50MB workspace size limit', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-quota');
 
@@ -737,7 +750,7 @@ describe('WorkspaceFactory', () => {
     it('should calculate workspace size', () => {
       const factory = new WorkspaceFactory({
         basePath: 'test-workspace',
-        defaultPermissions: {},
+        enforceCanonicalConfig: true,
       });
       factory.create('conv-size');
       factory.writeFile('conv-size', 'test.txt', 'hello');
