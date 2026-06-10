@@ -62,10 +62,7 @@ npm install
   },
   "workspace": {
     "basePath": "./workspace",
-    "defaultPermissions": {
-      "external_directory": { "*": "deny" },
-      "bash": { "*": "deny" }
-    }
+    "enforceCanonicalConfig": true
   }
 }
 ```
@@ -85,7 +82,7 @@ npm install
 | `orchestrator.healthCheck.retries` | `number` | 啟動時健康檢查重試次數 | `10` |
 | `orchestrator.healthCheck.intervalMs` | `number` | 健康檢查重試間隔 | `500` |
 | `workspace.basePath` | `string` | Workspace 資料夾根目錄 | `./workspace` |
-| `workspace.defaultPermissions` | `object` | 每個 workspace 內 `opencode.json` 的權限設定 | — |
+| `workspace.enforceCanonicalConfig` | `boolean` | 寫入 `opencode.json` 時強制合併 `config/canonical-opencode.json` 系統預設（保護 `$schema` 與 `permission`） | `true` |
 
 ### 環境變數覆寫
 
@@ -143,7 +140,7 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `POST` | `/api/conversations/:id/start` | 啟動 OpenCode 實例 |
 | `POST` | `/api/conversations/:id/stop` | 停止 OpenCode 實例（保留 workspace） |
 | `POST` | `/api/conversations/:id/restart` | 重啟 OpenCode 實例（保留 workspace） |
-| `GET/PUT` | `/api/conversations/:id/config` | 讀取 / 覆寫 `opencode.json` |
+| `GET/POST` | `/api/conversations/:id/config` | 讀取 / 寫入 `opencode.json`（`enforceCanonicalConfig` 保護系統預設值） |
 | `GET/PUT/GET/DELETE` | `/api/conversations/:id/agents` / `/:name` | Agent CRUD（自動發現） |
 | `POST/GET/GET/GET/DELETE` | `/api/conversations/:id/skills/upload` / `/import` / `/:name` / `/:name/info` | Skill 上傳（zip）/ 導入 / 讀取 / 資訊（結構+hash）/ 刪除 |
 | `PUT/POST/POST/POST` | `/api/conversations/:id/files` (write/read/delete/list) | 通用檔案 CRUD |
@@ -162,7 +159,7 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `message.history` | 取得對話歷史 |
 | `session.abort` | 中止正在生成的回應 |
 | `conversation.status` / `conversation.start` / `conversation.stop` / `conversation.restart` | 對話生命周期控制 |
-| `config.read` / `config.write` | 配置讀寫 |
+| `config.get` / `config.update` | 配置讀寫（`update` 支援 canonical 強制合併） |
 | `agent.list` / `agent.read` / `agent.write` / `agent.delete` | Agent CRUD |
 | `skills.import` / `skills.list` / `skills.get` / `skills.info` / `skills.delete` | Skill 導入 / 列出 / 讀取 / 資訊 / 刪除 |
 | `file.list` / `file.read` / `file.write` / `file.delete` | 檔案 CRUD |
@@ -187,7 +184,7 @@ echo "Available models: $MODELS"
 # 3. 準備對話（僅建立 workspace，不啟動 OpenCode）
 CONV=$(curl -s -X POST http://127.0.0.1:11697/api/conversations \
   -H "Content-Type: application/json" \
-  -d '{"id":"demo","model":"anthropic/claude-3-5-sonnet","agent":"build"}')
+  -d '{"id":"demo"}')
 
 echo "Conversation prepared: $CONV"
 
@@ -361,16 +358,19 @@ AGENTORCHESTRATOR_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
 
 ### 4. 調整權限限制
 
-預設禁止 `external_directory` 與 `bash`。若需放寬特定路徑：
+預設透過 `config/canonical-opencode.json` 限制 `external_directory` 與 `bash`。若需放寬，編輯 canonical 模板中的 `permission` 區塊：
 
 ```json
-"workspace": {
-  "defaultPermissions": {
+{
+  "$schema": "https://opencode.ai/schemas/opencode.json",
+  "permission": {
     "external_directory": { "*": "deny", "C:/Projects/**": "allow" },
     "bash": { "*": "deny", "git *": "allow" }
   }
 }
 ```
+
+若需完全關閉強制合併（不建議），設定 `workspace.enforceCanonicalConfig: false`，然後透過 `POST /api/conversations/:id/config` 寫入自訂內容。
 
 參考 [OpenCode 權限文件](https://opencode.ai/docs/zh-tw/permissions/)。
 
@@ -394,12 +394,12 @@ curl -s http://127.0.0.1:11697/api/models
 
 ### 7. 如何為對話設定預設模型
 
-在建立對話時帶入 `model` 與 `agent`：
+建立對話後，透過 config endpoints 設定 `opencode.json` 中的 `model` 與 `agent`：
 
 ```bash
-curl -s -X POST http://127.0.0.1:11697/api/conversations \
+curl -s -X POST http://127.0.0.1:11697/api/conversations/demo/config \
   -H "Content-Type: application/json" \
-  -d '{"id":"demo","model":"anthropic/claude-3-5-sonnet","agent":"build"}'
+  -d '{"model": "anthropic/claude-3-5-sonnet", "agent": "build"}'
 ```
 
 之後透過 WebSocket 發送訊息時，若不帶 `model`，會自動使用對話預設模型；若帶 `model`，則覆寫本次請求：
