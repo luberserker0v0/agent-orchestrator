@@ -103,7 +103,12 @@ export class InstanceManager {
     }
 
     if (!healthy) {
-      this.safeKill(proc);
+      if (this.config.runtime === 'docker') {
+        const rm = spawn('docker', ['rm', '-f', `agentorchestrator-${id}`], { stdio: 'ignore' });
+        await this.waitForExit(rm, 10000);
+      } else {
+        this.safeKill(proc);
+      }
       this.portPool.release(port);
       try { rmSync(workspace.path, { recursive: true, force: true }); } catch { /* ignore cleanup errors */ }
       throw new Error(`OpenCode instance failed health check after ${this.config.healthCheck.retries} retries`);
@@ -173,10 +178,12 @@ export class InstanceManager {
 
   private _spawnDocker(id: string, port: number, workspacePath: string, password: string): ChildProcess {
     const { image, containerPort } = this.config.docker!;
+    const containerName = `agentorchestrator-${id}`;
 
-    logger.info(`Spawning OpenCode container on port ${port} (image: ${image}, container port: ${containerPort})`);
+    logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${image})`);
     const proc = spawn('docker', [
-      'run', '--rm',
+      'run', '-d',
+      '--name', containerName,
       '-p', `127.0.0.1:${port}:${containerPort}`,
       '-v', `${workspacePath}:/workspace`,
       '-w', '/workspace',
@@ -195,20 +202,57 @@ export class InstanceManager {
     proc.stderr?.on('data', (data: Buffer) => {
       logger.warn(`[Docker ${id}] ${data.toString().trim()}`);
     });
-    proc.on('exit', (code: number | null) => {
-      logger.warn(`[OpenCode ${id}] container exited with code ${code}`);
-      this.cleanupInstance(id, false);
-    });
-    proc.on('error', (err: Error) => {
-      logger.error(`[OpenCode ${id}] container error: ${err.message}`);
-      this.cleanupInstance(id, false);
-    });
-
+    // docker run -d exits immediately; don't attach lifecycle cleanup here
     return proc;
   }
 
   async destroyInstance(id: string): Promise<void> {
     await this.cleanupInstance(id, true);
+  }
+
+  /** Kill process and release port, but preserve workspace on disk */
+  async stopInstance(id: string): Promise<void> {
+    await this.cleanupInstance(id, false);
+  }
+
+  /** Docker-only: restart container in-place (same port, same workspace, same container) */
+  async restartInstance(id: string): Promise<void> {
+    const inst = this.instances.get(id);
+    if (!inst) throw new Error(`Instance not found: ${id}`);
+
+    const containerName = `agentorchestrator-${id}`;
+    logger.info(`Restarting container ${containerName}...`);
+
+    const restart = spawn('docker', ['restart', containerName], { stdio: 'ignore' });
+    const exitCode = await new Promise<number | null>((resolve) => {
+      restart.on('exit', resolve);
+      restart.on('error', () => resolve(null));
+    });
+    if (exitCode !== 0) {
+      throw new Error(`docker restart failed for container ${containerName}`);
+    }
+
+    // Health check after restart
+    let healthy = false;
+    for (let i = 0; i < this.config.healthCheck.retries; i++) {
+      await this.delay(this.config.healthCheck.intervalMs);
+      try {
+        const result = await inst.client.health();
+        if (result.healthy) {
+          healthy = true;
+          logger.info(`[OpenCode ${id}] restart health check passed (attempt ${i + 1})`);
+          break;
+        }
+      } catch {
+        logger.warn(`[OpenCode ${id}] restart health check attempt ${i + 1} failed`);
+      }
+    }
+
+    if (!healthy) {
+      throw new Error(`Container restart health check failed for ${id} after ${this.config.healthCheck.retries} retries`);
+    }
+
+    inst.lastUsedAt = Date.now();
   }
 
   listInstances(): Pick<InstanceInfo, 'id' | 'port' | 'lastUsedAt'>[] {
@@ -241,9 +285,19 @@ export class InstanceManager {
 
     this.instances.delete(id);
 
-    this.safeKill(inst.process);
-    await this.waitForExit(inst.process, 5000);
-    this.safeKill(inst.process, 'SIGKILL');
+    if (this.config.runtime === 'docker') {
+      const containerName = `agentorchestrator-${id}`;
+      try {
+        const rm = spawn('docker', ['rm', '-f', containerName], { stdio: 'ignore' });
+        await this.waitForExit(rm, 10000);
+      } catch {
+        logger.warn(`[Docker ${id}] failed to remove container`);
+      }
+    } else {
+      this.safeKill(inst.process);
+      await this.waitForExit(inst.process, 5000);
+      this.safeKill(inst.process, 'SIGKILL');
+    }
 
     this.portPool.release(inst.port);
 

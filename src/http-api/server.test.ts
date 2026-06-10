@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { createHttpServer, type HttpServer } from './server.js';
-import { defaultOrchestratorConfig } from '../test-fixtures/ao-configs.js';
+import { defaultOrchestratorConfig, dockerOrchestratorConfig } from '../test-fixtures/ao-configs.js';
 import AdmZip from 'adm-zip';
 
 describe('HTTP API Server', () => {
@@ -16,6 +16,8 @@ describe('HTTP API Server', () => {
     mockInstanceManager = {
       createInstance: vi.fn(),
       destroyInstance: vi.fn().mockResolvedValue(undefined),
+      stopInstance: vi.fn().mockResolvedValue(undefined),
+      restartInstance: vi.fn().mockResolvedValue(undefined),
       listInstances: vi.fn(),
       getInstance: vi.fn(),
       setSessionId: vi.fn(),
@@ -809,7 +811,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/restart');
 
     expect(res.status).toBe(200);
-    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockInstanceManager.stopInstance).toHaveBeenCalledWith('conv-001');
   });
 
   it('POST /api/conversations/:id/restart returns 409 when in prepared status', async () => {
@@ -829,6 +831,27 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error).toContain('port busy');
+  });
+
+  it('POST /api/conversations/:id/restart uses restartInstance for Docker runtime', async () => {
+    const dockerHttp = createHttpServer(
+      { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
+      { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
+      mockInstanceManager,
+      mockWorkspaceFactory,
+      mockConversationState,
+      dockerOrchestratorConfig
+    );
+    mockConversationState.get.mockReturnValue({ id: 'conv-docker', status: 'running' });
+    mockInstanceManager.restartInstance.mockResolvedValue(undefined);
+    mockInstanceManager.getInstance.mockReturnValue({ port: 30010, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
+
+    const res = await request(dockerHttp.server).post('/api/conversations/conv-docker/restart');
+
+    expect(res.status).toBe(200);
+    expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith('conv-docker');
+    expect(mockInstanceManager.stopInstance).not.toHaveBeenCalled();
+    dockerHttp.server.close();
   });
 
   // ─── Single conversation GET ───────────────────────────
