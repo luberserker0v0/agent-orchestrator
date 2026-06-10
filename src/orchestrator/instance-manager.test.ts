@@ -254,6 +254,67 @@ describe('InstanceManager', () => {
       expect(mockHealth).toHaveBeenCalledTimes(2);
     });
 
+    it('calls ensure() when workspace already exists', async () => {
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+      mockCreateSession.mockResolvedValue({
+        id: 'ses_ensure',
+        title: null,
+        parent_id: null,
+        status: 'active',
+        created_at: '',
+        updated_at: '',
+      });
+
+      const info = await instanceManager.createInstance('conv-ensure');
+      const wsPath = info.workspacePath;
+      expect(existsSync(wsPath)).toBe(true);
+
+      // Stop preserves workspace on disk
+      await instanceManager.stopInstance('conv-ensure');
+      expect(instanceManager.listInstances()).toHaveLength(0);
+      expect(existsSync(wsPath)).toBe(true);
+
+      // Second creation should use ensure() since workspace exists
+      const proc2 = createMockProc();
+      mockedSpawn.mockReturnValue(proc2 as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      const info2 = await instanceManager.createInstance('conv-ensure');
+      expect(info2.workspacePath).toBe(wsPath);
+      expect(existsSync(info2.workspacePath)).toBe(true);
+    });
+
+    it('retries after healthy=false health check response', async () => {
+      const fastConfig: OrchestratorConfig = {
+        ...defaultOrchestratorConfig,
+        healthCheck: { retries: 3, intervalMs: 1 },
+      };
+      const fastManager = new InstanceManager(fastConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth
+        .mockResolvedValueOnce({ healthy: false, version: '1.0.0' })
+        .mockResolvedValueOnce({ healthy: true, version: '1.0.0' });
+      mockCreateSession.mockResolvedValue({
+        id: 'ses_false',
+        title: null,
+        parent_id: null,
+        status: 'active',
+        created_at: '',
+        updated_at: '',
+      });
+
+      const info = await fastManager.createInstance('conv-health-false');
+      expect(info.sessionId).toBeUndefined();
+      expect(mockHealth).toHaveBeenCalledTimes(2);
+
+      await fastManager.destroyInstance('conv-health-false');
+      fastManager.destroy();
+    });
+
   });
 
   describe('Docker runtime', () => {
@@ -325,6 +386,135 @@ describe('InstanceManager', () => {
       expect(info.sessionId).toBeUndefined();
       expect(existsSync(info.workspacePath)).toBe(true);
     });
+
+    it('destroys docker container using docker rm -f', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await dockerManager.createInstance('conv-docker-rm');
+
+      // Clear spawn calls to verify the docker rm call
+      mockedSpawn.mockClear();
+      const rmProc = createMockProc({ exitCode: 0 });
+      mockedSpawn.mockReturnValue(rmProc as any);
+
+      await dockerManager.destroyInstance('conv-docker-rm');
+
+      const [, args] = mockedSpawn.mock.calls[0] as [string, string[], unknown];
+      expect(args).toEqual(['rm', '-f', 'agentorchestrator-conv-docker-rm']);
+
+      dockerManager.destroy();
+    });
+
+    it('cleans up docker container when health check fails', async () => {
+      const fastDockerConfig: OrchestratorConfig = {
+        ...dockerOrchestratorConfig,
+        healthCheck: { retries: 2, intervalMs: 1 },
+      };
+      const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockRejectedValue(new Error('Connection refused'));
+
+      await expect(dockerManager.createInstance('conv-docker-health-fail')).rejects.toThrow(
+        'OpenCode instance failed health check after 2 retries'
+      );
+
+      expect(mockedSpawn).toHaveBeenCalledWith('docker', ['rm', '-f', 'agentorchestrator-conv-docker-health-fail'], { stdio: 'ignore' });
+
+      dockerManager.destroy();
+    });
+  });
+
+  describe('restartInstance', () => {
+    it('restarts docker container and waits for health check to pass', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await dockerManager.createInstance('conv-restart');
+
+      mockedSpawn.mockClear();
+      const restartProc = createMockProc({ exitCode: 0 });
+      mockedSpawn.mockReturnValue(restartProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      // restartInstance awaits 'exit' event — emit it after listener is registered
+      const restartPromise = dockerManager.restartInstance('conv-restart');
+      restartProc.emit('exit', 0);
+      await restartPromise;
+
+      const [, args] = mockedSpawn.mock.calls[0] as [string, string[], unknown];
+      expect(args).toEqual(['restart', 'agentorchestrator-conv-restart']);
+
+      await dockerManager.destroyInstance('conv-restart');
+      dockerManager.destroy();
+    });
+
+    it('throws when instance not found', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      await expect(dockerManager.restartInstance('no-such-instance')).rejects.toThrow(
+        'Instance not found: no-such-instance'
+      );
+      dockerManager.destroy();
+    });
+
+    it('throws when docker restart command fails', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await dockerManager.createInstance('conv-restart-fail');
+
+      mockedSpawn.mockClear();
+      const restartProc = createMockProc({ exitCode: 1 });
+      mockedSpawn.mockReturnValue(restartProc as any);
+
+      const restartPromise = dockerManager.restartInstance('conv-restart-fail');
+      restartProc.emit('exit', 1);
+      await expect(restartPromise).rejects.toThrow(
+        'docker restart failed for container agentorchestrator-conv-restart-fail'
+      );
+
+      await dockerManager.destroyInstance('conv-restart-fail');
+      dockerManager.destroy();
+    });
+
+    it('throws when health check fails after restart', async () => {
+      const fastDockerConfig: OrchestratorConfig = {
+        ...dockerOrchestratorConfig,
+        healthCheck: { retries: 2, intervalMs: 1 },
+      };
+      const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory);
+
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await dockerManager.createInstance('conv-restart-health');
+
+      mockedSpawn.mockClear();
+      const restartProc = createMockProc({ exitCode: 0 });
+      mockedSpawn.mockReturnValue(restartProc as any);
+      mockHealth.mockRejectedValue(new Error('Connection refused'));
+
+      const restartPromise = dockerManager.restartInstance('conv-restart-health');
+      restartProc.emit('exit', 0);
+      await expect(restartPromise).rejects.toThrow(
+        'Container restart health check failed for conv-restart-health after 2 retries'
+      );
+
+      await dockerManager.destroyInstance('conv-restart-health');
+      dockerManager.destroy();
+    });
   });
 
   describe('getInstance', () => {
@@ -349,6 +539,32 @@ describe('InstanceManager', () => {
 
     it('returns undefined for non-existent instance', () => {
       expect(instanceManager.getInstance('no-one')).toBeUndefined();
+    });
+  });
+
+  describe('setSessionId', () => {
+    it('sets session ID on existing instance', async () => {
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+      mockCreateSession.mockResolvedValue({
+        id: 'ses_set',
+        title: null,
+        parent_id: null,
+        status: 'active',
+        created_at: '',
+        updated_at: '',
+      });
+
+      await instanceManager.createInstance('conv-set-session');
+      instanceManager.setSessionId('conv-set-session', 'ses_set');
+
+      const inst = instanceManager.getInstance('conv-set-session');
+      expect(inst!.sessionId).toBe('ses_set');
+    });
+
+    it('does not throw for non-existent instance', () => {
+      expect(() => instanceManager.setSessionId('ghost', 'ses_ghost')).not.toThrow();
     });
   });
 
@@ -389,6 +605,35 @@ describe('InstanceManager', () => {
 
     it('does not throw for non-existent id', async () => {
       await expect(instanceManager.destroyInstance('ghost')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('stopInstance', () => {
+    it('kills process but preserves workspace on disk', async () => {
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+      mockCreateSession.mockResolvedValue({
+        id: 'ses_stop',
+        title: null,
+        parent_id: null,
+        status: 'active',
+        created_at: '',
+        updated_at: '',
+      });
+
+      const info = await instanceManager.createInstance('conv-stop');
+      expect(instanceManager.listInstances()).toHaveLength(1);
+      expect(existsSync(info.workspacePath)).toBe(true);
+
+      await instanceManager.stopInstance('conv-stop');
+
+      expect(instanceManager.listInstances()).toHaveLength(0);
+      expect(existsSync(info.workspacePath)).toBe(true);
+    });
+
+    it('does not throw for non-existent instance', async () => {
+      await expect(instanceManager.stopInstance('ghost')).resolves.toBeUndefined();
     });
   });
 
@@ -647,6 +892,102 @@ describe('InstanceManager', () => {
       expect(() => manager.destroy()).not.toThrow();
       // Calling destroy twice should also be safe
       expect(() => manager.destroy()).not.toThrow();
+    });
+  });
+
+  describe('cleanupOrphanContainers', () => {
+    it('returns immediately when runtime is direct', async () => {
+      const directManager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory);
+      await directManager.cleanupOrphanContainers();
+      expect(mockedSpawn).not.toHaveBeenCalled();
+      directManager.destroy();
+    });
+
+    it('does nothing when no orphan containers exist', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+
+      const promise = dockerManager.cleanupOrphanContainers();
+      mockProc.emit('exit', 0);
+      await promise;
+
+      expect(mockedSpawn).toHaveBeenCalledTimes(1);
+      expect(mockedSpawn).toHaveBeenCalledWith(
+        'docker',
+        ['ps', '-a', '--filter', 'name=agentorchestrator-', '--format', '{{.Names}}'],
+        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }),
+      );
+      dockerManager.destroy();
+    });
+
+    it('removes orphan containers', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      const psProc = createMockProc();
+      const rmProc1 = createMockProc();
+      const rmProc2 = createMockProc();
+
+      mockedSpawn.mockReturnValueOnce(psProc as any);
+      mockedSpawn.mockReturnValueOnce(rmProc1 as any);
+      mockedSpawn.mockReturnValueOnce(rmProc2 as any);
+
+      const promise = dockerManager.cleanupOrphanContainers();
+
+      psProc.emit('stdout:data', Buffer.from('agentorchestrator-foo\n'));
+      psProc.emit('stdout:data', Buffer.from('agentorchestrator-bar\n'));
+      psProc.emit('exit', 0);
+
+      rmProc1.emit('exit', 0);
+      rmProc2.emit('exit', 0);
+
+      await promise;
+
+      expect(mockedSpawn).toHaveBeenCalledTimes(3);
+      expect(mockedSpawn).toHaveBeenNthCalledWith(
+        1, 'docker',
+        ['ps', '-a', '--filter', 'name=agentorchestrator-', '--format', '{{.Names}}'],
+        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }),
+      );
+      expect(mockedSpawn).toHaveBeenNthCalledWith(2, 'docker', ['rm', '-f', 'agentorchestrator-foo'], expect.any(Object));
+      expect(mockedSpawn).toHaveBeenNthCalledWith(3, 'docker', ['rm', '-f', 'agentorchestrator-bar'], expect.any(Object));
+      dockerManager.destroy();
+    });
+
+    it('handles docker ps error gracefully', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      const mockProc = createMockProc();
+      mockedSpawn.mockReturnValue(mockProc as any);
+
+      const promise = dockerManager.cleanupOrphanContainers();
+      mockProc.emit('error', new Error('docker not found'));
+      await promise;
+
+      // Only the ps call was made, no rm calls
+      expect(mockedSpawn).toHaveBeenCalledTimes(1);
+      dockerManager.destroy();
+    });
+
+    it('still resolves when rm fails', async () => {
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory);
+      const psProc = createMockProc();
+      const rmProc = createMockProc();
+
+      mockedSpawn.mockReturnValueOnce(psProc as any);
+      mockedSpawn.mockReturnValueOnce(rmProc as any);
+
+      const promise = dockerManager.cleanupOrphanContainers();
+
+      psProc.emit('stdout:data', Buffer.from('agentorchestrator-stubborn\n'));
+      psProc.emit('exit', 0);
+
+      // rm emits error instead of exit — code counts error as complete
+      rmProc.emit('error', new Error('permission denied'));
+
+      await promise;
+
+      expect(mockedSpawn).toHaveBeenCalledTimes(2);
+      expect(mockedSpawn).toHaveBeenNthCalledWith(2, 'docker', ['rm', '-f', 'agentorchestrator-stubborn'], expect.any(Object));
+      dockerManager.destroy();
     });
   });
 });

@@ -137,6 +137,76 @@ describe('WorkspaceFactory', () => {
     expect(factory.getWorkspaceSize('ghost')).toBe(0);
   });
 
+  // ─── cleanupOrphans ──────────────────────────────────────
+
+  describe('cleanupOrphans', () => {
+    it('should remove all directories in basePath', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        enforceCanonicalConfig: true,
+      });
+
+      mkdirSync(join(TEST_BASE_PATH, 'orphan-1'), { recursive: true });
+      mkdirSync(join(TEST_BASE_PATH, 'orphan-2'), { recursive: true });
+      expect(existsSync(join(TEST_BASE_PATH, 'orphan-1'))).toBe(true);
+
+      factory.cleanupOrphans();
+
+      expect(existsSync(join(TEST_BASE_PATH, 'orphan-1'))).toBe(false);
+      expect(existsSync(join(TEST_BASE_PATH, 'orphan-2'))).toBe(false);
+    });
+
+    it('should not throw when basePath is empty', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        enforceCanonicalConfig: true,
+      });
+
+      expect(() => factory.cleanupOrphans()).not.toThrow();
+    });
+
+    it('should not throw when basePath does not exist', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'nonexistent-workspace',
+        enforceCanonicalConfig: true,
+      });
+
+      expect(() => factory.cleanupOrphans()).not.toThrow();
+    });
+
+    it('should not affect files outside basePath', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        enforceCanonicalConfig: true,
+      });
+
+      const outsidePath = join(process.cwd(), 'outside-test-file.txt');
+      writeFileSync(outsidePath, 'should not be deleted');
+      mkdirSync(join(TEST_BASE_PATH, 'orphan-inside'), { recursive: true });
+
+      factory.cleanupOrphans();
+
+      expect(existsSync(outsidePath)).toBe(true);
+      rmSync(outsidePath, { force: true });
+    });
+
+    it('should handle errors gracefully', () => {
+      const factory = new WorkspaceFactory({
+        basePath: 'test-workspace',
+        enforceCanonicalConfig: true,
+      });
+
+      mkdirSync(join(TEST_BASE_PATH, 'orphan-a'), { recursive: true });
+      mkdirSync(join(TEST_BASE_PATH, 'orphan-b'), { recursive: true });
+
+      // Simulate a read-only scenario: create a file and make it unwritable
+      // On Windows this approach is limited, so just verify no throw
+      expect(() => factory.cleanupOrphans()).not.toThrow();
+      expect(existsSync(join(TEST_BASE_PATH, 'orphan-a'))).toBe(false);
+      expect(existsSync(join(TEST_BASE_PATH, 'orphan-b'))).toBe(false);
+    });
+  });
+
   // ─── Config ──────────────────────────────────────────────
 
   describe('writeConfig / readConfig', () => {

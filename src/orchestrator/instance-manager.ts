@@ -345,6 +345,55 @@ export class InstanceManager {
     }
   }
 
+  async cleanupOrphanContainers(): Promise<void> {
+    if (this.config.runtime !== 'docker') {
+      logger.info('Runtime is not docker, skipping orphan container cleanup');
+      return;
+    }
+
+    return new Promise<void>((resolve) => {
+      const ps = spawn('docker', ['ps', '-a', '--filter', 'name=agentorchestrator-', '--format', '{{.Names}}'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let output = '';
+      ps.stdout!.on('data', (chunk: Buffer) => {
+        output += chunk.toString();
+      });
+
+      ps.on('error', (err) => {
+        logger.error('Failed to list Docker containers for orphan cleanup', err);
+        resolve();
+      });
+
+      ps.on('exit', () => {
+        const names = output.trim().split('\n').filter(Boolean);
+        if (names.length === 0) {
+          logger.info('No orphan Docker containers found');
+          resolve();
+          return;
+        }
+
+        logger.info(`Found ${names.length} orphan Docker container(s), removing...`);
+        let completed = 0;
+        for (const name of names) {
+          const rm = spawn('docker', ['rm', '-f', name], { stdio: 'ignore' });
+          rm.on('error', () => {
+            completed++;
+            if (completed === names.length) resolve();
+          });
+          rm.on('exit', () => {
+            completed++;
+            if (completed === names.length) {
+              logger.info(`Cleaned up ${names.length} orphan Docker container(s)`);
+              resolve();
+            }
+          });
+        }
+      });
+    });
+  }
+
   private startIdleSweep(): void {
     if (this.config.idleTimeoutMs === 0) {
       logger.info('Idle sweep disabled (idleTimeoutMs=0)');
