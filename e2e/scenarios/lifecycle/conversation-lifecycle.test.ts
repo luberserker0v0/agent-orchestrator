@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startServer, type E2EServer } from '../helpers/server.js';
+import { startServer, type E2EServer } from '../../helpers/server.js';
+import { opencodeConfigWithProvider } from '../../src/test-fixtures/user-configs.js';
+import { uploadOpencodeConfig } from '../../src/test-fixtures/helpers.js';
 
 describe('Conversation Lifecycle (E2E)', () => {
   let server: E2EServer;
@@ -51,14 +53,16 @@ describe('Conversation Lifecycle (E2E)', () => {
     expect(res.status).toBe(409);
   });
 
-  it('starts conversation', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/e2e-lifecycle/start`, {
+  it('uploads provider config and starts conversation', async () => {
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-lifecycle', opencodeConfigWithProvider);
+
+    const startRes = await fetch(`${server.baseUrl}/api/conversations/e2e-lifecycle/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     });
-    expect(res.status).toBe(200);
-    const body = await res.json();
+    expect(startRes.status).toBe(200);
+    const body = await startRes.json();
     expect(body.status).toBe('running');
     expect(body.ready).toBe(false);
     expect(typeof body.port).toBe('number');

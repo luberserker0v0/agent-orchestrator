@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startServer, type E2EServer } from '../helpers/server.js';
-import { createWSClient } from '../helpers/ws.js';
+import { startServer, type E2EServer } from '../../helpers/server.js';
+import { createWSClient } from '../../helpers/ws.js';
 import { opencodeConfigWithProvider } from '../../src/test-fixtures/user-configs.js';
 import { uploadOpencodeConfig } from '../../src/test-fixtures/helpers.js';
 

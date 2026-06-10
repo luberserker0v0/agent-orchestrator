@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestratorConfig } from '../../src/config-loader.js';
@@ -6,6 +7,7 @@ import { createHttpServer, type HttpServer } from '../../src/http-api/server.js'
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
 import { ConversationState } from '../../src/orchestrator/conversation-state.js';
+import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE } from '../../src/test-fixtures/ao-configs.js';
 
 export interface E2EServer {
   port: number;
@@ -22,19 +24,25 @@ export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>)
     defaultPermissions: {
       external_directory: { '*': 'deny' },
       bash: { '*': 'deny' },
+      question: 'deny'
     },
   };
 
   const serverConfig = { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 };
   const wsConfig = { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 };
+
+  const runtime = orchestratorOverrides?.runtime || process.env.E2E_RUNTIME || 'direct';
+
+  if (runtime === 'docker') {
+    const info = spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 5000 });
+    if (info.status !== 0) throw new Error('Docker is required for docker runtime tests but docker info failed');
+    const img = spawnSync('docker', ['inspect', TEST_DOCKER_IMAGE], { stdio: 'ignore', timeout: 5000 });
+    if (img.status !== 0) throw new Error(`Docker image ${TEST_DOCKER_IMAGE} not found. Run: docker pull ${TEST_DOCKER_IMAGE}`);
+  }
+
+  const baseConfig = runtime === 'docker' ? dockerOrchestratorConfig : defaultOrchestratorConfig;
   const orchestratorConfig: OrchestratorConfig = {
-    maxInstances: 5,
-    idleTimeoutMs: 600000,
-    idleSweepIntervalMs: 60000,
-    portRange: { start: 30000, end: 30050 },
-    opencodeBinary: 'opencode',
-    healthCheck: { retries: 10, intervalMs: 500 },
-    runtime: 'direct',
+    ...baseConfig,
     ...orchestratorOverrides,
   };
 
