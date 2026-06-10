@@ -47,7 +47,8 @@
     "basePath": "./workspace",
     "defaultPermissions": {
       "external_directory": { "*": "deny" },
-      "bash": { "*": "deny" }
+      "bash": { "*": "deny" },
+      "question": "deny"
     }
   }
 }

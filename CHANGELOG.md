@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- feat(e2e): add e2e test framework with 6 scenario files (conversation lifecycle, ready-state, file CRUD, agent CRUD, docker runtime, message-send) — tests using real OpenCode instances
+- feat(e2e): restructure scenarios into `workspace/` (runtime-agnostic CRUD) and `lifecycle/` (runtime-specific, runs once per runtime). Runtime selected via `E2E_RUNTIME` env var, no soft-skip logic
+- feat(e2e): add `test:e2e:workspace`, `test:e2e:direct`, `test:e2e:docker` scripts for targeted runtime testing
+- feat(e2e): add e2e test framework with 5 scenario files (file CRUD, agent CRUD, conversation lifecycle, ready-state, message-send) — tests using real OpenCode instances
 - feat(e2e): add message-send scenario with HTTP REST and WebSocket JSON-RPC paths, including error handling
 - feat(conversation-state): add `isReady` state, `startReadyCheck()` polling mechanism, and `conversation.ready`/`conversation.readyLost` events
 - feat(http-api): add `POST /api/conversations/:id/message` for sending text via HTTP REST
