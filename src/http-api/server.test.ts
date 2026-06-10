@@ -897,26 +897,6 @@ describe('HTTP API Server', () => {
     expect(res.status).toBe(404);
   });
 
-  // ─── Config PATCH ──────────────────────────────────────
-
-  it('PATCH /api/conversations/:id/config updates config', async () => {
-    const res = await request(server)
-      .patch('/api/conversations/conv-001/config')
-      .send({ config: { model: 'new/model' } });
-
-    expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith('conv-001', { model: 'new/model' });
-  });
-
-  it('PATCH /api/conversations/:id/config returns 400 for missing config', async () => {
-    const res = await request(server)
-      .patch('/api/conversations/conv-001/config')
-      .send({});
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Missing or invalid config');
-  });
-
   // ─── Config GET ────────────────────────────────────────
 
   it('GET /api/conversations/:id/config reads config', async () => {

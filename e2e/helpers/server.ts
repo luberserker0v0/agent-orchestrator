@@ -21,11 +21,7 @@ export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>)
 
   const workspaceConfig = {
     basePath: workspaceDir,
-    defaultPermissions: {
-      external_directory: { '*': 'deny' },
-      bash: { '*': 'deny' },
-      question: 'deny'
-    },
+    enforceCanonicalConfig: false,
   };
 
   const serverConfig = { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 };

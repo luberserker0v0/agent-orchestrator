@@ -81,7 +81,7 @@ function createMockProc(opts: { exitCode?: number | null; pid?: number | undefin
 
 const workspaceConfig: WorkspaceConfig = {
   basePath: 'test-workspace-im',
-  defaultPermissions: {},
+  enforceCanonicalConfig: true,
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────

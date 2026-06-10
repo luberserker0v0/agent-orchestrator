@@ -172,7 +172,7 @@ export class WSRouter {
 
       // ─── Config ──────────────────────────────────────────
 
-      case 'config.patch': {
+      case 'config.update': {
         const { config } = params as { config: Record<string, unknown> };
         if (typeof config !== 'object' || config === null) {
           throw new Error('Missing or invalid config');
@@ -184,7 +184,7 @@ export class WSRouter {
         this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
           changedFiles: ['.opencode/opencode.json'],
         });
-        return { patched: true };
+        return { updated: true };
       }
 
       case 'config.get': {

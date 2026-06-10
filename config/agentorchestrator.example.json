@@ -45,10 +45,9 @@
   // ── Workspace ─────────────────────────────────────────────────────
   "workspace": {
     "basePath": "./workspace",
-    "defaultPermissions": {
-      "external_directory": { "*": "deny" },
-      "bash": { "*": "deny" },
-      "question": "deny"
-    }
+    // When true: user-submitted opencode.json is merged with canonical-opencode.json,
+    // and canonical keys always win (security enforcement).
+    // When false: user-submitted opencode.json is written verbatim.
+    "enforceCanonicalConfig": true
   }
 }

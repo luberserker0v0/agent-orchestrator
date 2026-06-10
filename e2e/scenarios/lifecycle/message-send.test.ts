@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startServer, type E2EServer } from '../../helpers/server.js';
 import { createWSClient } from '../../helpers/ws.js';
-import { opencodeConfigWithProvider } from '../../src/test-fixtures/user-configs.js';
-import { uploadOpencodeConfig } from '../../src/test-fixtures/helpers.js';
+import { createProviderConfig } from '../../../src/test-fixtures/user-configs.js';
+import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
 
 describe('Message Send (E2E)', () => {
   let server: E2EServer;
@@ -33,7 +33,7 @@ describe('Message Send (E2E)', () => {
         body: JSON.stringify({ id: 'e2e-msg-http' }),
       });
       expect(createRes.status).toBe(201);
-      await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-http', opencodeConfigWithProvider);
+      await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-http', createProviderConfig());
 
       await fetch(`${server.baseUrl}/api/conversations/e2e-msg-http/start`, {
         method: 'POST',
@@ -97,7 +97,7 @@ describe('Message Send (E2E)', () => {
       const conv = await createRes.json() as { wsUrl: string };
       expect(createRes.status).toBe(201);
 
-      await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws', opencodeConfigWithProvider);
+      await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws', createProviderConfig());
 
       await fetch(`${server.baseUrl}/api/conversations/e2e-msg-ws/start`, {
         method: 'POST',
@@ -153,7 +153,7 @@ describe('Message Send (E2E)', () => {
       });
       const conv = await createRes.json() as { wsUrl: string };
 
-      await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws-notext', opencodeConfigWithProvider);
+      await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws-notext', createProviderConfig());
 
       await fetch(`${server.baseUrl}/api/conversations/e2e-msg-ws-notext/start`, {
         method: 'POST',

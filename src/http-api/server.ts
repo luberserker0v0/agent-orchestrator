@@ -335,26 +335,6 @@ export function createHttpServer(
 
   // ─── Config ──────────────────────────────────────────────
 
-  app.patch('/api/conversations/:id/config', (req: Request, res: Response) => {
-    const id = getConversationId(req);
-    if (!ensureConversation(res, id)) return;
-
-    try {
-      const config = req.body.config;
-      if (typeof config !== 'object' || config === null) {
-        res.status(400).json({ error: 'Missing or invalid config body' });
-        return;
-      }
-      workspaceFactory.writeConfig(id, config);
-      markNeedsRestartIfRunning(id, 'opencode.json changed');
-      conversationState.emitEvent(id, 'conversation.configChanged', { changedFiles: ['.opencode/opencode.json'] });
-      res.status(204).send();
-    } catch (err) {
-      logger.error(`Failed to update config for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
-    }
-  });
-
   app.get('/api/conversations/:id/config', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
@@ -367,7 +347,6 @@ export function createHttpServer(
     }
   });
 
-  // POST config (write raw JSON as full opencode.json replacement)
   app.post('/api/conversations/:id/config', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;

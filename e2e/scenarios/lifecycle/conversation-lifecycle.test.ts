@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startServer, type E2EServer } from '../../helpers/server.js';
-import { opencodeConfigWithProvider } from '../../src/test-fixtures/user-configs.js';
-import { uploadOpencodeConfig } from '../../src/test-fixtures/helpers.js';
+import { createProviderConfig } from '../../../src/test-fixtures/user-configs.js';
+import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
 
 describe('Conversation Lifecycle (E2E)', () => {
   let server: E2EServer;
@@ -54,7 +54,7 @@ describe('Conversation Lifecycle (E2E)', () => {
   });
 
   it('uploads provider config and starts conversation', async () => {
-    await uploadOpencodeConfig(server.baseUrl, 'e2e-lifecycle', opencodeConfigWithProvider);
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-lifecycle', createProviderConfig());
 
     const startRes = await fetch(`${server.baseUrl}/api/conversations/e2e-lifecycle/start`, {
       method: 'POST',

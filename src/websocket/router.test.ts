@@ -1039,7 +1039,7 @@ describe('WSRouter', () => {
 
   // ─── Config methods ─────────────────────────────────────
 
-  it('handles config.patch', async () => {
+  it('handles config.update', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
@@ -1047,7 +1047,7 @@ describe('WSRouter', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     mockWs.emit('message', Buffer.from(JSON.stringify({
-      jsonrpc: '2.0', id: 40, method: 'config.patch',
+      jsonrpc: '2.0', id: 40, method: 'config.update',
       params: { config: { model: 'new/model' } },
     })));
 
@@ -1056,12 +1056,12 @@ describe('WSRouter', () => {
     expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith('conv-001', { model: 'new/model' });
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
-      try { const p = JSON.parse(c[0]); return p.id === 40 && p.result?.patched === true; } catch { return false; }
+      try { const p = JSON.parse(c[0]); return p.id === 40 && p.result?.updated === true; } catch { return false; }
     });
     expect(resultCall).toBeDefined();
   });
 
-  it('handles config.patch with missing config', async () => {
+  it('handles config.update with missing config', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
@@ -1069,7 +1069,7 @@ describe('WSRouter', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     mockWs.emit('message', Buffer.from(JSON.stringify({
-      jsonrpc: '2.0', id: 41, method: 'config.patch',
+      jsonrpc: '2.0', id: 41, method: 'config.update',
       params: {},
     })));
 

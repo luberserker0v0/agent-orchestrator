@@ -1,8 +1,11 @@
 import type { OrchestratorConfig } from '../config-loader.js';
+import { loadDockerConfig } from './test-env.js';
 
 export const TEST_PORT_RANGE = { start: 30000, end: 30050 };
-export const TEST_DOCKER_IMAGE = 'ghcr.io/anomalyco/opencode';
-export const TEST_CONTAINER_PORT = 3000;
+
+const dockerCfg = loadDockerConfig();
+export const TEST_DOCKER_IMAGE = dockerCfg.image;
+export const TEST_CONTAINER_PORT = dockerCfg.containerPort;
 
 export const defaultOrchestratorConfig: OrchestratorConfig = {
   maxInstances: 5,

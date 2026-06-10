@@ -83,12 +83,14 @@ function ensureWithinWorkspace(workspacePath: string, relativePath: string): str
 
 export class WorkspaceFactory {
   private basePath: string;
-  private defaultPermissions: Record<string, unknown>;
+  private canonicalConfig: Record<string, unknown>;
+  private enforceCanonicalConfig: boolean;
   private allowedCopySources: string[];
 
-  constructor(config: WorkspaceConfig) {
+  constructor(config: WorkspaceConfig, canonicalConfig?: Record<string, unknown>) {
     this.basePath = resolve(process.cwd(), config.basePath);
-    this.defaultPermissions = config.defaultPermissions;
+    this.enforceCanonicalConfig = config.enforceCanonicalConfig;
+    this.canonicalConfig = canonicalConfig ?? {};
     this.allowedCopySources = [
       join(process.cwd(), 'assets'),
       join(process.cwd(), 'templates'),
@@ -102,17 +104,6 @@ export class WorkspaceFactory {
     const opencodeDir = join(wsPath, '.opencode');
 
     mkdirSync(opencodeDir, { recursive: true });
-
-    const opencodeConfig: Record<string, unknown> = {
-      $schema: 'https://opencode.ai/config.json',
-      permission: this.defaultPermissions,
-    };
-
-    writeFileSync(
-      join(opencodeDir, 'opencode.json'),
-      JSON.stringify(opencodeConfig, null, 2),
-      'utf-8'
-    );
 
     logger.info(`Workspace created: ${wsPath}`);
     return { id: wsId, path: wsPath, opencodeDir };
@@ -144,9 +135,21 @@ export class WorkspaceFactory {
     const opencodeDir = join(wsPath, '.opencode');
     mkdirSync(opencodeDir, { recursive: true });
 
+    let result: Record<string, unknown>;
+    if (this.enforceCanonicalConfig) {
+      result = structuredClone(this.canonicalConfig);
+      for (const key of Object.keys(config)) {
+        if (!(key in this.canonicalConfig)) {
+          result[key] = config[key];
+        }
+      }
+    } else {
+      result = config;
+    }
+
     writeFileSync(
       join(opencodeDir, 'opencode.json'),
-      JSON.stringify(config, null, 2),
+      JSON.stringify(result, null, 2),
       'utf-8'
     );
     logger.info(`Config written for workspace: ${wsPath}`);
