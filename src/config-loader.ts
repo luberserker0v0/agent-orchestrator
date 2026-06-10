@@ -41,7 +41,7 @@ export interface OrchestratorConfig {
 
 export interface WorkspaceConfig {
   basePath: string;
-  defaultPermissions: Record<string, unknown>;
+  enforceCanonicalConfig: boolean;
 }
 
 export interface AgentOrchestratorConfig {
@@ -54,6 +54,7 @@ export interface AgentOrchestratorConfig {
 const CONFIG_DIR = join(process.cwd(), 'config');
 const CONFIG_PATH = join(CONFIG_DIR, 'agentorchestrator.json');
 const EXAMPLE_PATH = join(CONFIG_DIR, 'agentorchestrator.example.json');
+const CANONICAL_OPECONFIG_PATH = join(CONFIG_DIR, 'canonical-opencode.json');
 
 function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHESTRATOR'): void {
   for (const [envKey, envValue] of Object.entries(process.env)) {
@@ -163,6 +164,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   if (!config.workspace.basePath || typeof config.workspace.basePath !== 'string') {
     throw new Error('Config validation failed: workspace.basePath must be a non-empty string');
   }
+  if (typeof config.workspace.enforceCanonicalConfig !== 'boolean') {
+    throw new Error(`Config validation failed: workspace.enforceCanonicalConfig must be a boolean, got ${config.workspace.enforceCanonicalConfig}`);
+  }
 }
 
 function readJSON(path: string): Record<string, unknown> {
@@ -171,6 +175,19 @@ function readJSON(path: string): Record<string, unknown> {
     return parseJSONC(raw) as Record<string, unknown>;
   }
   return JSON.parse(raw) as Record<string, unknown>;
+}
+
+export function loadCanonicalConfig(enforce: boolean): Record<string, unknown> {
+  if (!existsSync(CANONICAL_OPECONFIG_PATH)) {
+    if (enforce) {
+      throw new Error(
+        `Canonical opencode config not found at ${CANONICAL_OPECONFIG_PATH}. ` +
+        'Create it or set workspace.enforceCanonicalConfig to false.'
+      );
+    }
+    return {};
+  }
+  return readJSON(CANONICAL_OPECONFIG_PATH) as Record<string, unknown>;
 }
 
 export function loadConfig(): AgentOrchestratorConfig {
@@ -191,6 +208,9 @@ export function loadConfig(): AgentOrchestratorConfig {
   applyEnvOverrides(parsed);
   const config = parsed as unknown as AgentOrchestratorConfig;
   config.orchestrator.runtime = config.orchestrator.runtime || 'direct';
+  if (config.workspace.enforceCanonicalConfig === undefined) {
+    config.workspace.enforceCanonicalConfig = true;
+  }
   validateConfig(config);
   return config;
 }

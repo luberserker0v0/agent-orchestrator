@@ -123,12 +123,17 @@ describe('WSConnection', () => {
     expect(mockWs.close).toHaveBeenCalledWith(1000, 'Done');
   });
 
-  it('heartbeat terminates on timeout', () => {
+  it('heartbeat terminates only after consecutive misses exceed threshold', () => {
     vi.advanceTimersByTime(5000);
     expect(mockWs.ping).toHaveBeenCalledTimes(1);
     expect((connection as any).isAlive).toBe(false);
 
-    vi.advanceTimersByTime(5000);
+    // First two misses only warn, no terminate
+    vi.advanceTimersByTime(10000);  // t=15s, 2 consecutive misses
+    expect(mockWs.terminate).not.toHaveBeenCalled();
+
+    // Third consecutive miss triggers terminate
+    vi.advanceTimersByTime(5000);   // t=20s, 3 consecutive misses > threshold
     expect(mockWs.terminate).toHaveBeenCalled();
   });
 

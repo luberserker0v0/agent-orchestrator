@@ -1,4 +1,4 @@
-import { loadConfig } from './config-loader.js';
+import { loadConfig, loadCanonicalConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';
 import { ConversationState } from './orchestrator/conversation-state.js';
@@ -9,9 +9,10 @@ async function main() {
   logger.info('AgentOrchestrator starting...');
 
   const config = loadConfig();
+  const canonicalConfig = loadCanonicalConfig(config.workspace.enforceCanonicalConfig);
   logger.info('Configuration loaded');
 
-  const workspaceFactory = new WorkspaceFactory(config.workspace);
+  const workspaceFactory = new WorkspaceFactory(config.workspace, canonicalConfig);
   const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory);
   const conversationState = new ConversationState();
 

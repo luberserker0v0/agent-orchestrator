@@ -81,7 +81,7 @@ function createMockProc(opts: { exitCode?: number | null; pid?: number | undefin
 
 const workspaceConfig: WorkspaceConfig = {
   basePath: 'test-workspace-im',
-  defaultPermissions: {},
+  enforceCanonicalConfig: true,
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -272,12 +272,15 @@ describe('InstanceManager', () => {
       // Trigger stderr data event via registered callback
       const stderrCbs = (mockProc as any).listeners?.['stderr:data'];
       if (stderrCbs) stderrCbs.forEach((cb: (...args: unknown[]) => void) => cb(Buffer.from('Debug info')));
-      // Trigger exit event
+
+      // With -d mode, exit event no longer triggers cleanup; verify instance still tracked
       mockProc.exitCode = 0;
       mockProc.emit('exit', 0);
+      expect(dockerManager.listInstances()).toHaveLength(1);
 
-      await new Promise((r) => setTimeout(r, 10));
-      expect(dockerManager.listInstances()).toHaveLength(0);
+      // Cleanup
+      await dockerManager.destroyInstance('conv-docker-stdio');
+      dockerManager.destroy();
     });
 
     it('spawns docker container with correct args', async () => {
@@ -291,7 +294,8 @@ describe('InstanceManager', () => {
 
       const [, args] = mockedSpawn.mock.calls[0] as [string, string[], unknown];
       expect(args).toEqual([
-        'run', '--rm',
+        'run', '-d',
+        '--name', 'agentorchestrator-conv-docker',
         '-p', '127.0.0.1:30000:3000',
         '-v', expect.stringMatching(/conv-docker:\/workspace$/),
         '-w', '/workspace',
@@ -300,6 +304,11 @@ describe('InstanceManager', () => {
         dockerOrchestratorConfig.docker!.image,
         'serve', '--port', '3000', '--hostname', '0.0.0.0',
       ]);
+
+      // Cleanup
+      mockProc.exitCode = 0;
+      await dockerManager.destroyInstance('conv-docker');
+      dockerManager.destroy();
     });
 
     it('creates instance with correct info in docker mode', async () => {

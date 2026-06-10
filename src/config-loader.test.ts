@@ -18,7 +18,7 @@ function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentO
       opencodeBinary: 'opencode',
       healthCheck: { retries: 10, intervalMs: 500 },
     },
-    workspace: { basePath: './workspace', defaultPermissions: {} },
+    workspace: { basePath: './workspace', enforceCanonicalConfig: true },
     ...overrides,
   } as AgentOrchestratorConfig;
 }
@@ -198,7 +198,7 @@ describe('validateConfig', () => {
 
   it('rejects empty workspace.basePath', () => {
     const config = createValidConfig({
-      workspace: { basePath: '', defaultPermissions: {} },
+      workspace: { basePath: '', enforceCanonicalConfig: true },
     });
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
   });

@@ -23,6 +23,8 @@ export interface JSONRPCEvent {
 
 export type MessageHandler = (method: string, params: unknown) => Promise<unknown>;
 
+const MAX_MISSED_HEARTBEATS = 2;
+
 export class WSConnection {
   private ws: WebSocket;
   private handler: MessageHandler;
@@ -31,6 +33,7 @@ export class WSConnection {
   private heartbeatTimer?: NodeJS.Timeout;
   private idleTimer?: NodeJS.Timeout;
   private isAlive = true;
+  private missedHeartbeats = 0;
   public conversationId: string;
 
   constructor(
@@ -49,6 +52,7 @@ export class WSConnection {
     this.ws.on('message', (raw) => this.onMessage(raw));
     this.ws.on('pong', () => {
       this.isAlive = true;
+      this.missedHeartbeats = 0;
       this.resetIdleTimer();
     });
     this.ws.on('close', () => this.dispose());
@@ -60,6 +64,7 @@ export class WSConnection {
 
   private async onMessage(raw: Buffer | ArrayBuffer | Buffer[]): Promise<void> {
     this.isAlive = true;
+    this.missedHeartbeats = 0;
     this.resetIdleTimer();
 
     let req: JSONRPCRequest;
@@ -110,12 +115,16 @@ export class WSConnection {
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
       if (!this.isAlive) {
-        logger.warn(`[WS ${this.conversationId}] heartbeat timeout, closing`);
-        this.ws.terminate();
+        this.missedHeartbeats++;
+        if (this.missedHeartbeats > MAX_MISSED_HEARTBEATS) {
+          logger.warn(`[WS ${this.conversationId}] heartbeat timeout after ${this.missedHeartbeats} consecutive misses, closing`);
+          this.ws.terminate();
+        }
         return;
       }
+      this.missedHeartbeats = 0;
       this.isAlive = false;
-      this.ws.ping();
+      try { this.ws.ping(); } catch { /* socket may be closing */ }
     }, this.heartbeatIntervalMs);
   }
 
