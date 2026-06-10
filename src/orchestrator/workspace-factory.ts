@@ -128,6 +128,31 @@ export class WorkspaceFactory {
     }
   }
 
+  cleanupOrphans(): void {
+    if (!existsSync(this.basePath)) {
+      logger.info('No workspace directory to clean up');
+      return;
+    }
+
+    const entries = readdirSync(this.basePath);
+    if (entries.length === 0) {
+      logger.info('Workspace directory is empty, nothing to clean up');
+      return;
+    }
+
+    let cleaned = 0;
+    for (const entry of entries) {
+      const fullPath = join(this.basePath, entry);
+      try {
+        rmSync(fullPath, { recursive: true, force: true });
+        cleaned++;
+      } catch (err) {
+        logger.error(`Failed to remove orphan workspace: ${fullPath}`, err);
+      }
+    }
+    logger.info(`Cleaned up ${cleaned} orphan workspace(s)`);
+  }
+
   // ─── Config ──────────────────────────────────────────────
 
   writeConfig(id: string, config: Record<string, unknown>): void {
