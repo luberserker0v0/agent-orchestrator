@@ -1,12 +1,13 @@
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import { logger } from '../utils/logger.js';
-import { InstanceManager } from '../orchestrator/instance-manager.js';
+import type { OpenCodeClient } from '../opencode-http/client.js';
+import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { WSConnection } from './connection.js';
 import type { WebSocketConfig } from '../config-loader.js';
-import type { ServerConfig } from '../config-loader.js';
+import type { ServerConfig, OrchestratorConfig } from '../config-loader.js';
 import { wsConnectionsActive } from '../metrics/registry.js';
 
 export class WSRouter {
@@ -16,6 +17,7 @@ export class WSRouter {
   private conversationState: ConversationState;
   private wsConfig: WebSocketConfig;
   private serverConfig: ServerConfig;
+  private orchestratorConfig: OrchestratorConfig;
   private connections: Map<string, WSConnection> = new Map();
   private eventUnsubscribers: Map<string, () => void> = new Map();
 
@@ -25,7 +27,8 @@ export class WSRouter {
     workspaceFactory: WorkspaceFactory,
     conversationState: ConversationState,
     wsConfig: WebSocketConfig,
-    serverConfig: ServerConfig
+    serverConfig: ServerConfig,
+    orchestratorConfig: OrchestratorConfig
   ) {
     this.wss = wss;
     this.instanceManager = instanceManager;
@@ -33,6 +36,7 @@ export class WSRouter {
     this.conversationState = conversationState;
     this.wsConfig = wsConfig;
     this.serverConfig = serverConfig;
+    this.orchestratorConfig = orchestratorConfig;
 
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
   }
@@ -47,6 +51,18 @@ export class WSRouter {
     }
     this.eventUnsubscribers.clear();
     this.wss.close();
+  }
+
+  private createSessionInBackground(id: string, client: OpenCodeClient): void {
+    client.createSession({ title: `AgentOrchestrator-${id}` })
+      .then((session) => {
+        this.conversationState.setInstanceInfo(id, { sessionId: session.id });
+        this.instanceManager.setSessionId(id, session.id);
+        logger.info(`[OpenCode ${id}] session created: ${session.id}`);
+      })
+      .catch((err) => {
+        logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
+      });
   }
 
   private async onConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
@@ -387,6 +403,129 @@ export class WSRouter {
           changedFiles: [`.opencode/skills/${name}/`],
         });
         return { deleted: name };
+      }
+
+      // ─── Conversation Lifecycle ──────────────────────────
+
+      case 'conversation.status': {
+        return {
+          id: state.id,
+          status: state.status,
+          ready: state.ready,
+          port: state.port,
+          sessionId: state.sessionId,
+          wsUrl: state.wsUrl,
+          lastError: state.lastError,
+        };
+      }
+
+      case 'conversation.start': {
+        if (state.status === 'running' || state.status === 'starting') {
+          throw new Error('Conversation is already starting or running');
+        }
+
+        this.conversationState.cancelReadyCheck(conversationId);
+        this.conversationState.transition(conversationId, 'starting');
+
+        try {
+          const newInstance = await this.instanceManager.createInstance(conversationId);
+          this.conversationState.setInstanceInfo(conversationId, { port: newInstance.port });
+          this.conversationState.setRunningInstance(conversationId, {
+            process: newInstance.process,
+            client: newInstance.client,
+          });
+          this.conversationState.transition(conversationId, 'running');
+          this.conversationState.startReadyCheck(conversationId);
+
+          // Create session in background
+          this.createSessionInBackground(conversationId, newInstance.client);
+
+          return {
+            status: 'running',
+            port: newInstance.port,
+            wsUrl: state.wsUrl,
+            sessionId: state.sessionId,
+          };
+        } catch (err) {
+          this.conversationState.transition(conversationId, 'error', { error: (err as Error).message });
+          throw err;
+        }
+      }
+
+      case 'conversation.stop': {
+        if (state.status !== 'running' && state.status !== 'starting' && state.status !== 'error') {
+          throw new Error(`Cannot stop conversation in status: ${state.status}`);
+        }
+
+        try {
+          await this.instanceManager.destroyInstance(conversationId);
+          this.conversationState.removeRunningInstance(conversationId);
+          this.conversationState.transition(conversationId, 'stopped');
+          return { status: 'stopped' };
+        } catch (err) {
+          logger.error(`Failed to stop conversation ${conversationId}:`, err);
+          throw err;
+        }
+      }
+
+      case 'conversation.restart': {
+        const previousStatus = state.status;
+        if (previousStatus !== 'running' && previousStatus !== 'stopped' && previousStatus !== 'error') {
+          throw new Error(`Cannot restart conversation in status: ${previousStatus}`);
+        }
+
+        this.conversationState.transition(conversationId, 'restarting');
+
+        try {
+          const hadInstance = previousStatus === 'running' || previousStatus === 'error';
+          let dockerRestarted = false;
+
+          if (hadInstance) {
+            this.conversationState.cancelReadyCheck(conversationId);
+            if (this.orchestratorConfig.runtime === 'docker') {
+              try {
+                await this.instanceManager.restartInstance(conversationId);
+                dockerRestarted = true;
+              } catch {
+                await this.instanceManager.stopInstance(conversationId).catch(() => {});
+                this.conversationState.removeRunningInstance(conversationId);
+              }
+            } else {
+              await this.instanceManager.stopInstance(conversationId);
+              this.conversationState.removeRunningInstance(conversationId);
+            }
+          }
+
+          this.conversationState.clearNeedsRestart(conversationId);
+
+          let newInstance: InstanceInfo;
+          if (dockerRestarted) {
+            newInstance = this.instanceManager.getInstance(conversationId)!;
+          } else {
+            newInstance = await this.instanceManager.createInstance(conversationId);
+            this.conversationState.setInstanceInfo(conversationId, { port: newInstance.port });
+            this.conversationState.setRunningInstance(conversationId, {
+              process: newInstance.process,
+              client: newInstance.client,
+            });
+          }
+
+          this.conversationState.transition(conversationId, 'running');
+          this.conversationState.startReadyCheck(conversationId);
+
+          // Create session in background
+          this.createSessionInBackground(conversationId, newInstance.client);
+
+          return {
+            status: 'running',
+            port: newInstance.port,
+            wsUrl: state.wsUrl,
+            sessionId: state.sessionId,
+          };
+        } catch (err) {
+          this.conversationState.transition(conversationId, 'error', { error: (err as Error).message });
+          throw err;
+        }
       }
 
       default:

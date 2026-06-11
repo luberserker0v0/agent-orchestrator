@@ -74,6 +74,10 @@ describe('WSRouter', () => {
     mockInstanceManager = {
       getInstance: vi.fn(),
       createInstance: vi.fn(),
+      destroyInstance: vi.fn(),
+      stopInstance: vi.fn(),
+      restartInstance: vi.fn(),
+      setSessionId: vi.fn(),
     };
 
     mockWorkspaceFactory = {
@@ -100,10 +104,17 @@ describe('WSRouter', () => {
 
     mockConversationState = {
       has: vi.fn().mockReturnValue(true),
-      get: vi.fn().mockReturnValue({ status: 'running', ready: true }),
+      get: vi.fn().mockReturnValue({ status: 'running', ready: true, port: 30000 }),
       markNeedsRestart: vi.fn(),
       emitEvent: vi.fn(),
       subscribe: vi.fn().mockReturnValue(() => {}),
+      transition: vi.fn(),
+      cancelReadyCheck: vi.fn(),
+      startReadyCheck: vi.fn(),
+      setInstanceInfo: vi.fn(),
+      setRunningInstance: vi.fn(),
+      removeRunningInstance: vi.fn(),
+      clearNeedsRestart: vi.fn(),
     };
 
     router = new WSRouter(
@@ -112,7 +123,8 @@ describe('WSRouter', () => {
       mockWorkspaceFactory,
       mockConversationState,
       { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
-      { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 }
+      { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
+      { runtime: 'direct', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest', containerPort: 30000 } }
     );
   });
 
@@ -1603,6 +1615,204 @@ describe('WSRouter', () => {
       try { const p = JSON.parse(c[0]); return p.id === 80 && p.error?.message?.includes('not ready'); } catch { return false; }
     });
     expect(errorCall).toBeDefined();
+  });
+
+  // ─── Conversation Lifecycle ────────────────────────────
+
+  it('handles conversation.status', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.get.mockReturnValue({
+      id: 'conv-001', status: 'running', ready: true, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://host/ws/conv-001', lastError: undefined,
+    });
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 100, method: 'conversation.status',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 100 && p.result; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result.status).toBe('running');
+    expect(parsed.result.port).toBe(30000);
+  });
+
+  it('handles conversation.start', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.get.mockReturnValue({ status: 'prepared', ready: false, wsUrl: 'ws://host/ws/conv-001' });
+    mockInstanceManager.createInstance.mockResolvedValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 101, method: 'conversation.start',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'starting');
+    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'running');
+    expect(mockConversationState.startReadyCheck).toHaveBeenCalledWith('conv-001');
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 101 && p.result; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result.status).toBe('running');
+  });
+
+  it('rejects conversation.start when already running', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: true });
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 102, method: 'conversation.start',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockInstanceManager.createInstance).not.toHaveBeenCalled();
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 102 && p.error?.message?.includes('already starting or running'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles conversation.stop', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: true });
+    mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 103, method: 'conversation.stop',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationState.removeRunningInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'stopped');
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 103 && p.result; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result.status).toBe('stopped');
+  });
+
+  it('rejects conversation.stop when not in running/starting/error status', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.get.mockReturnValue({ status: 'prepared', ready: false });
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 104, method: 'conversation.stop',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockInstanceManager.destroyInstance).not.toHaveBeenCalled();
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 104 && p.error?.message?.includes('Cannot stop'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles conversation.restart in direct runtime', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: true, wsUrl: 'ws://host/ws/conv-001' });
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockInstanceManager.stopInstance.mockResolvedValue(undefined);
+    mockInstanceManager.createInstance.mockResolvedValue(createMockInstance());
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 105, method: 'conversation.restart',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockInstanceManager.stopInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'restarting');
+    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'running');
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 105 && p.result; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result.status).toBe('running');
+  });
+
+  it('handles conversation.restart in docker runtime', async () => {
+    const dockerMockWss = createMockWSS();
+    const dockerWs = createMockWebSocket();
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: true, wsUrl: 'ws://host/ws/conv-001' });
+    mockInstanceManager.restartInstance.mockResolvedValue(undefined);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+
+    const dockerRouter = new WSRouter(
+      dockerMockWss as any,
+      mockInstanceManager,
+      mockWorkspaceFactory,
+      mockConversationState,
+      { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
+      { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
+      { runtime: 'docker', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest' } }
+    );
+
+    dockerMockWss.emit('connection', dockerWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    dockerWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 106, method: 'conversation.restart',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockInstanceManager.stopInstance).not.toHaveBeenCalled();
+    expect(mockInstanceManager.createInstance).not.toHaveBeenCalled();
+
+    const sendCalls = dockerWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 106 && p.result; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result.status).toBe('running');
+
+    dockerRouter.closeAll();
+    expect(dockerRouter).toBeDefined();
   });
 
   // ─── Skills import success path ────────────────────────
