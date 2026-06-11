@@ -1,17 +1,19 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadProviderConfig } from './test-env.js';
 
 const DIR = fileURLToPath(new URL('.', import.meta.url));
 
-const BASE_TEMPLATE: Record<string, unknown> = JSON.parse(
-  readFileSync(join(DIR, 'opencode.template.json'), 'utf-8'),
-);
+function readTemplate(name: string): Record<string, unknown> {
+  const local = join(DIR, `${name}.json`);
+  const example = join(DIR, `${name}.example.json`);
+  const path = existsSync(local) ? local : example;
+  return JSON.parse(readFileSync(path, 'utf-8'));
+}
 
-const PROVIDER_TEMPLATE: Record<string, unknown> = JSON.parse(
-  readFileSync(join(DIR, 'opencode.provider.template.json'), 'utf-8'),
-);
+const BASE_TEMPLATE = readTemplate('opencode.template');
+const PROVIDER_TEMPLATE = readTemplate('opencode.provider.template');
 
 /** Minimal opencode.json (no provider — no model access) */
 export const opencodeConfigMinimal: Record<string, unknown> =

@@ -23,6 +23,10 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Test template overrides (copy from .example.json)
+src/test-fixtures/opencode.template.json
+src/test-fixtures/opencode.provider.template.json
+
 # Test coverage
 coverage/
 
