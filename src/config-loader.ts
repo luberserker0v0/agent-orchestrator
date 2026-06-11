@@ -55,6 +55,7 @@ const CONFIG_DIR = join(process.cwd(), 'config');
 const CONFIG_PATH = join(CONFIG_DIR, 'agentorchestrator.json');
 const EXAMPLE_PATH = join(CONFIG_DIR, 'agentorchestrator.example.json');
 const CANONICAL_OPECONFIG_PATH = join(CONFIG_DIR, 'canonical-opencode.json');
+const CANONICAL_OPECONFIG_EXAMPLE_PATH = join(CONFIG_DIR, 'canonical-opencode.example.json');
 
 function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHESTRATOR'): void {
   for (const [envKey, envValue] of Object.entries(process.env)) {
@@ -178,16 +179,19 @@ function readJSON(path: string): Record<string, unknown> {
 }
 
 export function loadCanonicalConfig(enforce: boolean): Record<string, unknown> {
-  if (!existsSync(CANONICAL_OPECONFIG_PATH)) {
+  const path = existsSync(CANONICAL_OPECONFIG_PATH)
+    ? CANONICAL_OPECONFIG_PATH
+    : CANONICAL_OPECONFIG_EXAMPLE_PATH;
+  if (!existsSync(path)) {
     if (enforce) {
       throw new Error(
-        `Canonical opencode config not found at ${CANONICAL_OPECONFIG_PATH}. ` +
+        `Canonical opencode config not found at ${CANONICAL_OPECONFIG_PATH} or ${CANONICAL_OPECONFIG_EXAMPLE_PATH}. ` +
         'Create it or set workspace.enforceCanonicalConfig to false.'
       );
     }
     return {};
   }
-  return readJSON(CANONICAL_OPECONFIG_PATH) as Record<string, unknown>;
+  return readJSON(path) as Record<string, unknown>;
 }
 
 export function loadConfig(): AgentOrchestratorConfig {

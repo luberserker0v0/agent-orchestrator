@@ -24,8 +24,13 @@ export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>)
     enforceCanonicalConfig: false,
   };
 
-  const serverConfig = { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 };
-  const wsConfig = { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 };
+  const host = process.env.AO_TEST_SERVER_HOST || '127.0.0.1';
+  const shutdownTimeoutMs = Number(process.env.AO_TEST_SHUTDOWN_TIMEOUT_MS) || 15000;
+  const heartbeatIntervalMs = Number(process.env.AO_TEST_HEARTBEAT_INTERVAL_MS) || 30000;
+  const idleTimeoutMs = Number(process.env.AO_TEST_IDLE_TIMEOUT_MS) || 600000;
+
+  const serverConfig = { port: 0, host, shutdownTimeoutMs };
+  const wsConfig = { heartbeatIntervalMs, idleTimeoutMs };
 
   const runtime = orchestratorOverrides?.runtime || process.env.E2E_RUNTIME || 'direct';
 
@@ -56,7 +61,7 @@ export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>)
   );
 
   return new Promise((resolve, reject) => {
-    httpServer.server.listen(0, '127.0.0.1', () => {
+    httpServer.server.listen(0, host, () => {
       const addr = httpServer.server.address();
       if (!addr || typeof addr !== 'object') {
         reject(new Error('Failed to get server address'));
@@ -74,7 +79,7 @@ export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>)
         try { rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
       };
 
-      resolve({ port, baseUrl: `http://127.0.0.1:${port}`, cleanup, orchestratorConfig });
+      resolve({ port, baseUrl: `http://${host}:${port}`, cleanup, orchestratorConfig });
     });
     httpServer.server.on('error', (err) => {
       reject(err);

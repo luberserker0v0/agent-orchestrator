@@ -17,16 +17,22 @@ npm-debug.log*
 .env
 .env.local
 .env.*.local
+.env.test
 
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Test template overrides (copy from .example.json)
+src/test-fixtures/opencode.template.json
+src/test-fixtures/opencode.provider.template.json
 
 # Test coverage
 coverage/
 
 # User runtime config (copy from agentorchestrator.example.json)
 config/agentorchestrator.json
+config/canonical-opencode.json
 
 # Temporary files
 *.tmp

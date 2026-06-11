@@ -1013,7 +1013,7 @@ export function createHttpServer(
   const httpServer = createServer(app);
 
   const wss = new WebSocketServer({ noServer: true });
-  const wsRouter = new WSRouter(wss, instanceManager, workspaceFactory, conversationState, wsConfig, serverConfig);
+  const wsRouter = new WSRouter(wss, instanceManager, workspaceFactory, conversationState, wsConfig, serverConfig, orchestratorConfig);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ?? '';
