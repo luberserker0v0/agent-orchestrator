@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- docs: sync README, API.md, ARCHITECTURE.md with current codebase (config schema, endpoint tables, WS methods, lifecycle behavior)
+
 ### Added
 
 - feat(e2e): restructure scenarios into `workspace/` (runtime-agnostic CRUD) and `lifecycle/` (runtime-specific, runs once per runtime). Runtime selected via `E2E_RUNTIME` env var, no soft-skip logic
