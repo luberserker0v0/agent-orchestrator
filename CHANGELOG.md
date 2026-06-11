@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - docs: add QUICKSTART.md and QUICKTEST.md for rapid onboarding and testing workflow
 
+### Fixed
+
+- fix(config-loader): always use jsonc-parser for config JSON files to handle comments in `.json` files (#45)
+
 ### Changed
 
 - docs: sync README, API.md, ARCHITECTURE.md with current codebase (config schema, endpoint tables, WS methods, lifecycle behavior)
