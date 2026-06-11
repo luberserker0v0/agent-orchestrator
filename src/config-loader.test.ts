@@ -1,8 +1,9 @@
-import { readFileSync, existsSync, renameSync } from 'node:fs';
+import { readFileSync, existsSync, renameSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { parse as parseJSONC } from 'jsonc-parser';
 import { describe, it, expect, afterEach } from 'vitest';
-import { loadConfig, validateConfig } from './config-loader.js';
+import { loadConfig, validateConfig, readJSON } from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
 
 function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentOrchestratorConfig {
@@ -221,6 +222,16 @@ describe('example config file', () => {
     const raw = readFileSync(examplePath, 'utf-8');
     const parsed = parseJSONC(raw) as AgentOrchestratorConfig;
     expect(() => validateConfig(parsed)).not.toThrow();
+  });
+});
+
+describe('readJSON with JSONC comments', () => {
+  it('parses JSON with comments from a non-.example.json path', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'jsonc-test-'));
+    const tmpFile = join(tmpDir, 'config.json');
+    writeFileSync(tmpFile, '{\n  // comment\n  "key": "value"\n}\n', 'utf-8');
+    const result = readJSON(tmpFile);
+    expect(result).toEqual({ key: 'value' });
   });
 });
 

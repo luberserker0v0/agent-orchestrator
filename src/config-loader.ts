@@ -178,12 +178,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   }
 }
 
-function readJSON(path: string): Record<string, unknown> {
+export function readJSON(path: string): Record<string, unknown> {
   const raw = readFileSync(path, 'utf-8');
-  if (path.endsWith('.example.json')) {
-    return parseJSONC(raw) as Record<string, unknown>;
-  }
-  return JSON.parse(raw) as Record<string, unknown>;
+  return parseJSONC(raw) as Record<string, unknown>;
 }
 
 export function loadCanonicalConfig(enforce: boolean): Record<string, unknown> {
