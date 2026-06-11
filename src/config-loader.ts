@@ -32,6 +32,8 @@ export interface OrchestratorConfig {
   portRange: {
     start: number;
     end: number;
+    /** When true (default), PortPool falls back to OS-assigned port when the configured range is exhausted */
+    allowDynamicFallback?: boolean;
   };
   runtime: Runtime;
   opencodeBinary: string;
@@ -129,12 +131,18 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   if (orchestrator.portRange.end <= orchestrator.portRange.start) {
     throw new Error(`Config validation failed: portRange.end (${orchestrator.portRange.end}) must be greater than portRange.start (${orchestrator.portRange.start})`);
   }
-  const portCount = orchestrator.portRange.end - orchestrator.portRange.start + 1;
-  if (orchestrator.maxInstances > portCount) {
-    throw new Error(
-      `Config validation failed: maxInstances (${orchestrator.maxInstances}) cannot exceed available ports (${portCount}). ` +
-      `Either increase portRange or decrease maxInstances.`
-    );
+  if (orchestrator.portRange.allowDynamicFallback !== undefined && typeof orchestrator.portRange.allowDynamicFallback !== 'boolean') {
+    throw new Error(`Config validation failed: orchestrator.portRange.allowDynamicFallback must be a boolean, got ${orchestrator.portRange.allowDynamicFallback}`);
+  }
+  const dynamicFallback = orchestrator.portRange.allowDynamicFallback ?? true;
+  if (!dynamicFallback) {
+    const portCount = orchestrator.portRange.end - orchestrator.portRange.start + 1;
+    if (orchestrator.maxInstances > portCount) {
+      throw new Error(
+        `Config validation failed: maxInstances (${orchestrator.maxInstances}) cannot exceed available ports (${portCount}). ` +
+        `Either increase portRange, decrease maxInstances, or enable allowDynamicFallback.`
+      );
+    }
   }
 
   // Health check validation

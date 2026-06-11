@@ -33,7 +33,7 @@ export class InstanceManager {
 
   constructor(config: OrchestratorConfig, workspaceFactory: WorkspaceFactory) {
     this.config = config;
-    this.portPool = new PortPool(config.portRange.start, config.portRange.end);
+    this.portPool = new PortPool(config.portRange.start, config.portRange.end, config.portRange.allowDynamicFallback);
     this.workspaceFactory = workspaceFactory;
     this.startIdleSweep();
   }

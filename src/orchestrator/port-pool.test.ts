@@ -8,6 +8,7 @@ const BASE_PORT = 52000;
 vi.mock('node:net', () => {
   const occupiedPorts = new Set<number>();
   type Cb = (...args: unknown[]) => void;
+  let dynamicPortCounter = 54000;
 
   const mockServer: Record<string, unknown> = {
     on: vi.fn((_event: string, cb: Cb) => {
@@ -28,6 +29,7 @@ vi.mock('node:net', () => {
       setImmediate(() => cb?.());
       return mockServer;
     }),
+    address: vi.fn(() => ({ port: dynamicPortCounter++, family: 'IPv4', address: '127.0.0.1' })),
     _errorCb: null as Cb | null,
   };
 
@@ -64,8 +66,8 @@ describe('PortPool', () => {
     expect(pool.getUsedCount()).toBe(0);
   });
 
-  it('should return null when pool is exhausted', async () => {
-    const pool = new PortPool(BASE_PORT + 10, BASE_PORT + 12);
+  it('should return null when pool is exhausted (dynamic fallback disabled)', async () => {
+    const pool = new PortPool(BASE_PORT + 10, BASE_PORT + 12, false);
     await pool.allocate();
     await pool.allocate();
     await pool.allocate();
@@ -106,14 +108,45 @@ describe('PortPool', () => {
     pool.release(port!);
   });
 
-  it('should return null when all ports are occupied by other processes', async () => {
+  it('should return null when all ports are occupied (dynamic fallback disabled)', async () => {
     const net = await import('node:net');
     (net as any).__setPortOccupied(BASE_PORT + 60, true);
     (net as any).__setPortOccupied(BASE_PORT + 61, true);
 
-    const pool = new PortPool(BASE_PORT + 60, BASE_PORT + 61);
+    const pool = new PortPool(BASE_PORT + 60, BASE_PORT + 61, false);
     const port = await pool.allocate();
     expect(port).toBeNull();
+  });
+
+  it('should fallback to dynamic port when range exhausted', async () => {
+    const pool = new PortPool(BASE_PORT + 80, BASE_PORT + 80);
+    const port = await pool.allocate();
+    expect(port).not.toBeNull();
+    // Range had only 1 port; second allocate triggers dynamic fallback
+    const port2 = await pool.allocate();
+    expect(port2).not.toBeNull();
+    expect(port2).not.toBe(port);
+    pool.release(port!);
+    pool.release(port2!);
+  });
+
+  it('should not use dynamic fallback when disabled', async () => {
+    const pool = new PortPool(BASE_PORT + 90, BASE_PORT + 90, false);
+    const port = await pool.allocate();
+    expect(port).not.toBeNull();
+    const port2 = await pool.allocate();
+    expect(port2).toBeNull();
+    pool.release(port!);
+  });
+
+  it('should release dynamic ports correctly', async () => {
+    const pool = new PortPool(BASE_PORT + 100, BASE_PORT + 100);
+    await pool.allocate();
+    const dynamicPort = await pool.allocate();
+    expect(dynamicPort).not.toBeNull();
+    expect(pool.getUsedCount()).toBe(2);
+    pool.release(dynamicPort!);
+    expect(pool.getUsedCount()).toBe(1);
   });
 
   it('should handle double release of same port', async () => {
