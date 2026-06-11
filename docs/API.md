@@ -99,7 +99,7 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 
 ### `POST /api/conversations/:id/stop`
 
-停止 OpenCode 實例，**保留 workspace**。
+停止 OpenCode 實例，**移除 workspace**（可透過 `POST /start` 重新建立並啟動）。
 
 **請求**：空 body
 
@@ -172,7 +172,7 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 }
 ```
 
-**回應**（`204 No Content`）
+**回應**（`200 OK`）：回傳寫入後的完整 config 內容。
 
 ---
 
@@ -743,10 +743,13 @@ references/capabilities.md
   "id": 1,
   "method": "session.create",
   "params": {
-    "name": "feature-discussion"
+    "title": "feature-discussion",
+    "parentID": "ses_parent_xxx"
   }
 }
 ```
+- `title`（可選）：會話標題
+- `parentID`（可選）：父會話 ID（從指定會話分支建立）
 
 **回應**：
 ```json
@@ -755,37 +758,30 @@ references/capabilities.md
   "id": 1,
   "result": {
     "id": "ses_xxx",
-    "name": "feature-discussion"
+    "title": "feature-discussion"
   }
 }
 ```
 
 ---
 
-#### `session.delete`
+#### `session.get`
 
-刪除會話。
+取得指定會話詳細資訊。
 
 **請求**：
 ```json
 {
   "jsonrpc": "2.0",
   "id": 2,
-  "method": "session.delete",
+  "method": "session.get",
   "params": {
-    "id": "ses_xxx"
+    "sessionId": "ses_xxx"
   }
 }
 ```
 
-**回應**：
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "result": { "deleted": true }
-}
-```
+**回應**：OpenCode 會話物件。
 
 ---
 
@@ -811,6 +807,110 @@ references/capabilities.md
   "result": [
     { "id": "ses_xxx", "name": "default" }
   ]
+}
+```
+
+---
+
+#### `session.children`
+
+取得指定會話的子會話。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "session.children",
+  "params": {
+    "sessionId": "ses_xxx"
+  }
+}
+```
+
+**回應**：子會話陣列。
+
+---
+
+#### `session.fork`
+
+從指定會話建立分支。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "session.fork",
+  "params": {
+    "sessionId": "ses_xxx",
+    "messageID": "msg_xxx"
+  }
+}
+```
+- `sessionId`（必填）：來源會話
+- `messageID`（可選）：分支點訊息 ID，省略則以最新狀態分支
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "sessionId": "ses_fork_xxx"
+  }
+}
+```
+
+---
+
+#### `session.delete`
+
+刪除會話。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "session.delete",
+  "params": {
+    "sessionId": "ses_xxx"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": { "deleted": "ses_xxx" }
+}
+```
+
+---
+
+#### `session.abort`
+
+中止正在生成的回應。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "session.abort",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": { "aborted": true }
 }
 ```
 
@@ -1089,7 +1189,7 @@ references/capabilities.md
 
 ---
 
-#### `agent.read`
+#### `agent.get`
 
 讀取指定 Agent。
 
@@ -1098,7 +1198,7 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 13,
-  "method": "agent.read",
+  "method": "agent.get",
   "params": {
     "name": "designer.md"
   }
@@ -1119,7 +1219,7 @@ references/capabilities.md
 
 ---
 
-#### `agent.write`
+#### `agent.register`
 
 寫入 Agent。
 
@@ -1128,7 +1228,7 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 14,
-  "method": "agent.write",
+  "method": "agent.register",
   "params": {
     "name": "designer.md",
     "content": "---\nname: Designer\n---\nYou are a senior UI/UX designer."
@@ -1141,7 +1241,7 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 14,
-  "result": { "ok": true }
+  "result": { "registered": "designer.md" }
 }
 ```
 
@@ -1168,7 +1268,79 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 15,
-  "result": { "ok": true }
+  "result": { "deleted": "designer.md" }
+}
+```
+
+---
+
+### AGENTS.md 類
+
+#### `agent.config.write`
+
+寫入 AGENTS.md 內容。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "method": "agent.config.write",
+  "params": {
+    "content": "# Project Agents\n\n## Designer\n..."
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "result": { "written": true }
+}
+```
+
+---
+
+#### `agent.config.get`
+
+讀取 AGENTS.md 內容。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17,
+  "method": "agent.config.get",
+  "params": {}
+}
+```
+
+**回應**：AGENTS.md 文字內容。
+
+---
+
+#### `agent.config.delete`
+
+刪除 AGENTS.md。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "method": "agent.config.delete",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "result": { "deleted": true }
 }
 ```
 
@@ -1369,6 +1541,34 @@ references/capabilities.md
     "path": "templates/spec.md",
     "content": "# Design Spec\n\n## Goals\n..."
   }
+}
+```
+
+---
+
+#### `file.copy`
+
+從伺服器本機 `{cwd}/assets/`、`{cwd}/templates/` 或 `{cwd}/skills/` 路徑複製檔案/資料夾到 workspace。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "method": "file.copy",
+  "params": {
+    "source": "templates/spec.md",
+    "dest": "docs/spec.md"
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "result": { "copied": "docs/spec.md" }
 }
 ```
 

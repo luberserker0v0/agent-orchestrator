@@ -226,7 +226,9 @@ AgentOrchestrator
 |------|------|
 | `createInstance(id, options?)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、spawn OpenCode、健康檢查、建立 Session |
 | `getInstance(id)` | 取得實例資訊，並更新 `lastUsedAt` |
-| `destroyInstance(id)` | 銷毀實例：kill 進程、釋放端口（**保留 workspace**） |
+| `destroyInstance(id)` | 銷毀實例：kill 進程、釋放端口、**移除 workspace** |
+| `stopInstance(id)` | 停止實例：kill 進程、釋放端口，**保留 workspace** |
+| `restartInstance(id)` | Docker 模式：原地重啟容器（相同 port、workspace） |
 | `listInstances()` | 列出所有活躍實例 |
 | `evictLRU()` | 私有方法：達上限時淘汰最久未使用的實例 |
 
@@ -236,15 +238,12 @@ AgentOrchestrator
   id: string;              // conversation ID
   port: number;             // OpenCode 實例端口
   workspacePath: string;    // workspace 路徑
-  process: ChildProcess;    // OpenCode 子進程
+  process: ChildProcess;    // OpenCode 子進程（direct 模式）
   client: OpenCodeClient;    // HTTP 客戶端（連到該實例）
-  sessionId: string;        // OpenCode Session ID
   lastUsedAt: number;       // 最後使用時間戳
-  isReady: boolean;         // 是否就緒
-  defaultModel?: string;    // 對話預設模型
-  defaultAgent?: string;    // 對話預設代理
 }
 ```
+> `sessionId` 與 `ready` 狀態存於 `ConversationState` 而非 `InstanceInfo`。`createSessionInBackground()` 會非同步建立 Session 並更新至 ConversationState。
 
 ---
 
@@ -253,9 +252,10 @@ AgentOrchestrator
 動態端口分配器，確保 OpenCode 實例端口不衝突。
 
 **`PortPool`**：
-- `allocate()` → 從可用端口池取出第一個端口
-- `release(port)` → 將端口放回池中
+- `allocate()` → 從可用端口池取出第一個端口；若範圍耗盡且 `allowDynamicFallback=true`，自動退回到 OS 分配端口（bind `0`）
+- `release(port)` → 將端口放回池中（動態端口直接丟棄，不回收）
 - `getUsedCount()` → 取得已使用端口數量
+- `allowDynamicFallback`（建構參數）— 設定為 `true` 時，範圍耗盡不拋錯，改為 OS 分配；預設 `true`
 
 ---
 

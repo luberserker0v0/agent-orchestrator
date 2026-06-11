@@ -18,7 +18,7 @@
 
 ## 前置需求
 
-- **Node.js** >= 18.0.0
+- **Node.js** >= 20.0.0
 - **OpenCode CLI** 已安裝（執行 `opencode --version` 確認）
 - 指定的端口範圍未被占用（預設 `30000-30100`）
 
@@ -36,13 +36,14 @@ npm install
 
 ## 設定檔
 
-設定檔位於 `config/agentorchestrator.json`：
+設定檔位於 `config/agentorchestrator.json`（參考 `config/agentorchestrator.example.json`）：
 
 ```json
 {
   "server": {
     "port": 0,
-    "host": "127.0.0.1"
+    "host": "127.0.0.1",
+    "shutdownTimeoutMs": 15000
   },
   "websocket": {
     "heartbeatIntervalMs": 30000,
@@ -50,11 +51,19 @@ npm install
   },
   "orchestrator": {
     "maxInstances": 10,
+    "idleTimeoutMs": 600000,
+    "idleSweepIntervalMs": 60000,
     "portRange": {
       "start": 30000,
-      "end": 30100
+      "end": 30100,
+      "allowDynamicFallback": true
     },
+    "runtime": "direct",
     "opencodeBinary": "opencode",
+    "docker": {
+      "image": "ghcr.io/anomalyco/opencode",
+      "containerPort": 3000
+    },
     "healthCheck": {
       "retries": 10,
       "intervalMs": 500
@@ -71,18 +80,25 @@ npm install
 
 | 欄位 | 類型 | 說明 | 預設值 |
 |------|------|------|--------|
-| `server.port` | `number` | HTTP 服務端口，`0` 表示由作業系統自動分配 | `0` |
+| `server.port` | `number` | HTTP 服務端口，`0` 表示由 OS 自動分配 | `0` |
 | `server.host` | `string` | 綁定主機 | `127.0.0.1` |
+| `server.shutdownTimeoutMs` | `number` | 優雅關閉最大等待時間（毫秒） | `15000` |
 | `websocket.heartbeatIntervalMs` | `number` | WebSocket 心跳間隔（毫秒） | `30000` |
 | `websocket.idleTimeoutMs` | `number` | WebSocket 空閒斷線超時（毫秒） | `600000` |
 | `orchestrator.maxInstances` | `number` | 最大同時存活 OpenCode 實例數 | `10` |
-| `orchestrator.portRange.start` | `number` | OpenCode 動態端口範圍起始 | `30000` |
-| `orchestrator.portRange.end` | `number` | OpenCode 動態端口範圍結束 | `30100` |
-| `orchestrator.opencodeBinary` | `string` | OpenCode CLI 指令或絕對路徑 | `opencode` |
-| `orchestrator.healthCheck.retries` | `number` | 啟動時健康檢查重試次數 | `10` |
+| `orchestrator.idleTimeoutMs` | `number` | 實例閒置自動銷毀超時（毫秒），`0` = 停用 | `600000` |
+| `orchestrator.idleSweepIntervalMs` | `number` | 閒置檢查間隔（毫秒） | `60000` |
+| `orchestrator.portRange.start` | `number` | 動態端口範圍起始 | `30000` |
+| `orchestrator.portRange.end` | `number` | 動態端口範圍結束 | `30100` |
+| `orchestrator.portRange.allowDynamicFallback` | `boolean` | 範圍耗盡時是否使用 OS 分配端口 | `true` |
+| `orchestrator.runtime` | `"direct"\|"docker"` | 執行環境（直接執行或 Docker 容器） | `"direct"` |
+| `orchestrator.opencodeBinary` | `string` | OpenCode CLI 指令或絕對路徑（`direct` 模式） | `opencode` |
+| `orchestrator.docker.image` | `string` | Docker 映像名稱（`docker` 模式） | `ghcr.io/anomalyco/opencode` |
+| `orchestrator.docker.containerPort` | `number` | 容器內 OpenCode 監聽端口 | `3000` |
+| `orchestrator.healthCheck.retries` | `number` | 健康檢查重試次數 | `10` |
 | `orchestrator.healthCheck.intervalMs` | `number` | 健康檢查重試間隔 | `500` |
 | `workspace.basePath` | `string` | Workspace 資料夾根目錄 | `./workspace` |
-| `workspace.enforceCanonicalConfig` | `boolean` | 寫入 `opencode.json` 時強制合併 `config/canonical-opencode.json` 系統預設（保護 `$schema` 與 `permission`） | `true` |
+| `workspace.enforceCanonicalConfig` | `boolean` | 寫入 `opencode.json` 時強制合併 canonical 系統預設（保護 `$schema` 與 `permission`） | `true` |
 
 ### 環境變數覆寫
 
@@ -136,33 +152,51 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | 方法 | 端點 | 說明 |
 |------|------|------|
 | `GET` | `/health` | 健康檢查 |
+| `GET` | `/metrics` | Prometheus 指標 |
 | `POST` | `/api/conversations` | 準備對話（僅建立 workspace，不啟動 OpenCode） |
-| `POST` | `/api/conversations/:id/start` | 啟動 OpenCode 實例 |
-| `POST` | `/api/conversations/:id/stop` | 停止 OpenCode 實例（保留 workspace） |
-| `POST` | `/api/conversations/:id/restart` | 重啟 OpenCode 實例（保留 workspace） |
-| `GET/POST` | `/api/conversations/:id/config` | 讀取 / 寫入 `opencode.json`（`enforceCanonicalConfig` 保護系統預設值） |
-| `GET/PUT/GET/DELETE` | `/api/conversations/:id/agents` / `/:name` | Agent CRUD（自動發現） |
-| `POST/GET/GET/GET/DELETE` | `/api/conversations/:id/skills/upload` / `/import` / `/:name` / `/:name/info` | Skill 上傳（zip）/ 導入 / 讀取 / 資訊（結構+hash）/ 刪除 |
-| `PUT/POST/POST/POST` | `/api/conversations/:id/files` (write/read/delete/list) | 通用檔案 CRUD |
-| `GET/GET/POST` | `/api/conversations/:id/sessions` / `/:sid/children` / `/:sid/fork` | 會話樹查詢與分支 |
-| `GET` | `/api/conversations/:id/events` | 取得最近 100 條事件 |
-| `GET` | `/api/models` | 查詢可用模型列表 |
-| `DELETE` | `/api/conversations/:id` | 刪除對話 |
 | `GET` | `/api/conversations` | 列出活躍對話 |
+| `GET` | `/api/conversations/:id` | 取得單一對話詳細資訊 |
+| `DELETE` | `/api/conversations/:id` | 刪除對話 |
+| `POST` | `/api/conversations/:id/start` | 啟動 OpenCode 實例 |
+| `POST` | `/api/conversations/:id/stop` | 停止 OpenCode 實例（移除 workspace，可重新 start） |
+| `POST` | `/api/conversations/:id/restart` | 重啟 OpenCode 實例 |
+| `POST` | `/api/conversations/:id/message` | 發送訊息（HTTP REST） |
+| `GET` | `/api/conversations/:id/events` | 取得最近 100 條事件 |
+| `GET/POST` | `/api/conversations/:id/config` | 讀取 / 寫入 `opencode.json` |
+| `PUT/GET/DELETE` | `/api/conversations/:id/agent/config` | 寫入 / 讀取 / 刪除 `AGENTS.md` |
+| `GET/PUT` | `/api/conversations/:id/agents` | 列出 / 寫入 Agent 定義 |
+| `GET/DELETE` | `/api/conversations/:id/agents/:name` | 讀取 / 刪除指定 Agent |
+| `PUT` | `/api/conversations/:id/files` | 寫入檔案 |
+| `POST` | `/api/conversations/:id/files/read` | 讀取檔案 |
+| `POST` | `/api/conversations/:id/files/delete` | 刪除檔案 |
+| `POST` | `/api/conversations/:id/files/list` | 列出目錄 |
+| `POST` | `/api/conversations/:id/files/copy` | 從本機複製檔案/資料夾 |
+| `POST/GET` | `/api/conversations/:id/sessions` | 建立 / 列出會話 |
+| `GET/DELETE` | `/api/conversations/:id/sessions/:sid` | 讀取 / 刪除指定會話 |
+| `GET` | `/api/conversations/:id/sessions/:sid/children` | 取得子會話 |
+| `POST` | `/api/conversations/:id/sessions/:sid/fork` | 分支會話 |
+| `POST` | `/api/conversations/:id/skills/upload` | 上傳 Skill（zip） |
+| `POST` | `/api/conversations/:id/skills/import` | 從本機導入 Skill |
+| `GET` | `/api/conversations/:id/skills` | 列出 Skills |
+| `GET` | `/api/conversations/:id/skills/:name` | 讀取 SKILL.md |
+| `GET` | `/api/conversations/:id/skills/:name/info` | Skill 結構資訊與 hash |
+| `DELETE` | `/api/conversations/:id/skills/:name` | 刪除 Skill |
+| `GET` | `/api/models` | 查詢可用模型列表 |
 
 **WebSocket API**（JSON-RPC 2.0）：
 
 | 方法 | 說明 |
 |------|------|
-| `session.create` / `session.delete` / `session.list` | 會話管理 |
+| `session.create` / `session.get` / `session.list` / `session.children` / `session.fork` / `session.delete` | 會話管理 |
+| `session.abort` | 中止正在生成的回應 |
 | `message.send` | 發送訊息，等待 AI 回應 |
 | `message.history` | 取得對話歷史 |
-| `session.abort` | 中止正在生成的回應 |
 | `conversation.status` / `conversation.start` / `conversation.stop` / `conversation.restart` | 對話生命周期控制 |
 | `config.get` / `config.update` | 配置讀寫（`update` 支援 canonical 強制合併） |
-| `agent.list` / `agent.read` / `agent.write` / `agent.delete` | Agent CRUD |
+| `agent.register` / `agent.get` / `agent.list` / `agent.delete` | Agent CRUD |
+| `agent.config.write` / `agent.config.get` / `agent.config.delete` | AGENTS.md 管理 |
+| `file.write` / `file.read` / `file.list` / `file.delete` / `file.copy` | 檔案 CRUD |
 | `skills.import` / `skills.list` / `skills.get` / `skills.info` / `skills.delete` | Skill 導入 / 列出 / 讀取 / 資訊 / 刪除 |
-| `file.list` / `file.read` / `file.write` / `file.delete` | 檔案 CRUD |
 | `events.subscribe` / `events.unsubscribe` | 事件流訂閱 |
 
 ---
