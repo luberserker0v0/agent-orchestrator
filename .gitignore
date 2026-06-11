@@ -32,6 +32,7 @@ coverage/
 
 # User runtime config (copy from agentorchestrator.example.json)
 config/agentorchestrator.json
+config/canonical-opencode.json
 
 # Temporary files
 *.tmp
