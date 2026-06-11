@@ -360,7 +360,7 @@ export function createHttpServer(
       workspaceFactory.writeConfig(id, config);
       markNeedsRestartIfRunning(id, 'opencode.json changed');
       conversationState.emitEvent(id, 'conversation.configChanged', { changedFiles: ['.opencode/opencode.json'] });
-      res.status(204).send();
+      res.status(200).json(config);
     } catch (err) {
       logger.error(`Failed to write config for ${id}:`, err);
       res.status(500).json({ error: (err as Error).message });
