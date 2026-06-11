@@ -43,7 +43,7 @@ describe('validateConfig', () => {
       orchestrator: {
         ...createValidConfig().orchestrator,
         maxInstances: 200,
-        portRange: { start: 30000, end: 30100 },
+        portRange: { start: 30000, end: 30100, allowDynamicFallback: false },
       },
     });
     expect(() => validateConfig(config)).toThrow(

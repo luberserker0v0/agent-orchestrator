@@ -19,7 +19,8 @@
     "idleSweepIntervalMs": 60000, // Idle check interval (ms)
     "portRange": {
       "start": 30000,
-      "end": 30100               // maxInstances must not exceed portRange.end - portRange.start + 1
+      "end": 30100,              // maxInstances must not exceed portRange.end - portRange.start + 1 (unless allowDynamicFallback is true)
+      "allowDynamicFallback": true  // When port range exhausted, use OS-assigned port
     },
 
     // "direct" = spawn opencode binary directly on the host

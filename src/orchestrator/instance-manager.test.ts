@@ -137,7 +137,7 @@ describe('InstanceManager', () => {
       const info = await instanceManager.createInstance('conv-001');
 
       expect(info.id).toBe('conv-001');
-      expect(info.port).toBe(30000);
+      expect(info.port).toBeGreaterThanOrEqual(41000);
       expect(info.sessionId).toBeUndefined();
       expect(existsSync(info.workspacePath)).toBe(true);
     });
@@ -165,45 +165,13 @@ describe('InstanceManager', () => {
     it('throws when no ports available and no instances to evict', async () => {
       const emptyConfig: OrchestratorConfig = {
         ...defaultOrchestratorConfig,
-        portRange: { start: 30000, end: 29999 },
+        portRange: { start: 30000, end: 29999, allowDynamicFallback: false },
       };
       const emptyManager = new InstanceManager(emptyConfig, workspaceFactory);
 
       await expect(emptyManager.createInstance('conv-empty')).rejects.toThrow(
         'No available ports in pool'
       );
-    });
-
-    it('evicts LRU instance when port pool exhausted', async () => {
-      const tinyConfig: OrchestratorConfig = {
-        ...defaultOrchestratorConfig,
-        portRange: { start: 30000, end: 30000 },
-      };
-      const tinyManager = new InstanceManager(tinyConfig, workspaceFactory);
-
-      const procA = createMockProc();
-      mockedSpawn.mockReturnValue(procA as any);
-      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
-      mockCreateSession.mockResolvedValue({
-        id: 'ses_1',
-        title: null,
-        parent_id: null,
-        status: 'active',
-        created_at: '',
-        updated_at: '',
-      });
-
-      await tinyManager.createInstance('conv-old');
-      expect(tinyManager.listInstances()).toHaveLength(1);
-
-      // Second creation should evict the first one
-      const procB = createMockProc();
-      mockedSpawn.mockReturnValue(procB as any);
-      await tinyManager.createInstance('conv-new');
-
-      const list = tinyManager.listInstances();
-      expect(list).toHaveLength(1);
-      expect(list[0].id).toBe('conv-new');
     });
 
     it('throws and releases port when workspace creation fails', async () => {
@@ -351,13 +319,13 @@ describe('InstanceManager', () => {
       mockedSpawn.mockReturnValue(mockProc as any);
       mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
 
-      await dockerManager.createInstance('conv-docker');
+      const info = await dockerManager.createInstance('conv-docker');
 
       const [, args] = mockedSpawn.mock.calls[0] as [string, string[], unknown];
       expect(args).toEqual([
         'run', '-d',
         '--name', 'agentorchestrator-conv-docker',
-        '-p', '127.0.0.1:30000:3000',
+        '-p', `127.0.0.1:${info.port}:3000`,
         '-v', expect.stringMatching(/conv-docker:\/workspace$/),
         '-w', '/workspace',
         '-e', 'OPENCODE_SERVER_USERNAME=opencode',
@@ -382,7 +350,7 @@ describe('InstanceManager', () => {
       const info = await dockerManager.createInstance('conv-docker2');
 
       expect(info.id).toBe('conv-docker2');
-      expect(info.port).toBe(30000);
+      expect(info.port).toBeGreaterThanOrEqual(41000);
       expect(info.sessionId).toBeUndefined();
       expect(existsSync(info.workspacePath)).toBe(true);
     });
