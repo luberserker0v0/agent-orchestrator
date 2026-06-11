@@ -592,7 +592,8 @@ describe('HTTP API Server', () => {
       .post('/api/conversations/conv-001/config')
       .send({ model: 'test/model', permission: { bash: { '*': 'deny' } } });
 
-    expect(res.status).toBe(204);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ model: 'test/model', permission: { bash: { '*': 'deny' } } });
     expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith('conv-001', {
       model: 'test/model',
       permission: { bash: { '*': 'deny' } },
