@@ -1787,7 +1787,7 @@ describe('WSRouter', () => {
       mockConversationState,
       { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
       { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
-      { runtime: 'docker', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest' } }
+      { runtime: 'docker', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest', containerPort: 3000 } }
     );
 
     dockerMockWss.emit('connection', dockerWs, createMockReq('/ws/conv-001'));
