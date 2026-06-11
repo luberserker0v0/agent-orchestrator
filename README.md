@@ -352,6 +352,8 @@ wscat -c ws://127.0.0.1:11697/ws/demo
 
 | 文件 | 說明 |
 |------|------|
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | 5 分鐘快速上手：安裝、啟動、第一個對話 |
+| [`docs/QUICKTEST.md`](docs/QUICKTEST.md) | 測試入門：單元測試、E2E 測試、撰寫規範 |
 | [`docs/API.md`](docs/API.md) | 完整的 REST API 與 WebSocket API 文件，包含請求/回應範例與錯誤處理 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 架構圖、資料流、核心模組詳細說明與 OpenCode 實例生命週期 |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | 開發環境設定、程式碼規範、提交訊息規範、PR 流程與測試要求 |
