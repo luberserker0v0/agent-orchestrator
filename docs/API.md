@@ -72,9 +72,11 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 **回應**（`200 OK`）：
 ```json
 {
+  "id": "my-conversation-001",
   "status": "running",
   "ready": false,
   "port": 30000,
+  "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001",
   "sessionId": "ses_171df93daffektj6tWpV4EBEmz"
 }
 ```
@@ -123,7 +125,14 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 
 **回應**（`200 OK`）：
 ```json
-{ "status": "restarting" }
+{
+  "id": "my-conversation-001",
+  "status": "running",
+  "ready": false,
+  "port": 30000,
+  "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001",
+  "sessionId": "ses_xxx"
+}
 ```
 
 **錯誤**（`404`）：
@@ -158,7 +167,7 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 
 寫入（或更新）對話的 `opencode.json`。
 
-當 `enforceCanonicalConfig=true`（預設），伺服器會先從 `config/canonical-opencode.json` 載入系統預設值，再合併使用者提供的 keys（使用者 keys 僅在 canonical 中不存在的項目才會生效，保護 `$schema` 與 `permission` 不被覆寫）。若設為 `false`，則直接寫入使用者的原始內容。
+當 `enforceCanonicalConfig=true`（預設），伺服器會先從 `config/canonical-opencode.example.json` 載入系統預設值，再合併使用者提供的 keys（使用者 keys 僅在 canonical 中不存在的項目才會生效，保護 `$schema` 與 `permission` 不被覆寫）。若設為 `false`，則直接寫入使用者的原始內容。
 
 **請求**：
 ```json
@@ -172,7 +181,7 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 }
 ```
 
-**回應**（`200 OK`）：回傳寫入後的完整 config 內容。
+**回應**（`204 No Content`）
 
 ---
 
@@ -202,7 +211,7 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 }
 ```
 
-**回應**（`201 Created`）
+**回應**（`204 No Content`）
 
 ---
 
@@ -228,6 +237,47 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 ### `DELETE /api/conversations/:id/agents/:name`
 
 刪除指定 Agent 定義檔。
+
+**回應**（`204 No Content`）
+
+---
+
+### `PUT /api/conversations/:id/agent/config`
+
+寫入 AGENTS.md 內容。
+
+**請求**：
+```json
+{
+  "content": "# Project Agents\n\n## Designer\n..."
+}
+```
+
+**回應**（`204 No Content`）
+
+---
+
+### `GET /api/conversations/:id/agent/config`
+
+讀取 AGENTS.md 內容。
+
+**回應**：
+```json
+{
+  "content": "# Project Agents\n\n## Designer\n..."
+}
+```
+
+**錯誤**（`404`）：
+```json
+{ "error": "AGENTS.md not found" }
+```
+
+---
+
+### `DELETE /api/conversations/:id/agent/config`
+
+刪除 AGENTS.md。
 
 **回應**（`204 No Content`）
 
@@ -445,7 +495,7 @@ references/capabilities.md
 }
 ```
 
-**回應**（`201 Created`）
+**回應**（`204 No Content`）
 
 **錯誤**（`400`）：
 ```json
@@ -517,6 +567,29 @@ references/capabilities.md
   "path": "templates",
   "files": ["spec.md", "README.md", "assets"]
 }
+```
+
+---
+
+### `POST /api/conversations/:id/sessions`
+
+建立新會話（僅在對話為 `running` 且 `ready` 狀態時可用）。
+
+**請求**：
+```json
+{
+  "title": "feature-discussion",
+  "parentID": "ses_parent_xxx"
+}
+```
+- `title`（可選）：會話標題
+- `parentID`（可選）：父會話 ID（從指定會話分支建立）
+
+**回應**（`201 Created`）：OpenCode 會話物件。
+
+**錯誤**（`409`）：
+```json
+{ "error": "Instance is not ready yet. OpenCode is still initializing." }
 ```
 
 ---
@@ -621,25 +694,28 @@ references/capabilities.md
 
 ### `GET /api/conversations/:id/events`
 
-取得對話最近 100 條事件。適用於 WebSocket 重連時的事件回放。
+取得對話最近 50 條事件（可透過 `?limit=100` 取得最多 100 條）。適用於 WebSocket 重連時的事件回放。
 
 **回應**：
 ```json
 [
   {
     "type": "conversation.prepared",
-    "timestamp": "2026-06-05T14:45:22.734Z",
-    "payload": { "id": "my-conversation-001" }
+    "id": "my-conversation-001",
+    "timestamp": 1780500965587,
+    "payload": {}
   },
   {
     "type": "conversation.starting",
-    "timestamp": "2026-06-05T14:45:25.123Z",
-    "payload": { "id": "my-conversation-001" }
+    "id": "my-conversation-001",
+    "timestamp": 1780500967123,
+    "payload": {}
   },
   {
     "type": "conversation.running",
-    "timestamp": "2026-06-05T14:45:28.456Z",
-    "payload": { "id": "my-conversation-001", "port": 30000 }
+    "id": "my-conversation-001",
+    "timestamp": 1780500968456,
+    "payload": { "status": "running" }
   }
 ]
 ```
@@ -1016,8 +1092,10 @@ references/capabilities.md
   "result": {
     "id": "my-conversation-001",
     "status": "running",
+    "ready": false,
     "port": 30000,
-    "sessionId": "ses_xxx"
+    "sessionId": "ses_xxx",
+    "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001"
   }
 }
 ```
@@ -1043,7 +1121,12 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 7,
-  "result": { "status": "running" }
+  "result": {
+    "status": "running",
+    "port": 30000,
+    "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001",
+    "sessionId": "ses_xxx"
+  }
 }
 ```
 
@@ -1093,8 +1176,12 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 9,
-  "result": { "status": "restarting" }
-}
+  "result": {
+    "status": "running",
+    "port": 30000,
+    "wsUrl": "ws://127.0.0.1:11697/ws/my-conversation-001",
+    "sessionId": "ses_xxx"
+  }
 ```
 
 ---
@@ -1631,64 +1718,19 @@ references/capabilities.md
 
 ### 事件類
 
-#### `events.subscribe`
+#### 事件推送（自動行為）
 
-訂閱對話事件流。訂閱後，伺服器會透過 WebSocket 主動推送 `conversation.*` 事件。
+WebSocket 連線建立後即自動訂閱事件流，無需顯式 RPC 方法。伺服器透過 JSON-RPC notification 推送事件：
 
-**請求**：
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 20,
-  "method": "events.subscribe",
-  "params": {}
-}
-```
-
-**回應**：
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 20,
-  "result": { "subscribed": true }
-}
-```
-
-訂閱後可能收到的事件推送：
 ```json
 {
   "jsonrpc": "2.0",
   "method": "event",
   "params": {
     "type": "conversation.running",
-    "timestamp": "2026-06-05T14:45:28.456Z",
-    "payload": { "id": "demo", "port": 30000 }
+    "timestamp": 1780500968456,
+    "payload": { "id": "demo" }
   }
-}
-```
-
----
-
-#### `events.unsubscribe`
-
-取消訂閱事件流。
-
-**請求**：
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 21,
-  "method": "events.unsubscribe",
-  "params": {}
-}
-```
-
-**回應**：
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 21,
-  "result": { "subscribed": false }
 }
 ```
 
@@ -1696,13 +1738,13 @@ references/capabilities.md
 
 ## Conversation 生命周期事件
 
-當對話狀態改變時，AgentOrchestrator 會透過 WebSocket 推送事件（需先 `events.subscribe`）。
+當對話狀態改變時，AgentOrchestrator 會自動透過 WebSocket 推送事件（連線建立後自動訂閱，無需顯式呼叫）。
 
 | 事件類型 | 觸發時機 | Payload |
 |----------|----------|---------|
 | `conversation.prepared` | `POST /api/conversations` 完成 | `{ id }` |
 | `conversation.starting` | `POST /start` 開始 spawn | `{ id }` |
-| `conversation.running` | OpenCode 健康檢查通過 | `{ id, port }` |
+| `conversation.running` | OpenCode 健康檢查通過 | `{ id }` |
 | `conversation.ready` | OpenCode Session 首次可查詢（ready poll 成功） | `{ id }` |
 | `conversation.readyLost` | OpenCode Session 失聯（ready keepalive 失敗） | `{ id }` |
 | `conversation.stopped` | `POST /stop` 完成 | `{ id }` |
@@ -1792,7 +1834,7 @@ You are a senior UI/UX designer. Your responsibilities include:
 |--------|------|
 | `-32700` | Parse error：無法解析 JSON |
 | `-32600` | Invalid Request：jsonrpc 版本不對或缺少 method |
-| `-32601` | Method not found：未知的 WebSocket method |
+| `-32000` | Server error：未知的 WebSocket method（回傳 `-32000`） |
 | `-32000` | Server error：一般伺服器錯誤 |
 | `-32001` | Invalid state：對話狀態不允許此操作（如未運行時呼叫 `message.send`） |
 

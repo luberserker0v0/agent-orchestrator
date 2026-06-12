@@ -79,9 +79,7 @@ E2E tests spawn real OpenCode instances and the full AgentOrchestrator stack.
 cp .env.test.example .env.test
 ```
 
-Fill in at minimum:
-- `AO_TEST_PROVIDER_BASE_URL` — your OpenAI-compatible provider endpoint
-- `AO_TEST_PROVIDER_MODELS` — comma-separated model names available on your provider
+The default config in `src/test-fixtures/opencode.example.json` uses a hardcoded provider — update `.env.test` only if you need custom Docker or server overrides.
 
 3. For **Docker runtime** tests:
    - Docker must be installed and running

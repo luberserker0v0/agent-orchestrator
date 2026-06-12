@@ -54,12 +54,12 @@ Event Stream (WebSocket push via conversationState.subscribe):
 ### 1. 準備對話
 
 ```
-Client → POST /api/conversations (with model, agent)
+Client → POST /api/conversations
   │
   ▼
 AgentOrchestrator
   │ 1. 產生 UUID → workspace/{id}/
-  │ 2. WorkspaceFactory.create(id, options) → 建立資料夾（`opencode.json` 僅在用戶 POST 時寫入）
+  │ 2. WorkspaceFactory.create(id) → 建立資料夾（`opencode.json` 僅在用戶 POST 時寫入）
   │ 3. ConversationState.create(id) → status = 'prepared'
   │ 4. 註冊 wsUrl (尚未分配 port，不啟動 OpenCode)
   │
@@ -76,7 +76,7 @@ Client → POST /api/conversations/{id}/start
 AgentOrchestrator
   │ 1. ConversationState.transition(id, 'starting')
   │    → emit 'conversation.starting'
-  │ 2. InstanceManager.createInstance(id, reuseWorkspace=true)
+  │ 2. InstanceManager.createInstance(id)
   │    │ 2a. 若 workspace 已存在 → 跳過 create，直接使用
   │    │ 2b. PortPool.allocate() → 動態端口
   │    │ 2c. spawn("opencode serve --port 30000", cwd=workspace/{id}/)
@@ -203,10 +203,11 @@ AgentOrchestrator
 | `get(id)` | 取得對話狀態與執行中實例資訊 |
 | `has(id)` | 檢查對話是否存在 |
 | `transition(id, toStatus)` | 原子性狀態轉換，觸發對應事件 |
-| `setRunningInstance(id, port, sessionId)` | 記錄啟動後的實例資訊 |
+| `setRunningInstance(id, info)` | 記錄啟動後的實例資訊（`process`、`client`） |
+| `setInstanceInfo(id, info)` | 記錄實例元資訊（`port`、`sessionId`、`wsUrl`） |
 | `removeRunningInstance(id)` | 清除實例資訊（停止時） |
 | `subscribe(id, callback)` | WebSocket 訂閱事件流；回傳 unsubscribe 函式 |
-| `getRecentEvents(id)` | 取得最近 100 條事件（供 REST `GET /events` 與重連時回放） |
+| `getRecentEvents(id, limit?)` | 取得最近事件（預設 50 條，最多 100，供 REST `GET /events` 與重連時回放） |
 | `emitEvent(id, type, payload?)` | 內部發射事件並寫入歷史 |
 | `startReadyCheck(id)` | 啟動 `isReady` 輪詢：透過 `GET /session/{id}` 確認 OpenCode 已就緒；成功後 emit `conversation.ready`，後續 keepalive 失敗時 emit `conversation.readyLost` |
 
@@ -224,11 +225,11 @@ AgentOrchestrator
 
 | 方法 | 職責 |
 |------|------|
-| `createInstance(id, options?)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、spawn OpenCode、健康檢查、建立 Session |
+| `createInstance(id)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、spawn OpenCode、健康檢查、建立 Session |
 | `getInstance(id)` | 取得實例資訊，並更新 `lastUsedAt` |
 | `destroyInstance(id)` | 銷毀實例：kill 進程、釋放端口、**移除 workspace** |
 | `stopInstance(id)` | 停止實例：kill 進程、釋放端口，**保留 workspace** |
-| `restartInstance(id)` | Docker 模式：原地重啟容器（相同 port、workspace） |
+| `restartInstance(id)` | Docker 模式：原地重啟容器（相同 port、workspace），10 秒超時後 fallback 到 kill + respawn |
 | `listInstances()` | 列出所有活躍實例 |
 | `evictLRU()` | 私有方法：達上限時淘汰最久未使用的實例 |
 
@@ -253,7 +254,7 @@ AgentOrchestrator
 
 **`PortPool`**：
 - `allocate()` → 從可用端口池取出第一個端口；若範圍耗盡且 `allowDynamicFallback=true`，自動退回到 OS 分配端口（bind `0`）
-- `release(port)` → 將端口放回池中（動態端口直接丟棄，不回收）
+- `release(port)` → 將端口放回池中（所有端口皆回收使用）
 - `getUsedCount()` → 取得已使用端口數量
 - `allowDynamicFallback`（建構參數）— 設定為 `true` 時，範圍耗盡不拋錯，改為 OS 分配；預設 `true`
 
@@ -267,7 +268,7 @@ AgentOrchestrator
 
 | 方法 | 職責 |
 |------|------|
-| `create(id, options?)` | 建立 workspace 資料夾；**不寫入** `opencode.json`（僅在用戶透過 POST 或 WS `config.update` 時才寫入） |
+| `create(id?)` | 建立 workspace 資料夾；**不寫入** `opencode.json`（僅在用戶透過 POST 或 WS `config.update` 時才寫入） |
 | `hasWorkspace(id)` | 檢查 workspace 是否已存在 |
 | `ensure(id)` | 確保 workspace 存在（供重用時呼叫） |
 | `destroy(id)` | 移除 workspace 資料夾 |
@@ -280,10 +281,10 @@ AgentOrchestrator
 | `readSkill(id, name)` | 讀取 `.opencode/skills/{name}/SKILL.md` 內容 |
 | `getSkillInfo(id, name)` | 取得 Skill 目錄結構、總大小與 SHA-256 hash |
 | `deleteSkill(id, name)` | 移除 `.opencode/skills/{name}/` 目錄；若不存在則拋出錯誤 |
-| `calculateWorkspaceSize(id)` | 計算 workspace 總大小（遞迴） |
+| `getWorkspaceSize(id)` | 計算 workspace 總大小（遞迴） |
 
 **規範配置強制合併**：
-- `config/canonical-opencode.json` 為系統預設 `opencode.json` 模板，定義 `$schema` 與 `permission` 沙箱權限
+- `config/canonical-opencode.example.json` 為系統預設 `opencode.json` 模板，定義 `$schema` 與 `permission` 沙箱權限
 - `enforceCanonicalConfig`（預設 `true`）：`writeConfig()` 時 deep-clone canonical 模板，僅接受使用者提供的**非 canonical keys**（如 `model`、`agent`），確保安全設定不被覆寫
 - 設定 `workspace.enforceCanonicalConfig: false` 可關閉此行為，直接寫入使用者原始內容
 
@@ -337,14 +338,14 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再�
 - 檢查 `conversationState.has(id)`；若不存在 → 關閉連線（code `1011`）
 - 訂閱 `conversationState.subscribe(id)`，將事件即時推送給客戶端
 - 處理 25+ JSON-RPC 方法，包括：
-  - 會話類：`session.create`, `session.delete`, `session.list`
+  - 會話類：`session.create`, `session.delete`, `session.list`, `session.get`, `session.children`, `session.fork`, `session.abort`
   - 訊息類：`message.send`, `message.history`
   - 對話控制類：`conversation.status`, `conversation.start`, `conversation.stop`, `conversation.restart`
   - 配置類：`config.get`, `config.update`
-  - Agent 類：`agent.list`, `agent.read`, `agent.write`, `agent.delete`
+  - Agent 類：`agent.list`, `agent.read`, `agent.write`, `agent.delete`, `agent.config.get`, `agent.config.write`, `agent.config.delete`
   - 檔案類：`file.list`, `file.read`, `file.write`, `file.delete`
   - Skill 類：`skills.import`, `skills.list`, `skills.get`, `skills.info`, `skills.delete`
-  - 事件類：`events.subscribe`, `events.unsubscribe`
+  - 事件類：自動推送（連線即訂閱，無需顯式 RPC）
 - 若對話狀態非 `running`，執行需實例操作的方法時回傳 `-32001` invalid state
 
 ---
@@ -359,7 +360,7 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再�
 3. 回傳 `AgentOrchestratorConfig` 型別物件
 
 **`loadCanonicalConfig()`**：
-- 讀取 `config/canonical-opencode.json`，作為所有 workspace 的 `opencode.json` 系統預設模板
+- 讀取 `config/canonical-opencode.example.json`，作為所有 workspace 的 `opencode.json` 系統預設模板
 - 內容固定包含 `$schema` 與 `permission` 沙箱權限區塊
 - 供 `WorkspaceFactory.writeConfig()` 在 `enforceCanonicalConfig=true` 時合併使用
 
@@ -368,7 +369,7 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再�
 ## 安全設計
 
 1. **進程級隔離**：每個對話獨立 `opencode serve`，互不影響
-2. **檔案系統沙箱**：`config/canonical-opencode.json` 定義系統預設 `$schema` 與 `permission` 區塊，寫入 `opencode.json` 時強制合併（`enforceCanonicalConfig=true` 預設），確保權限設定不被使用者覆寫
+2. **檔案系統沙箱**：`config/canonical-opencode.example.json` 定義系統預設 `$schema` 與 `permission` 區塊，寫入 `opencode.json` 時強制合併（`enforceCanonicalConfig=true` 預設），確保權限設定不被使用者覆寫
 3. **動態 Basic Auth**：每個 OpenCode 實例自動生成獨立密碼，避免與使用者全域設定衝突
 4. **自動資源回收**：LRU 淘汰與刪除時的 `treeKill` + `rmSync`，防止殭屍進程與磁碟洩漏
 5. **Workspace 配額限制**：單一 workspace 上限 50 MB，超過時寫入操作被拒絕
