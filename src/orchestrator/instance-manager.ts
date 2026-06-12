@@ -224,11 +224,8 @@ export class InstanceManager {
     logger.info(`Restarting container ${containerName}...`);
 
     const restart = spawn('docker', ['restart', containerName], { stdio: 'ignore' });
-    const exitCode = await new Promise<number | null>((resolve) => {
-      restart.on('exit', resolve);
-      restart.on('error', () => resolve(null));
-    });
-    if (exitCode !== 0) {
+    await this.waitForExit(restart, 10000);
+    if (restart.exitCode !== 0) {
       throw new Error(`docker restart failed for container ${containerName}`);
     }
 
