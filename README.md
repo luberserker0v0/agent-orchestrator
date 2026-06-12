@@ -161,7 +161,7 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `POST` | `/api/conversations/:id/stop` | 停止 OpenCode 實例（移除 workspace，可重新 start） |
 | `POST` | `/api/conversations/:id/restart` | 重啟 OpenCode 實例 |
 | `POST` | `/api/conversations/:id/message` | 發送訊息（HTTP REST） |
-| `GET` | `/api/conversations/:id/events` | 取得最近 100 條事件 |
+| `GET` | `/api/conversations/:id/events` | 取得最近 50 條事件（最多 100） |
 | `GET/POST` | `/api/conversations/:id/config` | 讀取 / 寫入 `opencode.json` |
 | `PUT/GET/DELETE` | `/api/conversations/:id/agent/config` | 寫入 / 讀取 / 刪除 `AGENTS.md` |
 | `GET/PUT` | `/api/conversations/:id/agents` | 列出 / 寫入 Agent 定義 |
@@ -197,7 +197,7 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `agent.config.write` / `agent.config.get` / `agent.config.delete` | AGENTS.md 管理 |
 | `file.write` / `file.read` / `file.list` / `file.delete` / `file.copy` | 檔案 CRUD |
 | `skills.import` / `skills.list` / `skills.get` / `skills.info` / `skills.delete` | Skill 導入 / 列出 / 讀取 / 資訊 / 刪除 |
-| `events.subscribe` / `events.unsubscribe` | 事件流訂閱 |
+| 事件自動推送（連線即訂閱） | 事件流即時通知 |
 
 ---
 
@@ -394,7 +394,7 @@ AGENTORCHESTRATOR_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
 
 ### 4. 調整權限限制
 
-預設透過 `config/canonical-opencode.json` 限制 `external_directory` 與 `bash`。若需放寬，編輯 canonical 模板中的 `permission` 區塊：
+預設透過 `config/canonical-opencode.example.json` 限制 `external_directory` 與 `bash`。若需放寬，編輯 canonical 模板中的 `permission` 區塊：
 
 ```json
 {
