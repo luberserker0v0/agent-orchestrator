@@ -73,7 +73,6 @@ export function createWSClient(url: string): Promise<WSClient> {
       } else if (msg.method && eventHandlers.length > 0) {
         for (const handler of eventHandlers) handler(msg as unknown as JSONRPCEvent);
       }
-      }
     });
 
     ws.on('error', (err) => {
