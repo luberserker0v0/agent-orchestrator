@@ -1,15 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { parse as parseJSONC } from 'jsonc-parser';
+import { readAgentConfig } from './helpers.js';
+import type { OpencodeConfig } from '../opencode-http/types.js';
+import { validateOpencodeConfig } from '../opencode-http/types.js';
 
-const DIR = fileURLToPath(new URL('.', import.meta.url));
-
-function readTemplate(name: string): Record<string, unknown> {
-  const local = join(DIR, `${name}.json`);
-  const example = join(DIR, `${name}.example.json`);
-  const path = existsSync(local) ? local : example;
-  return parseJSONC(readFileSync(path, 'utf-8'));
-}
-
-export const OPENCODE_CONFIG = readTemplate('opencode');
+export const OPENCODE_CONFIG = readAgentConfig<OpencodeConfig>(
+  'opencode',
+  validateOpencodeConfig,
+);

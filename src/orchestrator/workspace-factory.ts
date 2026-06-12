@@ -13,6 +13,7 @@ import { join, dirname, basename, resolve, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { WorkspaceConfig } from '../config-loader.js';
+import type { OpencodeConfig } from '../opencode-http/types.js';
 
 export interface WorkspaceInfo {
   id: string;
@@ -155,7 +156,7 @@ export class WorkspaceFactory {
 
   // ─── Config ──────────────────────────────────────────────
 
-  writeConfig(id: string, config: Record<string, unknown>): void {
+  writeConfig(id: string, config: OpencodeConfig): void {
     const wsPath = this.resolveWorkspacePath(id);
     const opencodeDir = join(wsPath, '.opencode');
     mkdirSync(opencodeDir, { recursive: true });
@@ -169,7 +170,7 @@ export class WorkspaceFactory {
         }
       }
     } else {
-      result = config;
+      result = config as unknown as Record<string, unknown>;
     }
 
     writeFileSync(
@@ -180,14 +181,14 @@ export class WorkspaceFactory {
     logger.info(`Config written for workspace: ${wsPath}`);
   }
 
-  readConfig(id: string): Record<string, unknown> {
+  readConfig(id: string): OpencodeConfig {
     const wsPath = this.resolveWorkspacePath(id);
     const configPath = join(wsPath, '.opencode', 'opencode.json');
     if (!existsSync(configPath)) {
       return {};
     }
     const raw = readFileSync(configPath, 'utf-8');
-    return JSON.parse(raw) as Record<string, unknown>;
+    return JSON.parse(raw) as OpencodeConfig;
   }
 
   // ─── Agents ──────────────────────────────────────────────

@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "my_local_lmstudio/gemma-4-e4b-uncensored-hauhaucs-aggressive",
   "permission": {
     "bash": { "*": "deny" },
     "external_directory": { "*": "deny" },

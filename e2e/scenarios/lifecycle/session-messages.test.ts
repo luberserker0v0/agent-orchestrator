@@ -58,7 +58,7 @@ describe('Session Messages Query (E2E)', () => {
     const msgRes = await fetch(`${server.baseUrl}/api/conversations/e2e-ses-msg/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Say hello in one word' }),
+      body: JSON.stringify({ text: 'Say hello in one word', model: OPENCODE_CONFIG.model }),
     });
     expect(msgRes.status).toBe(200);
     const msgBody = await msgRes.json() as { messageId: string };
