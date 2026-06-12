@@ -8,6 +8,7 @@ import { ConversationState } from '../orchestrator/conversation-state.js';
 import { WSConnection } from './connection.js';
 import type { WebSocketConfig } from '../config-loader.js';
 import type { ServerConfig, OrchestratorConfig } from '../config-loader.js';
+import type { OpencodeConfig } from '../opencode-http/types.js';
 import { wsConnectionsActive } from '../metrics/registry.js';
 
 export class WSRouter {
@@ -190,7 +191,7 @@ export class WSRouter {
       // ─── Config ──────────────────────────────────────────
 
       case 'config.update': {
-        const { config } = params as { config: Record<string, unknown> };
+        const { config } = params as { config: OpencodeConfig };
         if (typeof config !== 'object' || config === null) {
           throw new Error('Missing or invalid config');
         }

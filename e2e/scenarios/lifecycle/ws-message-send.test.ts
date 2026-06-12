@@ -55,6 +55,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
     try {
       const response = await ws.request('message.send', {
         text: 'Say hello in one word',
+        model: OPENCODE_CONFIG.model
       });
       const result = response.result as { messageId: string; text: string; parts: Array<{ type: string; text?: string }> };
       expect(result).toHaveProperty('messageId');

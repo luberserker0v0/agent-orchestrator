@@ -99,3 +99,38 @@ export interface ConfigInfo {
   model?: string;
   [key: string]: unknown;
 }
+
+// ─── OpenCode JSON config types ──────────────────────────
+
+export interface OpencodeProviderEntry {
+  name?: string;
+  npm?: string;
+  options?: { baseURL?: string; apiKey?: string; [key: string]: unknown };
+  models?: Record<string, Record<string, unknown>>;
+}
+
+export interface OpencodeConfig {
+  $schema?: string;
+  model?: string;
+  small_model?: string;
+  provider?: Record<string, OpencodeProviderEntry>;
+  permission?: Record<string, unknown>;
+  agent?: Record<string, unknown>;
+  mcp?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export function validateOpencodeConfig(config: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (typeof config !== 'object' || config === null) {
+    errors.push('Config must be a JSON object');
+    return { valid: false, errors };
+  }
+  const c = config as OpencodeConfig;
+  if (!c.model) {
+    errors.push('Root field "model" is required (format: "providerID/modelID")');
+  } else if (typeof c.model === 'string' && !c.model.includes('/')) {
+    errors.push('model must be in format "providerID/modelID"');
+  }
+  return { valid: errors.length === 0, errors };
+}
