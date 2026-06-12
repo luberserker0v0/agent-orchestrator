@@ -35,7 +35,7 @@ export function createWSClient(url: string): Promise<WSClient> {
 
     ws.on('open', () => {
       resolve({
-        request(method, params = {}) {
+        request(method, params) {
           return new Promise((resolvePromise, rejectPromise) => {
             const id = nextId++;
             pending.set(id, { resolve: resolvePromise, reject: rejectPromise });

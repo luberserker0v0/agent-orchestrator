@@ -78,7 +78,6 @@ export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>)
         });
         try { rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
       };
-
       resolve({ port, baseUrl: `http://${host}:${port}`, cleanup, orchestratorConfig });
     });
     httpServer.server.on('error', (err) => {
