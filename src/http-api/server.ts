@@ -717,6 +717,24 @@ export function createHttpServer(
     }
   });
 
+  app.get('/api/conversations/:id/sessions/:sid/messages', async (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureReady(res, id)) return;
+
+    try {
+      const instance = instanceManager.getInstance(id);
+      if (!instance) {
+        res.status(500).json({ error: 'Instance reference lost' });
+        return;
+      }
+      const limit = req.query.limit ? Number(req.query.limit) : undefined;
+      const messages = await instance.client.listMessages(req.params.sid, limit);
+      res.json(messages);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // ─── Message ───────────────────────────────────────────
 
   app.post('/api/conversations/:id/message', async (req: Request, res: Response) => {

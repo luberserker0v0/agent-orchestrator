@@ -326,6 +326,42 @@ describe('WSRouter', () => {
     expect(resultCall).toBeDefined();
   });
 
+  it('handles message.history with custom sessionId', async () => {
+    const mockWs = createMockWebSocket();
+    const instance = createMockInstance();
+    mockInstanceManager.getInstance.mockReturnValue(instance);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'message.history',
+          params: { sessionId: 'child_ses_1', limit: 20 },
+        })
+      )
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(instance.client.listMessages).toHaveBeenCalledWith('child_ses_1', 20);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.id === 3 && parsed.result;
+      } catch {
+        return false;
+      }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
   it('handles session.abort', async () => {
     const mockWs = createMockWebSocket();
     const instance = createMockInstance();

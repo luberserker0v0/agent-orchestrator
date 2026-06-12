@@ -174,8 +174,9 @@ export class WSRouter {
       case 'message.history': {
         if (!instance) throw new Error('Instance not available');
         if (!instance.sessionId) throw new Error('Session not ready yet');
-        const { limit } = params as { limit?: number };
-        const messages = await instance.client.listMessages(instance.sessionId, limit);
+        const { sessionId, limit } = params as { sessionId?: string; limit?: number };
+        const sid = sessionId || instance.sessionId;
+        const messages = await instance.client.listMessages(sid, limit);
         return messages;
       }
 
