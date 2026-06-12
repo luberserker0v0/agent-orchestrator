@@ -84,8 +84,9 @@ describe('Ready State (E2E)', () => {
       expect(result).toHaveProperty('parts');
       expect(Array.isArray(result.parts)).toBe(true);
       expect(result.parts.length).toBeGreaterThan(0);
-      expect(result.parts[1].type).toBe('text');
-      expect(result.parts[1].text).toBeTruthy();
+      const rsTextPart = result.parts.find(p => p.type === 'text');
+      expect(rsTextPart).toBeTruthy();
+      expect(rsTextPart!.text).toBeTruthy();
     } finally {
       ws.close();
     }

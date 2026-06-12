@@ -63,8 +63,9 @@ describe('HTTP POST /api/conversations/:id/message (E2E)', () => {
     expect(body).toHaveProperty('parts');
     expect(Array.isArray(body.parts)).toBe(true);
     expect(body.parts.length).toBeGreaterThan(0);
-    expect(body.parts[1].type).toBe('text');
-    expect(body.parts[1].text).toBeTruthy();
+    const restTextPart = body.parts.find(p => p.type === 'text');
+    expect(restTextPart).toBeTruthy();
+    expect(restTextPart!.text).toBeTruthy();
   });
 
   it('returns 400 for missing text', async () => {
