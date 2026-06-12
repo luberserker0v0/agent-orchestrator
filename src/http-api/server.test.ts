@@ -1217,6 +1217,33 @@ describe('HTTP API Server', () => {
     expect(res.status).toBe(204);
   });
 
+  it('GET /api/conversations/:id/sessions/:sid/messages lists session messages', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
+    const mockMessages = [
+      { info: { id: 'msg_1', role: 'user' }, parts: [{ type: 'text', text: 'Hello' }] },
+      { info: { id: 'msg_2', role: 'assistant' }, parts: [{ type: 'text', text: 'Hi!' }] },
+    ];
+    const mockClient = { listMessages: vi.fn().mockResolvedValue(mockMessages) };
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+
+    const res = await request(server).get('/api/conversations/conv-001/sessions/ses_1/messages');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(mockMessages);
+    expect(mockClient.listMessages).toHaveBeenCalledWith('ses_1', undefined);
+  });
+
+  it('GET /api/conversations/:id/sessions/:sid/messages accepts limit query', async () => {
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
+    const mockClient = { listMessages: vi.fn().mockResolvedValue([]) };
+    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+
+    const res = await request(server).get('/api/conversations/conv-001/sessions/ses_1/messages?limit=5');
+
+    expect(res.status).toBe(200);
+    expect(mockClient.listMessages).toHaveBeenCalledWith('ses_1', 5);
+  });
+
   it('DELETE /api/conversations/:id destroys instance when running', async () => {
     mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
 

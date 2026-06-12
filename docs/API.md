@@ -557,6 +557,28 @@ references/capabilities.md
 
 ---
 
+### `GET /api/conversations/:id/sessions/:sid/messages`
+
+取得指定會話的訊息歷史（包括子代理會話的內容）。
+
+**查詢參數**：
+| 參數 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `limit` | integer | 否 | 限制回傳的訊息數量 |
+
+**回應**：陣列，包含完整訊息結構（含 `info` 與 `parts`）。
+
+```json
+[
+  {
+    "info": { "id": "msg_1", "role": "user" },
+    "parts": [{ "type": "text", "text": "Hello" }]
+  }
+]
+```
+
+---
+
 ### `POST /api/conversations/:id/sessions/:sid/fork`
 
 從指定會話建立分支（fork）。
@@ -976,7 +998,7 @@ references/capabilities.md
 
 #### `message.history`
 
-取得對話歷史。
+取得對話歷史。可指定 `sessionId` 以查詢子代理會話的訊息（需先用 `GET /sessions/:sid/children` 或 `conversation.session.children` 取得會話 ID）。
 
 **請求**：
 ```json
@@ -988,7 +1010,24 @@ references/capabilities.md
 }
 ```
 
+可選參數 `sessionId`：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "message.history",
+  "params": { "sessionId": "child_ses_xxx", "limit": 10 }
+}
+```
+
 **回應**：陣列，包含完整訊息結構（含 `info` 與 `parts`）。
+
+**參數**：
+| 參數 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `sessionId` | string | 否 | 要查詢的會話 ID；省略時使用主會話 |
+| `limit` | integer | 否 | 限制回傳的訊息數量 |
 
 ---
 
