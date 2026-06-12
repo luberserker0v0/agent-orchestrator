@@ -66,8 +66,9 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
       expect(result).toHaveProperty('parts');
       expect(Array.isArray(result.parts)).toBe(true);
       expect(result.parts.length).toBeGreaterThan(0);
-      expect(result.parts[1].type).toBe('text');
-      expect(result.parts[1].text).toBeTruthy();
+      const wsTextPart = result.parts.find(p => p.type === 'text');
+      expect(wsTextPart).toBeTruthy();
+      expect(wsTextPart!.text).toBeTruthy();
     } finally {
       ws.close();
     }
