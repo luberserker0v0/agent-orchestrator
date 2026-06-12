@@ -247,6 +247,13 @@ describe('WSRouter', () => {
       parts: [{ type: 'text', text: 'Hello' }],
     });
 
+    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.message', {
+      messageId: 'msg_1',
+      text: 'Hello',
+      parts: [{ type: 'text', text: 'Hello' }],
+      role: 'assistant',
+    });
+
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
       try {
@@ -287,6 +294,12 @@ describe('WSRouter', () => {
       model: undefined,
       agent: undefined,
       parts: [{ type: 'text', text: 'Hello' }],
+    });
+    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.message', {
+      messageId: 'msg_1',
+      text: 'Hello',
+      parts: [{ type: 'text', text: 'Hello' }],
+      role: 'assistant',
     });
   });
 

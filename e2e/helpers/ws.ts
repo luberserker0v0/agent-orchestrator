@@ -16,8 +16,8 @@ export interface JSONRPCResponse {
 
 export interface JSONRPCEvent {
   jsonrpc: '2.0';
-  method: 'event';
-  params: { type: string; timestamp: string; payload: Record<string, unknown> };
+  method: string;
+  params: Record<string, unknown>;
 }
 
 export interface WSClient {
@@ -58,21 +58,20 @@ export function createWSClient(url: string): Promise<WSClient> {
         msg = JSON.parse(data.toString());
       } catch { return; }
 
-      if (msg.method === 'event') {
-        for (const handler of eventHandlers) handler(msg as unknown as JSONRPCEvent);
-        return;
-      }
-
-      const id = msg.id as number;
-      const pendingReq = pending.get(id);
-      if (pendingReq) {
-        pending.delete(id);
-        if (msg.error) {
-          const err = msg.error as { code: number; message: string };
-          pendingReq.reject(new Error(err.message));
-        } else {
-          pendingReq.resolve(msg as unknown as JSONRPCResponse);
+      if (msg.id !== undefined && msg.id !== null) {
+        const id = msg.id as number;
+        const pendingReq = pending.get(id);
+        if (pendingReq) {
+          pending.delete(id);
+          if (msg.error) {
+            const err = msg.error as { code: number; message: string };
+            pendingReq.reject(new Error(err.message));
+          } else {
+            pendingReq.resolve(msg as unknown as JSONRPCResponse);
+          }
         }
+      } else if (msg.method && eventHandlers.length > 0) {
+        for (const handler of eventHandlers) handler(msg as unknown as JSONRPCEvent);
       }
     });
 

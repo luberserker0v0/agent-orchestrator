@@ -780,6 +780,12 @@ export function createHttpServer(
         .map((p) => (p as { text: string }).text)
         .join('');
 
+      conversationState.emitEvent(id, 'conversation.message', {
+        messageId: response.info.id,
+        text: texts,
+        parts: response.parts,
+        role: 'assistant',
+      });
       res.json({ messageId: response.info.id, text: texts, parts: response.parts });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
