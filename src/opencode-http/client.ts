@@ -39,7 +39,7 @@ export class OpenCodeClient {
       init.body = JSON.stringify(body);
     }
 
-    logger.info(`[OpenCode HTTP] ${method} ${path}`);
+    logger.debug(`[OpenCode HTTP] ${method} ${path}`);
     try {
       const res = await fetch(url, init);
 
