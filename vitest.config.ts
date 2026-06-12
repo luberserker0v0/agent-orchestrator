@@ -4,7 +4,13 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: (() => {
+      if (process.env.E2E_RUNTIME === 'docker' || process.env.E2E_RUNTIME === 'e2e') {
+        return ['e2e/scenarios/lifecycle/*.test.ts']
+      }
+    
+      return ['src/**/*.test.ts']
+    })(),
     coverage: {
       provider: 'v8',
       enabled: true,

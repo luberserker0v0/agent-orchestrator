@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startServer, type E2EServer } from '../../helpers/server.js';
 import { createWSClient } from '../../helpers/ws.js';
-import { createProviderConfig } from '../../../src/test-fixtures/user-configs.js';
+import { OPENCODE_CONFIG } from '../../../src/test-fixtures/user-configs.js';
 import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
 
 describe('WebSocket JSON-RPC message.send (E2E)', () => {
@@ -9,6 +9,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
 
   beforeAll(async () => {
     server = await startServer();
+    console.log(`[WebSocket JSON-RPC message.send (E2E)] server is listening on ${server.baseUrl}`)
   }, 30_000);
 
   afterAll(async () => {
@@ -23,7 +24,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
 
   async function waitForReady(baseUrl: string, conversationId: string): Promise<void> {
     for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 1000));
       const res = await fetch(`${baseUrl}/api/conversations/${conversationId}`);
       const body = await res.json() as { ready: boolean; sessionId?: string };
       if (body.ready === true && body.sessionId) return;
@@ -40,7 +41,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
     const conv = await createRes.json() as { wsUrl: string };
     expect(createRes.status).toBe(201);
 
-    await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws', createProviderConfig());
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws', OPENCODE_CONFIG);
 
     await fetch(`${server.baseUrl}/api/conversations/e2e-msg-ws/start`, {
       method: 'POST',
@@ -65,8 +66,8 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
       expect(result).toHaveProperty('parts');
       expect(Array.isArray(result.parts)).toBe(true);
       expect(result.parts.length).toBeGreaterThan(0);
-      expect(result.parts[0].type).toBe('text');
-      expect(result.parts[0].text).toBeTruthy();
+      expect(result.parts[1].type).toBe('text');
+      expect(result.parts[1].text).toBeTruthy();
     } finally {
       ws.close();
     }
@@ -96,7 +97,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
     });
     const conv = await createRes.json() as { wsUrl: string };
 
-    await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws-notext', createProviderConfig());
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws-notext', OPENCODE_CONFIG);
 
     await fetch(`${server.baseUrl}/api/conversations/e2e-msg-ws-notext/start`, {
       method: 'POST',

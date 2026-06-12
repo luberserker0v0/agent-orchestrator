@@ -10,16 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - docs: add QUICKSTART.md and QUICKTEST.md for rapid onboarding and testing workflow
+- feat(e2e): replace dynamic provider config with static OPENCODE_CONFIG fixture (#46)
+- feat(e2e): add cross-env for cross-platform env vars in npm scripts (#46)
 
 ### Fixed
 
 - fix(config-loader): always use jsonc-parser for config JSON files to handle comments in `.json` files (#45)
+- fix(instance-manager): add 10s timeout to docker restart spawn to prevent indefinite hang (#46)
+- fix(e2e): cleanup orphan Docker containers in test server startup/cleanup to prevent container name conflicts on re-runs (#46)
 
 ### Changed
 
 - docs: sync README, API.md, ARCHITECTURE.md with current codebase (config schema, endpoint tables, WS methods, lifecycle behavior)
-
-### Added
+- feat(http-api): return 204 No Content from POST /api/conversations/:id/config (#46)
 
 - feat(e2e): restructure scenarios into `workspace/` (runtime-agnostic CRUD) and `lifecycle/` (runtime-specific, runs once per runtime). Runtime selected via `E2E_RUNTIME` env var, no soft-skip logic
 - feat(e2e): add `test:e2e:workspace`, `test:e2e:direct`, `test:e2e:docker` scripts for targeted runtime testing

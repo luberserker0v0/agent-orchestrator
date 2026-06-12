@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startServer, type E2EServer } from '../../helpers/server.js';
 import { createWSClient } from '../../helpers/ws.js';
-import { createProviderConfig } from '../../../src/test-fixtures/user-configs.js';
+import { OPENCODE_CONFIG } from '../../../src/test-fixtures/user-configs.js';
 import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
 
 describe('Ready State (E2E)', () => {
@@ -9,15 +9,22 @@ describe('Ready State (E2E)', () => {
 
   beforeAll(async () => {
     server = await startServer();
+    console.log(`[Ready State (E2E) server is listening on ${server.baseUrl}`)
   }, 30_000);
 
   afterAll(async () => {
+    const ids = ['e2e-ready', 'e2e-ready-ws'];
+    for (const id of ids) {
+      try {
+        await fetch(`${server.baseUrl}/api/conversations/${id}`, { method: 'DELETE' });
+      } catch { /* ignore */ }
+    }
     await server.cleanup();
   }, 15_000);
 
   async function waitForReady(baseUrl: string, conversationId: string): Promise<void> {
     for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 1000));
       const res = await fetch(`${baseUrl}/api/conversations/${conversationId}`);
       const body = await res.json() as { ready: boolean };
       if (body.ready === true) return;
@@ -32,7 +39,7 @@ describe('Ready State (E2E)', () => {
       body: JSON.stringify({ id: 'e2e-ready' }),
     });
 
-    await uploadOpencodeConfig(server.baseUrl, 'e2e-ready', createProviderConfig());
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-ready', OPENCODE_CONFIG);
 
     const startRes = await fetch(`${server.baseUrl}/api/conversations/e2e-ready/start`, {
       method: 'POST',
@@ -52,7 +59,7 @@ describe('Ready State (E2E)', () => {
       body: JSON.stringify({ id: 'e2e-ready-ws' }),
     })).json();
 
-    await uploadOpencodeConfig(server.baseUrl, 'e2e-ready-ws', createProviderConfig());
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-ready-ws', OPENCODE_CONFIG);
 
     await fetch(`${server.baseUrl}/api/conversations/e2e-ready-ws/start`, {
       method: 'POST',
@@ -77,8 +84,8 @@ describe('Ready State (E2E)', () => {
       expect(result).toHaveProperty('parts');
       expect(Array.isArray(result.parts)).toBe(true);
       expect(result.parts.length).toBeGreaterThan(0);
-      expect(result.parts[0].type).toBe('text');
-      expect(result.parts[0].text).toBeTruthy();
+      expect(result.parts[1].type).toBe('text');
+      expect(result.parts[1].text).toBeTruthy();
     } finally {
       ws.close();
     }

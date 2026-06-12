@@ -16,7 +16,7 @@ export interface E2EServer {
   orchestratorConfig: OrchestratorConfig;
 }
 
-export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>): Promise<E2EServer> {
+export async function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>): Promise<E2EServer> {
   const workspaceDir = mkdtempSync(join(tmpdir(), 'e2e-ws-'));
 
   const workspaceConfig = {
@@ -60,6 +60,18 @@ export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>)
     orchestratorConfig,
   );
 
+  await instanceManager.cleanupOrphanContainers();
+
+  const cleanup = async () => {
+    instanceManager.destroy();
+    httpServer.closeWebSockets();
+    await new Promise<void>((resolveClose) => {
+      httpServer.server.close(() => resolveClose());
+    });
+    try { rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    await instanceManager.cleanupOrphanContainers().catch(() => {});
+  };
+
   return new Promise((resolve, reject) => {
     httpServer.server.listen(0, host, () => {
       const addr = httpServer.server.address();
@@ -69,16 +81,6 @@ export function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>)
       }
       const port = addr.port;
       serverConfig.port = port;
-
-      const cleanup = async () => {
-        instanceManager.destroy();
-        httpServer.closeWebSockets();
-        await new Promise<void>((resolveClose) => {
-          httpServer.server.close(() => resolveClose());
-        });
-        try { rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
-      };
-
       resolve({ port, baseUrl: `http://${host}:${port}`, cleanup, orchestratorConfig });
     });
     httpServer.server.on('error', (err) => {

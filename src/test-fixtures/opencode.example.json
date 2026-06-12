@@ -10,10 +10,14 @@
       "name": "my local lmstudio",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "",
-        "apiKey": ""
+        "baseURL": "http://host.docker.internal:25555/v1",
+        "apiKey": "nopassword"
       },
-      "models": {}
+      "models": {
+        "gemma-4-e4b-uncensored-hauhaucs-aggressive": {
+          "name": "gemma-4-e4b-uncensored-hauhaucs-aggressive"
+        }
+      }
     }
   }
 }

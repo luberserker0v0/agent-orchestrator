@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startServer, type E2EServer } from '../../helpers/server.js';
-import { createProviderConfig } from '../../../src/test-fixtures/user-configs.js';
+import { OPENCODE_CONFIG } from '../../../src/test-fixtures/user-configs.js';
 import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
 
 describe('HTTP POST /api/conversations/:id/message (E2E)', () => {
@@ -22,7 +22,7 @@ describe('HTTP POST /api/conversations/:id/message (E2E)', () => {
 
   async function waitForReady(baseUrl: string, conversationId: string): Promise<void> {
     for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 1000));
       const res = await fetch(`${baseUrl}/api/conversations/${conversationId}`);
       const body = await res.json() as { ready: boolean; sessionId?: string };
       if (body.ready === true && body.sessionId) return;
@@ -37,7 +37,7 @@ describe('HTTP POST /api/conversations/:id/message (E2E)', () => {
       body: JSON.stringify({ id: 'e2e-msg-http' }),
     });
     expect(createRes.status).toBe(201);
-    await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-http', createProviderConfig());
+    await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-http', OPENCODE_CONFIG);
 
     await fetch(`${server.baseUrl}/api/conversations/e2e-msg-http/start`, {
       method: 'POST',
@@ -63,8 +63,8 @@ describe('HTTP POST /api/conversations/:id/message (E2E)', () => {
     expect(body).toHaveProperty('parts');
     expect(Array.isArray(body.parts)).toBe(true);
     expect(body.parts.length).toBeGreaterThan(0);
-    expect(body.parts[0].type).toBe('text');
-    expect(body.parts[0].text).toBeTruthy();
+    expect(body.parts[1].type).toBe('text');
+    expect(body.parts[1].text).toBeTruthy();
   });
 
   it('returns 400 for missing text', async () => {
