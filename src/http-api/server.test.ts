@@ -681,6 +681,12 @@ describe('HTTP API Server', () => {
       agent: undefined,
       parts: [{ type: 'text', text: 'Hello' }],
     });
+    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.message', {
+      messageId: 'msg_1',
+      text: 'Hello back!',
+      parts: [{ type: 'text', text: 'Hello back!' }],
+      role: 'assistant',
+    });
   });
 
   it('POST /api/conversations/:id/message passes model and agent to OpenCode', async () => {
@@ -700,6 +706,12 @@ describe('HTTP API Server', () => {
       model: { providerID: 'google', modelID: 'gemini-2.0' },
       agent: 'build',
       parts: [{ type: 'text', text: 'Build it' }],
+    });
+    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.message', {
+      messageId: 'msg_2',
+      text: 'Done',
+      parts: [{ type: 'text', text: 'Done' }],
+      role: 'assistant',
     });
   });
 

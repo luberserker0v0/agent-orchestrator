@@ -169,6 +169,13 @@ export class WSRouter {
           .filter((p) => p.type === 'text')
           .map((p) => (p as { text: string }).text)
           .join('');
+
+        this.conversationState.emitEvent(conversationId, 'conversation.message', {
+          messageId: response.info.id,
+          text: texts,
+          parts: response.parts,
+          role: 'assistant',
+        });
         return { messageId: response.info.id, text: texts, parts: response.parts };
       }
 
