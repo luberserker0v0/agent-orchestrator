@@ -38,3 +38,6 @@ config/canonical-opencode.json
 *.tmp
 *.temp
 nul
+
+# Test artifacts
+skills/
