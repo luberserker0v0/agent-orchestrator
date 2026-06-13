@@ -96,6 +96,27 @@ describe('HTTP API Server', () => {
     expect(res.body.uptime).toBeGreaterThan(0);
   });
 
+  it('GET /api-docs/ serves Swagger UI', async () => {
+    const res = await request(server).get('/api-docs/');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('swagger-ui');
+  });
+
+  it('GET /api-docs redirects to /api-docs/', async () => {
+    const res = await request(server).get('/api-docs');
+    expect(res.status).toBe(301);
+    expect(res.headers.location).toBe('/api-docs/');
+  });
+
+  it('GET /api-docs.json returns OpenAPI spec', async () => {
+    const res = await request(server).get('/api-docs.json');
+    expect(res.status).toBe(200);
+    expect(res.body.openapi).toBe('3.0.3');
+    expect(res.body.info.title).toBe('AgentOrchestrator API');
+    expect(res.body.paths['/health']).toBeDefined();
+    expect(res.body.paths['/api/conversations']).toBeDefined();
+  });
+
   it('POST /api/conversations prepares workspace', async () => {
     mockConversationState.has.mockReturnValue(false);
 

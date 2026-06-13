@@ -199,23 +199,58 @@ export function loadCanonicalConfig(enforce: boolean): Record<string, unknown> {
   return readJSON(path) as Record<string, unknown>;
 }
 
-export function loadConfig(): AgentOrchestratorConfig {
-  let configPath: string;
+export function defaultConfig(): AgentOrchestratorConfig {
+  return {
+    server: {
+      port: 0,
+      host: '127.0.0.1',
+      shutdownTimeoutMs: 15000,
+    },
+    websocket: {
+      heartbeatIntervalMs: 30000,
+      idleTimeoutMs: 600000,
+    },
+    orchestrator: {
+      maxInstances: 10,
+      idleTimeoutMs: 600000,
+      idleSweepIntervalMs: 60000,
+      portRange: { start: 30000, end: 30100, allowDynamicFallback: true },
+      runtime: 'direct',
+      opencodeBinary: 'opencode',
+      healthCheck: { retries: 10, intervalMs: 500 },
+    },
+    workspace: {
+      basePath: './workspace',
+      enforceCanonicalConfig: true,
+    },
+  };
+}
 
-  if (existsSync(CONFIG_PATH)) {
-    configPath = CONFIG_PATH;
+export function loadConfig(configPath?: string): AgentOrchestratorConfig {
+  let resolvedPath: string | undefined;
+
+  if (configPath) {
+    if (!existsSync(configPath)) {
+      throw new Error(`Config file not found: ${configPath}`);
+    }
+    resolvedPath = configPath;
+  } else if (existsSync(CONFIG_PATH)) {
+    resolvedPath = CONFIG_PATH;
   } else if (existsSync(EXAMPLE_PATH)) {
     console.warn(`[config-loader] ${CONFIG_PATH} not found, falling back to ${EXAMPLE_PATH}. Copy it to use as your config.`);
-    configPath = EXAMPLE_PATH;
-  } else {
-    throw new Error(
-      `Config file not found. Please copy "${EXAMPLE_PATH}" to "${CONFIG_PATH}" and customize it.`
-    );
+    resolvedPath = EXAMPLE_PATH;
   }
 
-  const parsed = readJSON(configPath);
-  applyEnvOverrides(parsed);
-  const config = parsed as unknown as AgentOrchestratorConfig;
+  let config: AgentOrchestratorConfig;
+  if (resolvedPath) {
+    const parsed = readJSON(resolvedPath);
+    applyEnvOverrides(parsed);
+    config = parsed as unknown as AgentOrchestratorConfig;
+  } else {
+    config = defaultConfig();
+    applyEnvOverrides(config as unknown as Record<string, unknown>);
+  }
+
   config.orchestrator.runtime = config.orchestrator.runtime || 'direct';
   if (config.workspace.enforceCanonicalConfig === undefined) {
     config.workspace.enforceCanonicalConfig = true;

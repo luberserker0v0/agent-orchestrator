@@ -296,13 +296,17 @@ describe('loadConfig fallback paths', () => {
     expect(config.workspace).toBeDefined();
   });
 
-  it('throws when both config files are missing', () => {
+  it('uses defaults when both config files are missing', () => {
     if (existsSync(CONFIG_PATH)) {
       renameSync(CONFIG_PATH, BAK_JSON);
     }
     if (existsSync(EXAMPLE_PATH)) {
       renameSync(EXAMPLE_PATH, BAK_EXAMPLE);
     }
-    expect(() => loadConfig()).toThrow('Config file not found');
+    const config = loadConfig();
+    expect(config.server.port).toBe(0);
+    expect(config.server.host).toBe('127.0.0.1');
+    expect(config.orchestrator.maxInstances).toBe(10);
+    expect(config.workspace.basePath).toBe('./workspace');
   });
 });

@@ -4,11 +4,34 @@ import { InstanceManager } from './orchestrator/instance-manager.js';
 import { ConversationState } from './orchestrator/conversation-state.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
+import { parseCliArgs, printHelp } from './cli.js';
 
-async function main() {
+export async function main(cliArgs?: string[]) {
+  const cli = parseCliArgs(cliArgs ?? process.argv.slice(2));
+
+  if (cli.help) {
+    printHelp();
+    return;
+  }
+
+  if (cli.version) {
+    const { readFileSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = join(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    console.log(`v${pkg.version}`);
+    return;
+  }
+
+  // Set env vars from CLI args so applyEnvOverrides picks them up
+  if (cli.port !== undefined) process.env['AGENTORCHESTRATOR_SERVER_PORT'] = String(cli.port);
+  if (cli.host !== undefined) process.env['AGENTORCHESTRATOR_SERVER_HOST'] = cli.host;
+
   logger.info('AgentOrchestrator starting...');
 
-  const config = loadConfig();
+  const config = loadConfig(cli.configPath);
   const canonicalConfig = loadCanonicalConfig(config.workspace.enforceCanonicalConfig);
   logger.info('Configuration loaded');
 
@@ -89,7 +112,11 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  logger.error('Fatal error during startup:', err);
-  process.exit(1);
-});
+// Allow running as a script
+const isMain = process.argv.length > 1 && process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index.ts');
+if (isMain) {
+  main().catch((err) => {
+    logger.error('Fatal error during startup:', err);
+    process.exit(1);
+  });
+}
