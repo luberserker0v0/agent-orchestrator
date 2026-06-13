@@ -1,0 +1,329 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, statSync, cpSync } from 'node:fs';
+import { join } from 'node:path';
+
+vi.mock('node:fs', () => ({
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  readFileSync: vi.fn(),
+  readdirSync: vi.fn(),
+  existsSync: vi.fn(),
+  rmSync: vi.fn(),
+  statSync: vi.fn(),
+  cpSync: vi.fn(),
+}));
+
+vi.mock('../orchestrator/workspace-factory.js', () => ({
+  WorkspaceFactory: class {},
+  validateSkillName: vi.fn().mockImplementation((n: string) => n.replace(/[^a-zA-Z0-9_-]/g, '_')),
+  getDirSize: vi.fn().mockReturnValue(100),
+  hashDirectory: vi.fn().mockReturnValue({
+    files: ['SKILL.md', 'script.js'],
+    totalSize: 500,
+    sha256: 'abc123',
+  }),
+}));
+
+vi.mock('adm-zip', () => ({
+  default: vi.fn(),
+}));
+
+vi.mock('../utils/logger.js', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+import AdmZip from 'adm-zip';
+import { SkillService } from './skill-service.js';
+
+function makeMockEntry(name: string, isDir = false, size = 100) {
+  return {
+    entryName: name,
+    isDirectory: isDir,
+    header: { size },
+    getData: vi.fn().mockReturnValue(Buffer.from('mock data')),
+  };
+}
+
+describe('SkillService', () => {
+  let skillService: SkillService;
+  let mockWorkspaceFactory: any;
+  let mockConversationState: any;
+  const testId = 'test-conv';
+  const mockWsPath = '/tmp/workspace/test-conv';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue('# SKILL content');
+    vi.mocked(readdirSync).mockReturnValue([]);
+    vi.mocked(statSync).mockReturnValue({ isDirectory: () => true } as any);
+
+    mockWorkspaceFactory = {
+      resolveWorkspacePath: vi.fn().mockReturnValue(mockWsPath),
+      assertQuota: vi.fn(),
+    };
+
+    mockConversationState = {
+      get: vi.fn().mockReturnValue({ status: 'prepared', ready: false }),
+      markNeedsRestart: vi.fn(),
+      emitEvent: vi.fn(),
+    };
+
+    skillService = new SkillService(mockWorkspaceFactory, mockConversationState);
+  });
+
+  function makeRunning(): void {
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: true });
+  }
+
+  function mockZipEntries(entries: ReturnType<typeof makeMockEntry>[]): void {
+    vi.mocked(AdmZip).mockImplementationOnce(function () {
+      return {
+        getEntries: vi.fn().mockReturnValue(entries),
+      };
+    });
+  }
+
+  describe('uploadSkill', () => {
+    it('should extract zip to skill directory', () => {
+      mockZipEntries([makeMockEntry('SKILL.md')]);
+
+      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
+
+      expect(AdmZip).toHaveBeenCalledWith(Buffer.from('zip data'));
+      expect(mockWorkspaceFactory.resolveWorkspacePath).toHaveBeenCalledWith(testId);
+
+      const destPath = join(mockWsPath, '.opencode', 'skills', 'my-skill');
+      expect(mkdirSync).toHaveBeenCalledWith(destPath, { recursive: true });
+    });
+
+    it('should reject zip without SKILL.md at root', () => {
+      mockZipEntries([makeMockEntry('subdir/file.js')]);
+
+      expect(() => skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).toThrow(
+        'Skill archive must contain SKILL.md at the root'
+      );
+    });
+
+    it('should reject zip with path traversal in entry', () => {
+      mockZipEntries([
+        makeMockEntry('SKILL.md'),
+        makeMockEntry('../escape.txt'),
+      ]);
+
+      expect(() => skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).toThrow(
+        'Invalid zip entry path'
+      );
+    });
+
+    it('should reject zip with absolute path entry', () => {
+      mockZipEntries([
+        makeMockEntry('SKILL.md'),
+        makeMockEntry('/etc/passwd'),
+      ]);
+
+      expect(() => skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).toThrow(
+        'Invalid zip entry path'
+      );
+    });
+
+    it('should check quota before extracting', () => {
+      mockZipEntries([makeMockEntry('SKILL.md')]);
+
+      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
+
+      expect(mockWorkspaceFactory.assertQuota).toHaveBeenCalledWith(
+        mockWsPath,
+        expect.any(Number),
+        join(mockWsPath, '.opencode', 'skills', 'my-skill')
+      );
+    });
+
+    it('should write zip entries to disk', () => {
+      mockZipEntries([
+        makeMockEntry('SKILL.md'),
+        makeMockEntry('scripts/main.ts'),
+      ]);
+
+      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip'));
+
+      expect(writeFileSync).toHaveBeenCalledTimes(2);
+    });
+
+    it('should mark needsRestart and emit event when running', () => {
+      makeRunning();
+      mockZipEntries([makeMockEntry('SKILL.md')]);
+
+      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
+
+      expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith(testId, 'skill my-skill uploaded');
+      expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
+        changedFiles: ['.opencode/skills/my-skill/'],
+      });
+    });
+
+    it('should not mark needsRestart when not running', () => {
+      mockZipEntries([makeMockEntry('SKILL.md')]);
+
+      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
+
+      expect(mockConversationState.markNeedsRestart).not.toHaveBeenCalled();
+      expect(mockConversationState.emitEvent).toHaveBeenCalled();
+    });
+  });
+
+  describe('importSkill', () => {
+    it('should copy source directory to skills', () => {
+      const srcPath = join(process.cwd(), 'skills', 'custom-skill');
+
+      skillService.importSkill(testId, srcPath, 'imported-skill');
+
+      const destPath = join(mockWsPath, '.opencode', 'skills', 'imported-skill');
+      expect(cpSync).toHaveBeenCalledWith(srcPath, destPath, { recursive: true, force: true });
+    });
+
+    it('should reject non-allowed source path', () => {
+      expect(() => skillService.importSkill(testId, '/etc/passwd', 'bad')).toThrow(
+        'Source path not allowed'
+      );
+    });
+
+    it('should reject non-existent source', () => {
+      const srcPath = join(process.cwd(), 'skills', 'custom-skill');
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      expect(() => skillService.importSkill(testId, srcPath, 'imported-skill')).toThrow(
+        'Source not found'
+      );
+    });
+
+    it('should reject non-directory source', () => {
+      const srcPath = join(process.cwd(), 'skills', 'custom-skill');
+      vi.mocked(statSync).mockReturnValue({ isDirectory: () => false } as any);
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      expect(() => skillService.importSkill(testId, srcPath, 'imported-skill')).toThrow(
+        'Source must be a directory'
+      );
+    });
+
+    it('should check quota before copying', () => {
+      const srcPath = join(process.cwd(), 'skills', 'custom-skill');
+
+      skillService.importSkill(testId, srcPath, 'imported-skill');
+
+      expect(mockWorkspaceFactory.assertQuota).toHaveBeenCalledWith(
+        mockWsPath,
+        expect.any(Number),
+        join(mockWsPath, '.opencode', 'skills', 'imported-skill')
+      );
+    });
+
+    it('should reject non-allowed path under allowed base', () => {
+      const skipPath = join(process.cwd(), '.opencode', 'secrets');
+      const srcPath = join(skipPath, 'my-skill');
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      expect(() => skillService.importSkill(testId, srcPath, 'imported-skill')).toThrow(
+        'Source path not allowed'
+      );
+    });
+
+    it('should mark needsRestart and emit event when running', () => {
+      makeRunning();
+      const srcPath = join(process.cwd(), 'skills', 'custom-skill');
+
+      skillService.importSkill(testId, srcPath, 'imported-skill');
+
+      expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith(testId, 'skill imported-skill imported');
+      expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
+        changedFiles: ['.opencode/skills/imported-skill/'],
+      });
+    });
+  });
+
+  describe('listSkills', () => {
+    it('should return directory names from skills dir', () => {
+      const makeDirent = (name: string, isDir: boolean) => ({ name, isDirectory: () => isDir });
+      vi.mocked(readdirSync).mockReturnValue([
+        makeDirent('skill-one', true),
+        makeDirent('skill-two', true),
+        makeDirent('readme.txt', false),
+      ] as any);
+
+      const result = skillService.listSkills(testId);
+
+      expect(result).toEqual(['skill-one', 'skill-two']);
+    });
+
+    it('should return empty array when skills dir does not exist', () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const result = skillService.listSkills(testId);
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('readSkill', () => {
+    it('should return SKILL.md content', () => {
+      vi.mocked(readFileSync).mockReturnValueOnce('# Skill content');
+
+      const result = skillService.readSkill(testId, 'my-skill');
+
+      expect(result).toBe('# Skill content');
+    });
+
+    it('should throw when skill does not exist', () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      expect(() => skillService.readSkill(testId, 'missing')).toThrow('Skill not found: missing');
+    });
+  });
+
+  describe('getSkillInfo', () => {
+    it('should return skill directory info', () => {
+      const result = skillService.getSkillInfo(testId, 'my-skill');
+
+      expect(result).toEqual({
+        name: 'my-skill',
+        files: ['SKILL.md', 'script.js'],
+        totalSize: 500,
+        sha256: 'abc123',
+      });
+    });
+
+    it('should throw when skill directory does not exist', () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      expect(() => skillService.getSkillInfo(testId, 'missing')).toThrow('Skill not found: missing');
+    });
+  });
+
+  describe('deleteSkill', () => {
+    it('should delete skill directory and emit events', () => {
+      const destPath = join(mockWsPath, '.opencode', 'skills', 'my-skill');
+
+      skillService.deleteSkill(testId, 'my-skill');
+
+      expect(rmSync).toHaveBeenCalledWith(destPath, { recursive: true, force: true });
+      expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
+        changedFiles: ['.opencode/skills/my-skill/'],
+      });
+    });
+
+    it('should throw when skill does not exist', () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      expect(() => skillService.deleteSkill(testId, 'missing')).toThrow('Skill not found: missing');
+    });
+
+    it('should mark needsRestart when running', () => {
+      makeRunning();
+
+      skillService.deleteSkill(testId, 'my-skill');
+
+      expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith(testId, 'skill my-skill deleted');
+    });
+  });
+});
