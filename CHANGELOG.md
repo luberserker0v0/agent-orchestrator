@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- docs: add npm/npx install instructions, `aor` binary CLI reference, and Swagger UI documentation to README.md (#53)
+- docs: add `/api-docs`, `/api-docs/`, `/api-docs.json` endpoint documentation to API.md (#53)
 - docs: add QUICKSTART.md and QUICKTEST.md for rapid onboarding and testing workflow
 - feat(e2e): replace dynamic provider config with static OPENCODE_CONFIG fixture (#46)
 - feat(e2e): add cross-env for cross-platform env vars in npm scripts (#46)
