@@ -21,7 +21,10 @@ describe('Metrics', () => {
       } as any,
       {} as any,
       {} as any,
-      defaultOrchestratorConfig
+      defaultOrchestratorConfig,
+      {} as any,
+      {} as any,
+      {} as any
     );
 
     const res = await request(server).get('/metrics');

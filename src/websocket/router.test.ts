@@ -66,6 +66,10 @@ describe('WSRouter', () => {
   let mockConversationState: any;
   let router: WSRouter;
 
+  let mockConfigService: any;
+  let mockAgentService: any;
+  let mockSkillService: any;
+
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
@@ -81,25 +85,11 @@ describe('WSRouter', () => {
     };
 
     mockWorkspaceFactory = {
-      writeConfig: vi.fn(),
-      readConfig: vi.fn(),
-      writeAgent: vi.fn(),
-      readAgent: vi.fn(),
-      deleteAgent: vi.fn(),
-      listAgents: vi.fn(),
       writeFile: vi.fn(),
       readFile: vi.fn(),
       listFiles: vi.fn(),
       deleteFile: vi.fn(),
       copyFromLocal: vi.fn(),
-      importSkillFromLocal: vi.fn(),
-      listSkills: vi.fn(),
-      readSkill: vi.fn(),
-      getSkillInfo: vi.fn(),
-      deleteSkill: vi.fn(),
-      writeAgentsMd: vi.fn(),
-      readAgentsMd: vi.fn(),
-      deleteAgentsMd: vi.fn(),
     };
 
     mockConversationState = {
@@ -117,6 +107,32 @@ describe('WSRouter', () => {
       clearNeedsRestart: vi.fn(),
     };
 
+    mockConfigService = {
+      readConfig: vi.fn(),
+      writeConfig: vi.fn(),
+      patchConfig: vi.fn(),
+    };
+
+    mockAgentService = {
+      writeAgent: vi.fn(),
+      readAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      listAgents: vi.fn(),
+      listAgentsWithRuntime: vi.fn(),
+      writeAgentsMd: vi.fn(),
+      readAgentsMd: vi.fn(),
+      deleteAgentsMd: vi.fn(),
+    };
+
+    mockSkillService = {
+      uploadSkill: vi.fn(),
+      importSkill: vi.fn(),
+      listSkills: vi.fn(),
+      readSkill: vi.fn(),
+      getSkillInfo: vi.fn(),
+      deleteSkill: vi.fn(),
+    };
+
     router = new WSRouter(
       mockWss as any,
       mockInstanceManager,
@@ -124,7 +140,10 @@ describe('WSRouter', () => {
       mockConversationState,
       { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
       { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
-      { runtime: 'direct', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest', containerPort: 30000 } }
+      { runtime: 'direct', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest', containerPort: 30000 } },
+      mockConfigService,
+      mockAgentService,
+      mockSkillService
     );
   });
 
@@ -612,7 +631,7 @@ describe('WSRouter', () => {
   it('handles skills.list', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.listSkills.mockReturnValue(['web-search', 'code-review']);
+    mockSkillService.listSkills.mockReturnValue(['web-search', 'code-review']);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -647,7 +666,7 @@ describe('WSRouter', () => {
   it('handles skills.get', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.readSkill.mockReturnValue('# web-search\nA skill.');
+    mockSkillService.readSkill.mockReturnValue('# web-search\nA skill.');
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -683,7 +702,7 @@ describe('WSRouter', () => {
   it('handles skills.info', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.getSkillInfo.mockReturnValue({
+    mockSkillService.getSkillInfo.mockReturnValue({
       name: 'web-search',
       files: ['SKILL.md'],
       totalSize: 1234,
@@ -742,7 +761,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search');
+    expect(mockSkillService.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -759,6 +778,7 @@ describe('WSRouter', () => {
   it('handles skills.import with invalid name', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockSkillService.importSkill.mockImplementation(() => { throw new Error('Invalid skill name: foo/bar'); });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -777,13 +797,13 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.importSkillFromLocal).not.toHaveBeenCalled();
+    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills/test', 'foo/bar');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
       try {
         const parsed = JSON.parse(call[0]);
-        return parsed.id === 24 && parsed.error?.message?.includes('Invalid skill name');
+        return parsed.id === 24 && parsed.error;
       } catch {
         return false;
       }
@@ -794,7 +814,7 @@ describe('WSRouter', () => {
   it('handles skills.import with source from sibling prefix path skills_evil/', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+    mockSkillService.importSkill.mockImplementation(() => {
       throw new Error('Source path not allowed. Must be under one of: ...');
     });
 
@@ -815,7 +835,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.importSkillFromLocal).toHaveBeenCalledWith('conv-001', 'skills_evil/web-search', 'web-search');
+    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills_evil/web-search', 'web-search');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
@@ -832,6 +852,7 @@ describe('WSRouter', () => {
   it('handles skills.get with invalid name', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockSkillService.readSkill.mockImplementation(() => { throw new Error('Invalid skill name'); });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -850,13 +871,13 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.readSkill).not.toHaveBeenCalled();
+    expect(mockSkillService.readSkill).toHaveBeenCalledWith('conv-001', 'foo/bar');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
       try {
         const parsed = JSON.parse(call[0]);
-        return parsed.id === 25 && parsed.error?.message?.includes('Invalid skill name');
+        return parsed.id === 25 && parsed.error;
       } catch {
         return false;
       }
@@ -867,6 +888,7 @@ describe('WSRouter', () => {
   it('handles skills.info with invalid name', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockSkillService.getSkillInfo.mockImplementation(() => { throw new Error('Invalid skill name'); });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -885,13 +907,13 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.getSkillInfo).not.toHaveBeenCalled();
+    expect(mockSkillService.getSkillInfo).toHaveBeenCalledWith('conv-001', 'foo/bar');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
       try {
         const parsed = JSON.parse(call[0]);
-        return parsed.id === 26 && parsed.error?.message?.includes('Invalid skill name');
+        return parsed.id === 26 && parsed.error;
       } catch {
         return false;
       }
@@ -902,6 +924,7 @@ describe('WSRouter', () => {
   it('handles skills.delete with invalid name', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockSkillService.deleteSkill.mockImplementation(() => { throw new Error('Invalid skill name'); });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -920,13 +943,13 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.deleteSkill).not.toHaveBeenCalled();
+    expect(mockSkillService.deleteSkill).toHaveBeenCalledWith('conv-001', 'foo/bar');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
       try {
         const parsed = JSON.parse(call[0]);
-        return parsed.id === 27 && parsed.error?.message?.includes('Invalid skill name');
+        return parsed.id === 27 && parsed.error;
       } catch {
         return false;
       }
@@ -955,11 +978,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.writeAgentsMd).toHaveBeenCalledWith('conv-001', '# Agents\nDesigner agent.');
-    expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md updated');
-    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.configChanged', {
-      changedFiles: ['AGENTS.md'],
-    });
+    expect(mockAgentService.writeAgentsMd).toHaveBeenCalledWith('conv-001', '# Agents\nDesigner agent.');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -978,7 +997,7 @@ describe('WSRouter', () => {
   it('handles agent.config.get', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.readAgentsMd.mockReturnValue('# Agents content');
+    mockAgentService.readAgentsMd.mockReturnValue('# Agents content');
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1032,11 +1051,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.deleteAgentsMd).toHaveBeenCalledWith('conv-001');
-    expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md deleted');
-    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.configChanged', {
-      changedFiles: ['AGENTS.md'],
-    });
+    expect(mockAgentService.deleteAgentsMd).toHaveBeenCalledWith('conv-001');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -1114,7 +1129,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith('conv-001', { model: 'new/model' });
+    expect(mockConfigService.writeConfig).toHaveBeenCalledWith('conv-001', { model: 'new/model' });
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 40 && p.result?.updated === true; } catch { return false; }
@@ -1146,7 +1161,7 @@ describe('WSRouter', () => {
   it('handles config.get', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.readConfig.mockReturnValue({ model: 'test/model' });
+    mockConfigService.readConfig.mockReturnValue({ model: 'test/model' });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1180,7 +1195,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.writeAgent).toHaveBeenCalledWith('conv-001', 'designer', 'Designer agent');
+    expect(mockAgentService.writeAgent).toHaveBeenCalledWith('conv-001', 'designer', 'Designer agent');
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 50 && p.result?.registered === 'designer'; } catch { return false; }
@@ -1212,7 +1227,7 @@ describe('WSRouter', () => {
   it('handles agent.list', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.listAgents.mockReturnValue(['designer', 'coder']);
+    mockAgentService.listAgents.mockReturnValue(['designer', 'coder']);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1235,7 +1250,7 @@ describe('WSRouter', () => {
   it('handles agent.get', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.readAgent.mockReturnValue('Designer agent content');
+    mockAgentService.readAgent.mockReturnValue('Designer agent content');
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1289,7 +1304,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.deleteAgent).toHaveBeenCalledWith('conv-001', 'designer');
+    expect(mockAgentService.deleteAgent).toHaveBeenCalledWith('conv-001', 'designer');
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 55 && p.result?.deleted === 'designer'; } catch { return false; }
@@ -1836,7 +1851,10 @@ describe('WSRouter', () => {
       mockConversationState,
       { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
       { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
-      { runtime: 'docker', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest', containerPort: 3000 } }
+      { runtime: 'docker', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest', containerPort: 3000 } },
+      mockConfigService,
+      mockAgentService,
+      mockSkillService
     );
 
     dockerMockWss.emit('connection', dockerWs, createMockReq('/ws/conv-001'));
@@ -1880,7 +1898,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.importSkillFromLocal).toHaveBeenCalledWith('conv-001', 'skills/test', 'test-skill');
+    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills/test', 'test-skill');
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 90 && p.result?.imported === 'test-skill'; } catch { return false; }

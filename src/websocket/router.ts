@@ -3,12 +3,14 @@ import type { IncomingMessage } from 'node:http';
 import { logger } from '../utils/logger.js';
 import type { OpenCodeClient } from '../opencode-http/client.js';
 import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
-import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
+import { WorkspaceFactory } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
+import { ConfigService } from '../services/config-service.js';
+import { AgentService } from '../services/agent-service.js';
+import { SkillService } from '../services/skill-service.js';
 import { WSConnection } from './connection.js';
 import type { WebSocketConfig } from '../config-loader.js';
 import type { ServerConfig, OrchestratorConfig } from '../config-loader.js';
-import type { OpencodeConfig } from '../opencode-http/types.js';
 import { wsConnectionsActive } from '../metrics/registry.js';
 
 export class WSRouter {
@@ -19,6 +21,9 @@ export class WSRouter {
   private wsConfig: WebSocketConfig;
   private serverConfig: ServerConfig;
   private orchestratorConfig: OrchestratorConfig;
+  private configService: ConfigService;
+  private agentService: AgentService;
+  private skillService: SkillService;
   private connections: Map<string, WSConnection> = new Map();
   private eventUnsubscribers: Map<string, () => void> = new Map();
 
@@ -29,7 +34,10 @@ export class WSRouter {
     conversationState: ConversationState,
     wsConfig: WebSocketConfig,
     serverConfig: ServerConfig,
-    orchestratorConfig: OrchestratorConfig
+    orchestratorConfig: OrchestratorConfig,
+    configService: ConfigService,
+    agentService: AgentService,
+    skillService: SkillService
   ) {
     this.wss = wss;
     this.instanceManager = instanceManager;
@@ -38,6 +46,9 @@ export class WSRouter {
     this.wsConfig = wsConfig;
     this.serverConfig = serverConfig;
     this.orchestratorConfig = orchestratorConfig;
+    this.configService = configService;
+    this.agentService = agentService;
+    this.skillService = skillService;
 
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
   }
@@ -198,22 +209,16 @@ export class WSRouter {
       // ─── Config ──────────────────────────────────────────
 
       case 'config.update': {
-        const { config } = params as { config: OpencodeConfig };
+        const { config } = params as { config: Record<string, unknown> };
         if (typeof config !== 'object' || config === null) {
           throw new Error('Missing or invalid config');
         }
-        this.workspaceFactory.writeConfig(conversationId, config);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, 'opencode.json changed');
-        }
-        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
-          changedFiles: ['.opencode/opencode.json'],
-        });
+        this.configService.writeConfig(conversationId, config);
         return { updated: true };
       }
 
       case 'config.get': {
-        return this.workspaceFactory.readConfig(conversationId);
+        return this.configService.readConfig(conversationId);
       }
 
       // ─── Agents ──────────────────────────────────────────
@@ -221,36 +226,24 @@ export class WSRouter {
       case 'agent.register': {
         const { name, content } = params as { name: string; content: string };
         if (!name || content === undefined) throw new Error('Missing name or content');
-        this.workspaceFactory.writeAgent(conversationId, name, content);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, `agent ${name} updated`);
-        }
-        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
-          changedFiles: [`.opencode/agents/${name}.md`],
-        });
+        this.agentService.writeAgent(conversationId, name, content);
         return { registered: name };
       }
 
       case 'agent.list': {
-        return this.workspaceFactory.listAgents(conversationId);
+        return this.agentService.listAgents(conversationId);
       }
 
       case 'agent.get': {
         const { name } = params as { name: string };
         if (!name) throw new Error('Missing name');
-        return this.workspaceFactory.readAgent(conversationId, name);
+        return this.agentService.readAgent(conversationId, name);
       }
 
       case 'agent.delete': {
         const { name } = params as { name: string };
         if (!name) throw new Error('Missing name');
-        this.workspaceFactory.deleteAgent(conversationId, name);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, `agent ${name} deleted`);
-        }
-        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
-          changedFiles: [`.opencode/agents/${name}.md`],
-        });
+        this.agentService.deleteAgent(conversationId, name);
         return { deleted: name };
       }
 
@@ -259,28 +252,16 @@ export class WSRouter {
       case 'agent.config.write': {
         const { content } = params as { content: string };
         if (content === undefined) throw new Error('Missing content');
-        this.workspaceFactory.writeAgentsMd(conversationId, content);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, 'AGENTS.md updated');
-        }
-        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
-          changedFiles: ['AGENTS.md'],
-        });
+        this.agentService.writeAgentsMd(conversationId, content);
         return { written: true };
       }
 
       case 'agent.config.get': {
-        return this.workspaceFactory.readAgentsMd(conversationId);
+        return this.agentService.readAgentsMd(conversationId);
       }
 
       case 'agent.config.delete': {
-        this.workspaceFactory.deleteAgentsMd(conversationId);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, 'AGENTS.md deleted');
-        }
-        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
-          changedFiles: ['AGENTS.md'],
-        });
+        this.agentService.deleteAgentsMd(conversationId);
         return { deleted: true };
       }
 
@@ -371,46 +352,30 @@ export class WSRouter {
       case 'skills.import': {
         const { source, name } = params as { source: string; name: string };
         if (!source || !name) throw new Error('Missing source or name');
-        validateSkillName(name);
-        this.workspaceFactory.importSkillFromLocal(conversationId, source, name);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, `skill ${name} imported`);
-        }
-        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
-          changedFiles: [`.opencode/skills/${name}/`],
-        });
+        this.skillService.importSkill(conversationId, source, name);
         return { imported: name };
       }
 
       case 'skills.list': {
-        return this.workspaceFactory.listSkills(conversationId);
+        return this.skillService.listSkills(conversationId);
       }
 
       case 'skills.get': {
         const { name } = params as { name: string };
         if (!name) throw new Error('Missing name');
-        validateSkillName(name);
-        return this.workspaceFactory.readSkill(conversationId, name);
+        return this.skillService.readSkill(conversationId, name);
       }
 
       case 'skills.info': {
         const { name } = params as { name: string };
         if (!name) throw new Error('Missing name');
-        validateSkillName(name);
-        return this.workspaceFactory.getSkillInfo(conversationId, name);
+        return this.skillService.getSkillInfo(conversationId, name);
       }
 
       case 'skills.delete': {
         const { name } = params as { name: string };
         if (!name) throw new Error('Missing name');
-        validateSkillName(name);
-        this.workspaceFactory.deleteSkill(conversationId, name);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, `skill ${name} deleted`);
-        }
-        this.conversationState.emitEvent(conversationId, 'conversation.configChanged', {
-          changedFiles: [`.opencode/skills/${name}/`],
-        });
+        this.skillService.deleteSkill(conversationId, name);
         return { deleted: name };
       }
 

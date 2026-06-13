@@ -1,7 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createServer, type Server } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, dirname, sep, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import swaggerUi from 'swagger-ui-express';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
@@ -10,11 +8,13 @@ import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-man
 import type { OpenCodeClient } from '../opencode-http/client.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
+import { ConfigService } from '../services/config-service.js';
+import { AgentService } from '../services/agent-service.js';
+import { SkillService } from '../services/skill-service.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
 import { openapiSpec } from './openapi.js';
-import AdmZip from 'adm-zip';
 
 export interface HttpServer {
   server: Server;
@@ -28,7 +28,10 @@ export function createHttpServer(
   instanceManager: InstanceManager,
   workspaceFactory: WorkspaceFactory,
   conversationState: ConversationState,
-  orchestratorConfig: OrchestratorConfig
+  orchestratorConfig: OrchestratorConfig,
+  configService: ConfigService,
+  agentService: AgentService,
+  skillService: SkillService
 ): HttpServer {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
@@ -351,7 +354,7 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      const config = workspaceFactory.readConfig(id);
+      const config = configService.readConfig(id);
       res.json(config);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -368,9 +371,7 @@ export function createHttpServer(
         res.status(400).json({ error: 'Request body must be a JSON object' });
         return;
       }
-      workspaceFactory.writeConfig(id, config);
-      markNeedsRestartIfRunning(id, 'opencode.json changed');
-      conversationState.emitEvent(id, 'conversation.configChanged', { changedFiles: ['.opencode/opencode.json'] });
+      configService.writeConfig(id, config);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to write config for ${id}:`, err);
@@ -378,7 +379,6 @@ export function createHttpServer(
     }
   });
 
-  // Partial update (merge into current config)
   app.patch('/api/conversations/:id/config', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
@@ -390,11 +390,7 @@ export function createHttpServer(
         return;
       }
 
-      const current = workspaceFactory.readConfig(id);
-      const merged = { ...current, ...patch };
-      workspaceFactory.writeConfig(id, merged);
-      markNeedsRestartIfRunning(id, 'opencode.json changed');
-      conversationState.emitEvent(id, 'conversation.configChanged', { changedFiles: ['.opencode/opencode.json'] });
+      configService.patchConfig(id, patch);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to patch config for ${id}:`, err);
@@ -417,11 +413,7 @@ export function createHttpServer(
     }
 
     try {
-      workspaceFactory.writeAgent(id, name, content);
-      markNeedsRestartIfRunning(id, `agent ${name} updated`);
-      conversationState.emitEvent(id, 'conversation.configChanged', {
-        changedFiles: [`.opencode/agents/${name}.md`],
-      });
+      agentService.writeAgent(id, name, content);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to register agent ${name} for ${id}:`, err);
@@ -434,27 +426,8 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      const names = workspaceFactory.listAgents(id);
-
-      // Enrich with runtime agent descriptions when instance is ready
-      const state = conversationState.get(id);
-      if (state?.ready && state.status === 'running') {
-        const instance = instanceManager.getInstance(id);
-        if (instance) {
-          const runtimeAgents = await instance.client.listAgents();
-          const agentMap = new Map(runtimeAgents.map(a => [a.id, a]));
-          const result = names.map(name => ({
-            name,
-            ...(agentMap.has(name) && agentMap.get(name)!.description
-              ? { description: agentMap.get(name)!.description }
-              : {}),
-          }));
-          res.json(result);
-          return;
-        }
-      }
-
-      res.json(names);
+      const result = await agentService.listAgentsWithRuntime(id);
+      res.json(result);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -465,7 +438,7 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      const content = workspaceFactory.readAgent(id, req.params.name);
+      const content = agentService.readAgent(id, req.params.name);
       res.json({ name: req.params.name, content });
     } catch (err) {
       res.status(404).json({ error: (err as Error).message });
@@ -477,11 +450,7 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      workspaceFactory.deleteAgent(id, req.params.name);
-      markNeedsRestartIfRunning(id, `agent ${req.params.name} deleted`);
-      conversationState.emitEvent(id, 'conversation.configChanged', {
-        changedFiles: [`.opencode/agents/${req.params.name}.md`],
-      });
+      agentService.deleteAgent(id, req.params.name);
       res.status(204).send();
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -501,11 +470,7 @@ export function createHttpServer(
     }
 
     try {
-      workspaceFactory.writeAgentsMd(id, content);
-      markNeedsRestartIfRunning(id, 'AGENTS.md updated');
-      conversationState.emitEvent(id, 'conversation.configChanged', {
-        changedFiles: ['AGENTS.md'],
-      });
+      agentService.writeAgentsMd(id, content);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to write AGENTS.md for ${id}:`, err);
@@ -518,7 +483,7 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      const content = workspaceFactory.readAgentsMd(id);
+      const content = agentService.readAgentsMd(id);
       res.json({ content });
     } catch (err) {
       res.status(404).json({ error: (err as Error).message });
@@ -530,11 +495,7 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      workspaceFactory.deleteAgentsMd(id);
-      markNeedsRestartIfRunning(id, 'AGENTS.md deleted');
-      conversationState.emitEvent(id, 'conversation.configChanged', {
-        changedFiles: ['AGENTS.md'],
-      });
+      agentService.deleteAgentsMd(id);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to delete AGENTS.md for ${id}:`, err);
@@ -878,83 +839,28 @@ export function createHttpServer(
       return;
     }
 
-    let name: string;
     try {
-      name = validateSkillName(rawName);
+      validateSkillName(rawName);
     } catch {
       res.status(400).json({ error: 'Invalid skill name' });
       return;
     }
 
     try {
-      const zip = new AdmZip(req.body as Buffer);
-      const entries = zip.getEntries();
-
-      // Validate root SKILL.md
-      const hasRootSkillMd = entries.some((e) => e.entryName === 'SKILL.md');
-      if (!hasRootSkillMd) {
-        res.status(400).json({ error: 'Skill archive must contain SKILL.md at the root' });
-        return;
-      }
-
-      // Validate zip entry paths and calculate uncompressed size
-      const wsPath = workspaceFactory['resolveWorkspacePath'](id);
-      const destPath = join(wsPath, '.opencode', 'skills', name);
-      let totalUncompressedSize = 0;
-
-      for (const entry of entries) {
-        const entryName = entry.entryName;
-
-        // Reject absolute paths, drive paths, and traversal
-        if (entryName.includes('..')) {
-          res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
-          return;
-        }
-        if (entryName.startsWith('/') || entryName.startsWith('\\')) {
-          res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
-          return;
-        }
-        if (/^[A-Za-z]:/i.test(entryName)) {
-          res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
-          return;
-        }
-
-        // Verify resolved output remains inside destPath
-        const resolvedDest = resolve(destPath);
-        const resolvedOutput = resolve(destPath, entryName);
-        if (resolvedOutput !== resolvedDest && !resolvedOutput.startsWith(resolvedDest + sep)) {
-          res.status(400).json({ error: `Invalid zip entry path: ${entryName}` });
-          return;
-        }
-
-        totalUncompressedSize += entry.header.size;
-      }
-
-      // Check quota
-      try {
-        workspaceFactory['assertQuota'](wsPath, totalUncompressedSize, destPath);
-      } catch {
-        res.status(413).json({ error: 'Skill archive exceeds workspace quota' });
-        return;
-      }
-
-      // Safe extraction
-      mkdirSync(destPath, { recursive: true });
-      for (const entry of entries) {
-        if (entry.isDirectory) continue;
-        const entryPath = resolve(destPath, entry.entryName);
-        mkdirSync(dirname(entryPath), { recursive: true });
-        writeFileSync(entryPath, entry.getData());
-      }
-
-      markNeedsRestartIfRunning(id, `skill ${name} uploaded`);
-      conversationState.emitEvent(id, 'conversation.configChanged', {
-        changedFiles: [`.opencode/skills/${name}/`],
-      });
+      skillService.uploadSkill(id, rawName, req.body as Buffer);
       res.status(204).send();
     } catch (err) {
+      const message = (err as Error).message;
       logger.error(`Failed to upload skill for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      if (message.includes('Skill archive must contain SKILL.md')) {
+        res.status(400).json({ error: message });
+      } else if (message.includes('Invalid zip entry path')) {
+        res.status(400).json({ error: message });
+      } else if (message.includes('Workspace quota exceeded')) {
+        res.status(413).json({ error: 'Skill archive exceeds workspace quota' });
+      } else {
+        res.status(500).json({ error: message });
+      }
     }
   });
 
@@ -979,11 +885,7 @@ export function createHttpServer(
     }
 
     try {
-      workspaceFactory.importSkillFromLocal(id, source, name);
-      markNeedsRestartIfRunning(id, `skill ${name} imported`);
-      conversationState.emitEvent(id, 'conversation.configChanged', {
-        changedFiles: [`.opencode/skills/${name}/`],
-      });
+      skillService.importSkill(id, source, name);
       res.status(204).send();
     } catch (err) {
       const message = (err as Error).message;
@@ -1006,7 +908,7 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      const skills = workspaceFactory.listSkills(id);
+      const skills = skillService.listSkills(id);
       res.json(skills);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -1026,7 +928,7 @@ export function createHttpServer(
     }
 
     try {
-      const content = workspaceFactory.readSkill(id, req.params.name);
+      const content = skillService.readSkill(id, req.params.name);
       res.json({ name: req.params.name, content });
     } catch (err) {
       res.status(404).json({ error: (err as Error).message });
@@ -1046,7 +948,7 @@ export function createHttpServer(
     }
 
     try {
-      const info = workspaceFactory.getSkillInfo(id, req.params.name);
+      const info = skillService.getSkillInfo(id, req.params.name);
       res.json(info);
     } catch (err) {
       res.status(404).json({ error: (err as Error).message });
@@ -1066,11 +968,7 @@ export function createHttpServer(
     }
 
     try {
-      workspaceFactory.deleteSkill(id, req.params.name);
-      markNeedsRestartIfRunning(id, `skill ${req.params.name} deleted`);
-      conversationState.emitEvent(id, 'conversation.configChanged', {
-        changedFiles: [`.opencode/skills/${req.params.name}/`],
-      });
+      skillService.deleteSkill(id, req.params.name);
       res.status(204).send();
     } catch (err) {
       const message = (err as Error).message;
@@ -1094,7 +992,7 @@ export function createHttpServer(
   const httpServer = createServer(app);
 
   const wss = new WebSocketServer({ noServer: true });
-  const wsRouter = new WSRouter(wss, instanceManager, workspaceFactory, conversationState, wsConfig, serverConfig, orchestratorConfig);
+  const wsRouter = new WSRouter(wss, instanceManager, workspaceFactory, conversationState, wsConfig, serverConfig, orchestratorConfig, configService, agentService, skillService);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ?? '';
