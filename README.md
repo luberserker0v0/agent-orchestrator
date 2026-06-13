@@ -26,11 +26,50 @@
 
 ## 安裝
 
+### 從 npm 安裝（二進位 `aor`）
+
+```bash
+npm install -g agent-orchestrator
+aor --port 8080
+```
+
+或使用 `npx` 直接執行（無須安裝）：
+
+```bash
+npx agent-orchestrator --port 8080
+```
+
+### 原始碼安裝
+
 ```bash
 git clone <repository-url>
 cd agent-orchestrator
 npm install
+npm run build
+npm start
 ```
+
+---
+
+## CLI 用法（`aor`）
+
+安裝後提供 `aor` 二進位指令：
+
+```bash
+aor [options]
+```
+
+| 選項 | 別名 | 說明 |
+|------|------|------|
+| `--port <number>` | `-p` | HTTP 服務端口（0 = OS 自動分配） |
+| `--host <string>` | `-H` | 綁定主機位址 |
+| `--config <path>` | `-c` | 指定設定檔路徑 |
+| `--help` | `-h` | 顯示說明 |
+| `--version` | `-v` | 顯示版本號 |
+
+未指定 `--config` 時，依序尋找 `config/agentorchestrator.json` → `./agentorchestrator.json`，若皆不存在則使用內建預設值。
+
+環境變數覆寫優先於 CLI 參數，CLI 參數優先於設定檔：`config file < CLI args < env vars`。
 
 ---
 
@@ -151,6 +190,9 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 
 | 方法 | 端點 | 說明 |
 |------|------|------|
+| `GET` | `/api-docs` | 重新導向至 Swagger UI 頁面 |
+| `GET` | `/api-docs/` | Swagger UI 互動式 API 瀏覽器 |
+| `GET` | `/api-docs.json` | OpenAPI 3.0 規格原始 JSON |
 | `GET` | `/health` | 健康檢查 |
 | `GET` | `/metrics` | Prometheus 指標 |
 | `POST` | `/api/conversations` | 準備對話（僅建立 workspace，不啟動 OpenCode） |

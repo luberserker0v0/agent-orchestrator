@@ -6,6 +6,31 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 ## REST API
 
+### `GET /api-docs/`
+
+Swagger UI 互動式 API 瀏覽器。以 HTML 頁面呈現完整的 REST API 文件，可直接在瀏覽器中測試端點。
+
+**回應**（`text/html`）：Swagger UI 頁面
+
+---
+
+### `GET /api-docs`
+
+重新導向至 `/api-docs/`。
+
+**回應**：`301 Moved Permanently`
+- `Location: /api-docs/`
+
+---
+
+### `GET /api-docs.json`
+
+OpenAPI 3.0 規格原始 JSON，可用於匯入 Postman、Insomnia 等 API 工具。
+
+**回應**（`application/json`）：完整的 OpenAPI 3.0.3 規格文件，包含所有 REST 端點定義、請求/回應結構、錯誤碼。
+
+---
+
 ### `GET /health`
 
 健康檢查。
