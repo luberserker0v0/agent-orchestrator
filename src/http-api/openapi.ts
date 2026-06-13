@@ -133,9 +133,21 @@ export const openapiSpec: Record<string, unknown> = {
       },
       post: {
         tags: ['Config'],
-        summary: 'Write/update opencode.json',
+        summary: 'Write/update opencode.json (full replacement with canonical enforcement)',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: { content: { 'application/json': { schema: { type: 'object', description: 'Partial opencode.json content' } } } },
+        responses: {
+          '204': { description: 'Config updated' },
+          '400': { description: 'Invalid body', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      patch: {
+        tags: ['Config'],
+        summary: 'Partially update opencode.json (merge fields into current config)',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', description: 'Fields to merge into the current opencode.json' } } } },
         responses: {
           '204': { description: 'Config updated' },
           '400': { description: 'Invalid body', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
@@ -159,10 +171,10 @@ export const openapiSpec: Record<string, unknown> = {
       },
       get: {
         tags: ['Agents'],
-        summary: 'List agent definitions',
+        summary: 'List agent definitions, enriched with descriptions from running instance when available',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
-          '200': { description: 'Agent list', content: { 'application/json': { schema: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, size: { type: 'integer' } } } } } } },
+          '200': { description: 'Agent list', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/AgentItem' } } } } },
           '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           '500': { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -305,6 +317,18 @@ export const openapiSpec: Record<string, unknown> = {
         responses: {
           '200': { description: 'AI response', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } },
           '400': { description: 'Missing text', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Not running or not ready', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/conversations/{id}/providers': {
+      get: {
+        tags: ['Providers'],
+        summary: 'List LLM providers and their models from the running instance',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Provider list', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProvidersResponse' } } } },
           '409': { description: 'Not running or not ready', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           '500': { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
@@ -498,16 +522,7 @@ export const openapiSpec: Record<string, unknown> = {
         },
       },
     },
-    '/api/models': {
-      get: {
-        tags: ['System'],
-        summary: 'List available models from OpenCode CLI',
-        responses: {
-          '200': { description: 'Model list', content: { 'application/json': { schema: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' } } } } } } },
-          '500': { description: 'Failed to list models', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
-        },
-      },
-    },
+
   },
   components: {
     schemas: {
@@ -563,6 +578,20 @@ export const openapiSpec: Record<string, unknown> = {
           messageId: { type: 'string' },
           text: { type: 'string' },
           parts: { type: 'array', items: { type: 'object' } },
+        },
+      },
+      AgentItem: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          description: { type: 'string' },
+        },
+      },
+      ProvidersResponse: {
+        type: 'object',
+        properties: {
+          providers: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, models: { type: 'array', items: { type: 'string' } } } } },
+          default: { type: 'object', additionalProperties: { type: 'string' } },
         },
       },
     },

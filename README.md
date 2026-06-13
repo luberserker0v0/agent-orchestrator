@@ -204,7 +204,9 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `POST` | `/api/conversations/:id/restart` | 重啟 OpenCode 實例 |
 | `POST` | `/api/conversations/:id/message` | 發送訊息（HTTP REST） |
 | `GET` | `/api/conversations/:id/events` | 取得最近 50 條事件（最多 100） |
+| `GET` | `/api/conversations/:id/providers` | 取得供應商列表 |
 | `GET/POST` | `/api/conversations/:id/config` | 讀取 / 寫入 `opencode.json` |
+| `PATCH` | `/api/conversations/:id/config` | 部分更新 `opencode.json` |
 | `PUT/GET/DELETE` | `/api/conversations/:id/agent/config` | 寫入 / 讀取 / 刪除 `AGENTS.md` |
 | `GET/PUT` | `/api/conversations/:id/agents` | 列出 / 寫入 Agent 定義 |
 | `GET/DELETE` | `/api/conversations/:id/agents/:name` | 讀取 / 刪除指定 Agent |
@@ -223,7 +225,6 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 | `GET` | `/api/conversations/:id/skills/:name` | 讀取 SKILL.md |
 | `GET` | `/api/conversations/:id/skills/:name/info` | Skill 結構資訊與 hash |
 | `DELETE` | `/api/conversations/:id/skills/:name` | 刪除 Skill |
-| `GET` | `/api/models` | 查詢可用模型列表 |
 
 **WebSocket API**（JSON-RPC 2.0）：
 
@@ -253,31 +254,27 @@ WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 # 1. 啟動服務
 npm run dev
 
-# 2. 查詢可用模型
-MODELS=$(curl -s http://127.0.0.1:11697/api/models)
-echo "Available models: $MODELS"
-
-# 3. 準備對話（僅建立 workspace，不啟動 OpenCode）
+# 2. 準備對話（僅建立 workspace，不啟動 OpenCode）
 CONV=$(curl -s -X POST http://127.0.0.1:11697/api/conversations \
   -H "Content-Type: application/json" \
   -d '{"id":"demo"}')
 
 echo "Conversation prepared: $CONV"
 
-# 4. 寫入 Agent 定義（OpenCode 自動發現 .opencode/agents/*.md）
+# 3. 寫入 Agent 定義（OpenCode 自動發現 .opencode/agents/*.md）
 curl -s -X PUT http://127.0.0.1:11697/api/conversations/demo/agents \
   -H "Content-Type: application/json" \
   -d '{"name":"designer.md","content":"---\nname: Designer\n---\nYou are a senior UI/UX designer."}'
 
-# 5. 寫入模板檔案
+# 4. 寫入模板檔案
 curl -s -X PUT http://127.0.0.1:11697/api/conversations/demo/files \
   -H "Content-Type: application/json" \
   -d '{"path":"templates/spec.md","content":"# Design Spec\n\n## Goals\n..."}'
 
-# 6. 啟動 OpenCode
+# 5. 啟動 OpenCode
 curl -s -X POST http://127.0.0.1:11697/api/conversations/demo/start
 
-# 7. 使用 WebSocket 發送訊息（需安裝 wscat: npm install -g wscat）
+# 6. 使用 WebSocket 發送訊息（需安裝 wscat: npm install -g wscat）
 wscat -c ws://127.0.0.1:11697/ws/demo
 
 # 在 wscat 中輸入：
@@ -350,17 +347,16 @@ wscat -c ws://127.0.0.1:11697/ws/demo
        | PUT  /api/conversations/:id/agents
        | PUT  /api/conversations/:id/files
        | POST /api/conversations/:id/start
-       | GET  /api/models
        v
 [AgentOrchestrator HTTP API]  ←── Express (port 0 = auto-allocated)
-       |                    |
-       | spawn(...)         | spawn("opencode models")
-       v                    v
-[OpenCode Instance #1]  [Model List]
-       |                     |
-       | HTTP (internal)     | stdout parse
-       v                     v
-[OpenCode Server]       [Client Response]
+       |
+       | spawn(...)
+       v
+[OpenCode Instance #1]
+       |
+       | HTTP (internal)
+       v
+[OpenCode Server]
 
 [ConversationState] ←── event-driven lifecycle
        |
@@ -460,17 +456,7 @@ AGENTORCHESTRATOR_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
 rm -rf workspace/
 ```
 
-### 6. 如何查詢可用模型
-
-透過 `GET /api/models` 查詢，AgentOrchestrator 會執行 `opencode models` CLI 取得已設定供應商的所有模型：
-
-```bash
-curl -s http://127.0.0.1:11697/api/models
-```
-
-回傳格式為 `{ id, provider, model }` 陣列。若 OpenCode CLI 未安裝或未設定供應商憑證，回傳空陣列 `[]`。
-
-### 7. 如何為對話設定預設模型
+### 6. 如何為對話設定預設模型
 
 建立對話後，透過 config endpoints 設定 `opencode.json` 中的 `model` 與 `agent`：
 
@@ -486,7 +472,7 @@ curl -s -X POST http://127.0.0.1:11697/api/conversations/demo/config \
 {"jsonrpc":"2.0","id":1,"method":"message.send","params":{"text":"Hello","model":"openai/gpt-5"}}
 ```
 
-### 8. WebSocket 返回 "conversation not running"
+### 7. WebSocket 返回 "conversation not running"
 
 - **原因**：WebSocket 連線成功，但對話尚未進入 `running` 狀態，或已在 `stopped`/`destroyed` 狀態。
 - **排查**：

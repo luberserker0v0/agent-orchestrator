@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { loadConfig, loadCanonicalConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';

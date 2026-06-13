@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(api): add GET /api/conversations/:id/providers endpoint (#54)
+- feat(api): add PATCH /api/conversations/:id/config endpoint (#54)
+- feat(api): enhance GET /api/conversations/:id/agents with runtime data (#54)
 - docs: add npm/npx install instructions, `aor` binary CLI reference, and Swagger UI documentation to README.md (#53)
 - docs: add `/api-docs`, `/api-docs/`, `/api-docs.json` endpoint documentation to API.md (#53)
 - docs: add QUICKSTART.md and QUICKTEST.md for rapid onboarding and testing workflow
@@ -20,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(config-loader): always use jsonc-parser for config JSON files to handle comments in `.json` files (#45)
 - fix(instance-manager): add 10s timeout to docker restart spawn to prevent indefinite hang (#46)
 - fix(e2e): cleanup orphan Docker containers in test server startup/cleanup to prevent container name conflicts on re-runs (#46)
+
+### Removed
+
+- remove GET /api/models endpoint (#54)
 
 ### Changed
 

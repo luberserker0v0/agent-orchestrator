@@ -210,16 +210,38 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 
 ---
 
+### `PATCH /api/conversations/:id/config`
+
+部分更新對話的 `opencode.json`。僅更新請求中提供的欄位，其他欄位保持不變。
+
+**請求**：
+```json
+{
+  "model": "openai/gpt-5"
+}
+```
+
+**回應**（`204 No Content`）
+
+---
+
 ### `GET /api/conversations/:id/agents`
 
 列出對話的所有 Agent 定義檔。
 
-**回應**：
+當 OpenCode 實例正在運行且就緒時，回傳包含名稱與描述的增強資料；否則回傳純名稱陣列。
+
+**回應**（實例運行中）：
 ```json
 [
-  { "name": "designer.md", "size": 256 },
-  { "name": "reviewer.md", "size": 189 }
+  { "name": "designer.md", "description": "A senior UI/UX designer" },
+  { "name": "reviewer.md", "description": "A code reviewer" }
 ]
+```
+
+**回應**（實例未運行）：
+```json
+["designer.md", "reviewer.md"]
 ```
 
 ---
@@ -767,23 +789,22 @@ references/capabilities.md
 ]
 ```
 
----
+### `GET /api/conversations/:id/providers`
 
-### `GET /api/models`
+取得執行中 OpenCode 實例的供應商列表。代理至實例的 provider 端點。
 
-列出所有已設定供應商中可用的模型。透過執行 `opencode models` CLI 取得。
+**注意**：對話必須處於 `running` 且 `ready` 狀態。
 
 **回應**：
 ```json
 [
-  { "id": "anthropic/claude-3-5-sonnet", "provider": "anthropic", "model": "claude-3-5-sonnet" },
-  { "id": "openai/gpt-5", "provider": "openai", "model": "gpt-5" }
+  { "id": "anthropic", "name": "Anthropic", "models": ["claude-3-5-sonnet"] }
 ]
 ```
 
-**錯誤**（`500`）：
+**錯誤**（`409`）：
 ```json
-{ "error": "Failed to list models" }
+{ "error": "Instance is not ready yet. OpenCode is still initializing." }
 ```
 
 ---
