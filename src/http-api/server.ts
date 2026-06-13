@@ -10,7 +10,6 @@ import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-man
 import type { OpenCodeClient } from '../opencode-http/client.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
-import { listModels } from '../opencode-cli/models.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
@@ -379,6 +378,30 @@ export function createHttpServer(
     }
   });
 
+  // Partial update (merge into current config)
+  app.patch('/api/conversations/:id/config', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+
+    try {
+      const patch = req.body;
+      if (typeof patch !== 'object' || patch === null) {
+        res.status(400).json({ error: 'Request body must be a JSON object' });
+        return;
+      }
+
+      const current = workspaceFactory.readConfig(id);
+      const merged = { ...current, ...patch };
+      workspaceFactory.writeConfig(id, merged);
+      markNeedsRestartIfRunning(id, 'opencode.json changed');
+      conversationState.emitEvent(id, 'conversation.configChanged', { changedFiles: ['.opencode/opencode.json'] });
+      res.status(204).send();
+    } catch (err) {
+      logger.error(`Failed to patch config for ${id}:`, err);
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // ─── Agents ────────────────────────────────────────────
 
   app.put('/api/conversations/:id/agents', (req: Request, res: Response) => {
@@ -406,13 +429,32 @@ export function createHttpServer(
     }
   });
 
-  app.get('/api/conversations/:id/agents', (req: Request, res: Response) => {
+  app.get('/api/conversations/:id/agents', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
     try {
-      const agents = workspaceFactory.listAgents(id);
-      res.json(agents);
+      const names = workspaceFactory.listAgents(id);
+
+      // Enrich with runtime agent descriptions when instance is ready
+      const state = conversationState.get(id);
+      if (state?.ready && state.status === 'running') {
+        const instance = instanceManager.getInstance(id);
+        if (instance) {
+          const runtimeAgents = await instance.client.listAgents();
+          const agentMap = new Map(runtimeAgents.map(a => [a.id, a]));
+          const result = names.map(name => ({
+            name,
+            ...(agentMap.has(name) && agentMap.get(name)!.description
+              ? { description: agentMap.get(name)!.description }
+              : {}),
+          }));
+          res.json(result);
+          return;
+        }
+      }
+
+      res.json(names);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -747,6 +789,25 @@ export function createHttpServer(
     }
   });
 
+  // ─── Providers (proxy to running instance) ─────────────
+
+  app.get('/api/conversations/:id/providers', async (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureReady(res, id)) return;
+
+    try {
+      const instance = instanceManager.getInstance(id);
+      if (!instance) {
+        res.status(500).json({ error: 'Instance reference lost' });
+        return;
+      }
+      const providers = await instance.client.listProviders();
+      res.json(providers);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // ─── Message ───────────────────────────────────────────
 
   app.post('/api/conversations/:id/message', async (req: Request, res: Response) => {
@@ -1018,22 +1079,6 @@ export function createHttpServer(
       } else {
         res.status(500).json({ error: message });
       }
-    }
-  });
-
-  // ─── Models ────────────────────────────────────────────
-
-  app.get('/api/models', async (_req: Request, res: Response) => {
-    try {
-      const models = await listModels({
-        runtime: orchestratorConfig.runtime,
-        opencodeBinary: orchestratorConfig.opencodeBinary,
-        dockerImage: orchestratorConfig.docker?.image,
-      });
-      res.json(models);
-    } catch (err) {
-      logger.error('Failed to list models:', err);
-      res.status(500).json({ error: (err as Error).message });
     }
   });
 

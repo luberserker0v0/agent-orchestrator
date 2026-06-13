@@ -14,9 +14,9 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
                                 │
             ┌───────────────────┼───────────────────┐
             │                   │                   │
-            │  HTTP POST        │  HTTP GET         │  WS /ws/{id}
-            │  /api/conversations│  /api/models     │
-            ▼                   ▼                   ▼
+            │  HTTP POST        │  WS /ws/{id}      │
+            │  /api/conversations│                   │
+            ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    AgentOrchestrator HTTP API                │
 │  • Express Server (port 0 = auto-allocated)                 │
@@ -27,14 +27,14 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
                                 │
             ┌───────────────────┼───────────────────┐
             │                   │                   │
-            │ spawn(...)        │ spawn("opencode   │ HTTP
-            │                   │  models")         │ (internal)
-            ▼                   ▼                   ▼
-┌─────────────────────┐  ┌─────────────────────┐  ┌──────────────┐
-│ OpenCode Instance #1│  │   Model List CLI    │  │  OpenCode   │
-│  port: 30000        │  │   stdout parse      │  │  HTTP API   │
-│  cwd: workspace/... │  │                     │  │  /session   │
-└─────────────────────┘  └─────────────────────┘  └──────────────┘
+            │ spawn(...)        │ HTTP              │
+            │                   │ (internal)        │
+            ▼                   ▼
+┌─────────────────────┐  ┌──────────────┐
+│ OpenCode Instance #1│  │  OpenCode   │
+│  port: 30000        │  │  HTTP API   │
+│  cwd: workspace/... │  │  /session   │
+└─────────────────────┘  └──────────────┘
 
 Event Stream (WebSocket push via conversationState.subscribe):
   conversation.prepared

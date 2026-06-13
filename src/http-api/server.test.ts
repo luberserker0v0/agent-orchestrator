@@ -10,8 +10,6 @@ describe('HTTP API Server', () => {
   let mockInstanceManager: any;
   let mockWorkspaceFactory: any;
   let mockConversationState: any;
-  let mockListModels: any;
-
   beforeEach(() => {
     mockInstanceManager = {
       createInstance: vi.fn(),
@@ -70,8 +68,6 @@ describe('HTTP API Server', () => {
       startReadyCheck: vi.fn(),
       cancelReadyCheck: vi.fn(),
     };
-
-    mockListModels = vi.fn();
 
     httpServer = createHttpServer(
       { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
@@ -142,18 +138,6 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error).toContain('disk full');
-  });
-
-  it('GET /api/models lists models', async () => {
-    vi.doMock('../opencode-cli/models.js', () => ({
-      listModels: mockListModels,
-    }));
-    mockListModels.mockResolvedValue([
-      { id: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
-    ]);
-
-    const res = await request(server).get('/api/models');
-    expect(res.status).toBe(200);
   });
 
   it('DELETE /api/conversations/:id destroys instance and workspace', async () => {
