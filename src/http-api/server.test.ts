@@ -10,6 +10,10 @@ describe('HTTP API Server', () => {
   let mockInstanceManager: any;
   let mockWorkspaceFactory: any;
   let mockConversationState: any;
+  let mockConfigService: any;
+  let mockAgentService: any;
+  let mockSkillService: any;
+
   beforeEach(() => {
     mockInstanceManager = {
       createInstance: vi.fn(),
@@ -28,24 +32,12 @@ describe('HTTP API Server', () => {
       hasWorkspace: vi.fn(),
       writeConfig: vi.fn(),
       readConfig: vi.fn(),
-      writeAgent: vi.fn(),
-      readAgent: vi.fn(),
-      deleteAgent: vi.fn(),
-      listAgents: vi.fn(),
       writeFile: vi.fn(),
       readFile: vi.fn(),
       listFiles: vi.fn(),
       deleteFile: vi.fn(),
       copyFromLocal: vi.fn(),
       getWorkspaceSize: vi.fn(),
-      importSkillFromLocal: vi.fn(),
-      listSkills: vi.fn(),
-      readSkill: vi.fn(),
-      getSkillInfo: vi.fn(),
-      deleteSkill: vi.fn(),
-      writeAgentsMd: vi.fn(),
-      readAgentsMd: vi.fn(),
-      deleteAgentsMd: vi.fn(),
       resolveWorkspacePath: vi.fn().mockReturnValue('/tmp/workspace'),
       assertQuota: vi.fn(),
     };
@@ -69,13 +61,42 @@ describe('HTTP API Server', () => {
       cancelReadyCheck: vi.fn(),
     };
 
+    mockConfigService = {
+      readConfig: vi.fn(),
+      writeConfig: vi.fn(),
+      patchConfig: vi.fn(),
+    };
+
+    mockAgentService = {
+      writeAgent: vi.fn(),
+      readAgent: vi.fn(),
+      deleteAgent: vi.fn(),
+      listAgents: vi.fn(),
+      listAgentsWithRuntime: vi.fn(),
+      writeAgentsMd: vi.fn(),
+      readAgentsMd: vi.fn(),
+      deleteAgentsMd: vi.fn(),
+    };
+
+    mockSkillService = {
+      uploadSkill: vi.fn(),
+      importSkill: vi.fn(),
+      listSkills: vi.fn(),
+      readSkill: vi.fn(),
+      getSkillInfo: vi.fn(),
+      deleteSkill: vi.fn(),
+    };
+
     httpServer = createHttpServer(
       { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
       { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
       mockInstanceManager,
       mockWorkspaceFactory,
       mockConversationState,
-      defaultOrchestratorConfig
+      defaultOrchestratorConfig,
+      mockConfigService,
+      mockAgentService,
+      mockSkillService
     );
     server = httpServer.server;
   });
@@ -310,7 +331,7 @@ describe('HTTP API Server', () => {
 
   it('GET /api/conversations/:id/skills lists skills', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockWorkspaceFactory.listSkills.mockReturnValue(['web-search', 'code-review']);
+    mockSkillService.listSkills.mockReturnValue(['web-search', 'code-review']);
 
     const res = await request(server).get('/api/conversations/conv-001/skills');
 
@@ -321,7 +342,7 @@ describe('HTTP API Server', () => {
 
   it('GET /api/conversations/:id/skills/:name returns skill content', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockWorkspaceFactory.readSkill.mockReturnValue('# web-search\nA skill.');
+    mockSkillService.readSkill.mockReturnValue('# web-search\nA skill.');
 
     const res = await request(server).get('/api/conversations/conv-001/skills/web-search');
 
@@ -332,7 +353,7 @@ describe('HTTP API Server', () => {
 
   it('GET /api/conversations/:id/skills/:name/info returns skill info', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockWorkspaceFactory.getSkillInfo.mockReturnValue({
+    mockSkillService.getSkillInfo.mockReturnValue({
       name: 'web-search',
       files: ['SKILL.md'],
       totalSize: 1234,
@@ -347,18 +368,16 @@ describe('HTTP API Server', () => {
 
   it('DELETE /api/conversations/:id/skills/:name deletes skill', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
 
     const res = await request(server).delete('/api/conversations/conv-001/skills/web-search');
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search');
+    expect(mockSkillService.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search');
   });
 
   it('DELETE /api/conversations/:id/skills/:name returns 404 when skill not found', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockWorkspaceFactory.deleteSkill.mockImplementation(() => {
+    mockSkillService.deleteSkill.mockImplementation(() => {
       throw new Error('Skill not found: web-search');
     });
 
@@ -370,20 +389,18 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/skills/import imports skill', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/skills/import')
       .send({ source: 'skills/web-search', name: 'web-search' });
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.importSkillFromLocal).toHaveBeenCalledWith('conv-001', 'skills/web-search', 'web-search');
+    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills/web-search', 'web-search');
   });
 
   it('POST /api/conversations/:id/skills/import returns 403 for disallowed source', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+    mockSkillService.importSkill.mockImplementation(() => {
       throw new Error('Source path not allowed. Must be under one of: /skills');
     });
 
@@ -397,8 +414,7 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/skills/import returns 404 for missing source', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+    mockSkillService.importSkill.mockImplementation(() => {
       throw new Error('Source not found: skills/missing');
     });
 
@@ -412,8 +428,7 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/skills/import returns 413 for quota exceeded', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+    mockSkillService.importSkill.mockImplementation(() => {
       throw new Error('Workspace quota exceeded. Current: 50000000 bytes, Adding: 1000000 bytes, Limit: 50000000 bytes');
     });
 
@@ -427,7 +442,6 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/skills/import returns 400 for invalid name', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/skills/import')
@@ -435,13 +449,12 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('Invalid skill name');
-    expect(mockWorkspaceFactory.importSkillFromLocal).not.toHaveBeenCalled();
+    expect(mockSkillService.importSkill).not.toHaveBeenCalled();
   });
 
   it('POST /api/conversations/:id/skills/import returns 403 for sibling prefix path skills_evil/', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+    mockSkillService.importSkill.mockImplementation(() => {
       throw new Error('Source path not allowed. Must be under one of: ...');
     });
 
@@ -455,8 +468,7 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/skills/import returns 403 for absolute external path', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockWorkspaceFactory.importSkillFromLocal.mockImplementation(() => {
+    mockSkillService.importSkill.mockImplementation(() => {
       throw new Error('Source path not allowed. Must be under one of: ...');
     });
 
@@ -475,7 +487,7 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('Invalid skill name');
-    expect(mockWorkspaceFactory.readSkill).not.toHaveBeenCalled();
+    expect(mockSkillService.readSkill).not.toHaveBeenCalled();
   });
 
   it('GET /api/conversations/:id/skills/:name/info returns 400 for invalid name', async () => {
@@ -485,18 +497,17 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('Invalid skill name');
-    expect(mockWorkspaceFactory.getSkillInfo).not.toHaveBeenCalled();
+    expect(mockSkillService.getSkillInfo).not.toHaveBeenCalled();
   });
 
   it('DELETE /api/conversations/:id/skills/:name returns 400 for invalid name', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
 
     const res = await request(server).delete('/api/conversations/conv-001/skills/foo%5Cbar');
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('Invalid skill name');
-    expect(mockWorkspaceFactory.deleteSkill).not.toHaveBeenCalled();
+    expect(mockSkillService.deleteSkill).not.toHaveBeenCalled();
   });
 
   it('POST /api/conversations/:id/skills/upload returns 400 for invalid name', async () => {
@@ -509,6 +520,7 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('Invalid skill name');
+    expect(mockSkillService.uploadSkill).not.toHaveBeenCalled();
   });
 
   it('POST /api/conversations/:id/skills/upload returns 400 for missing name', async () => {
@@ -525,7 +537,9 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/skills/upload returns 400 for missing SKILL.md', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockWorkspaceFactory.resolveWorkspacePath.mockReturnValue('/tmp/workspace');
+    mockSkillService.uploadSkill.mockImplementation(() => {
+      throw new Error('Skill archive must contain SKILL.md at the root');
+    });
 
     const zip = new AdmZip();
     zip.addFile('README.md', Buffer.from('No skill here'));
@@ -537,11 +551,14 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('Skill archive must contain SKILL.md at the root');
+    expect(mockSkillService.uploadSkill).toHaveBeenCalledWith('conv-001', 'bad-skill', expect.any(Buffer));
   });
 
   it('POST /api/conversations/:id/skills/upload returns 400 for Windows drive path', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockWorkspaceFactory.resolveWorkspacePath.mockReturnValue('/tmp/workspace');
+    mockSkillService.uploadSkill.mockImplementation(() => {
+      throw new Error('Invalid zip entry path: C:/windows/evil.txt');
+    });
 
     const zip = new AdmZip();
     zip.addFile('SKILL.md', Buffer.from('# skill'));
@@ -554,13 +571,13 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Invalid zip entry path');
+    expect(mockSkillService.uploadSkill).toHaveBeenCalledWith('conv-001', 'slip-skill', expect.any(Buffer));
   });
 
   it('POST /api/conversations/:id/skills/upload returns 413 for quota exceeded', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockWorkspaceFactory.resolveWorkspacePath.mockReturnValue('/tmp/workspace');
-    mockWorkspaceFactory.assertQuota.mockImplementation(() => {
-      throw new Error('Workspace quota exceeded');
+    mockSkillService.uploadSkill.mockImplementation(() => {
+      throw new Error('Workspace quota exceeded. Current: 52428800 bytes, Adding: 1024 bytes, Limit: 52428800 bytes');
     });
 
     const zip = new AdmZip();
@@ -573,12 +590,11 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(413);
     expect(res.body.error).toBe('Skill archive exceeds workspace quota');
+    expect(mockSkillService.uploadSkill).toHaveBeenCalledWith('conv-001', 'quota-skill', expect.any(Buffer));
   });
 
   it('POST /api/conversations/:id/skills/upload succeeds for valid zip', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockWorkspaceFactory.resolveWorkspacePath.mockReturnValue('/tmp/workspace');
 
     const zip = new AdmZip();
     zip.addFile('SKILL.md', Buffer.from('# skill'));
@@ -590,6 +606,7 @@ describe('HTTP API Server', () => {
       .send(zip.toBuffer());
 
     expect(res.status).toBe(204);
+    expect(mockSkillService.uploadSkill).toHaveBeenCalledWith('conv-001', 'valid-skill', expect.any(Buffer));
   });
 
   it('POST /api/conversations/:id/config writes raw JSON as opencode.json', async () => {
@@ -599,7 +616,7 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(204);
     expect(res.body).toEqual({});
-    expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith('conv-001', {
+    expect(mockConfigService.writeConfig).toHaveBeenCalledWith('conv-001', {
       model: 'test/model',
       permission: { bash: { '*': 'deny' } },
     });
@@ -615,15 +632,12 @@ describe('HTTP API Server', () => {
   });
 
   it('PUT /api/conversations/:id/agent/config writes AGENTS.md', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
-
     const res = await request(server)
       .put('/api/conversations/conv-001/agent/config')
       .send({ content: '# Project Agents\n\nDesigner agent.' });
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.writeAgentsMd).toHaveBeenCalledWith('conv-001', '# Project Agents\n\nDesigner agent.');
-    expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md updated');
+    expect(mockAgentService.writeAgentsMd).toHaveBeenCalledWith('conv-001', '# Project Agents\n\nDesigner agent.');
   });
 
   it('PUT /api/conversations/:id/agent/config returns 400 for missing content', async () => {
@@ -636,7 +650,7 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/agent/config reads AGENTS.md', async () => {
-    mockWorkspaceFactory.readAgentsMd.mockReturnValue('# Agents');
+    mockAgentService.readAgentsMd.mockReturnValue('# Agents');
 
     const res = await request(server)
       .get('/api/conversations/conv-001/agent/config');
@@ -646,7 +660,7 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/agent/config returns 404 when missing', async () => {
-    mockWorkspaceFactory.readAgentsMd.mockImplementation(() => { throw new Error('AGENTS.md not found'); });
+    mockAgentService.readAgentsMd.mockImplementation(() => { throw new Error('AGENTS.md not found'); });
 
     const res = await request(server)
       .get('/api/conversations/conv-001/agent/config');
@@ -655,14 +669,11 @@ describe('HTTP API Server', () => {
   });
 
   it('DELETE /api/conversations/:id/agent/config deletes AGENTS.md', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
-
     const res = await request(server)
       .delete('/api/conversations/conv-001/agent/config');
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.deleteAgentsMd).toHaveBeenCalledWith('conv-001');
-    expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith('conv-001', 'AGENTS.md deleted');
+    expect(mockAgentService.deleteAgentsMd).toHaveBeenCalledWith('conv-001');
   });
 
   it('POST /api/conversations/:id/message sends text and returns result', async () => {
@@ -858,7 +869,10 @@ describe('HTTP API Server', () => {
       mockInstanceManager,
       mockWorkspaceFactory,
       mockConversationState,
-      dockerOrchestratorConfig
+      dockerOrchestratorConfig,
+      mockConfigService,
+      mockAgentService,
+      mockSkillService
     );
     mockConversationState.get.mockReturnValue({ id: 'conv-docker', status: 'running' });
     mockInstanceManager.restartInstance.mockResolvedValue(undefined);
@@ -918,7 +932,7 @@ describe('HTTP API Server', () => {
   // ─── Config GET ────────────────────────────────────────
 
   it('GET /api/conversations/:id/config reads config', async () => {
-    mockWorkspaceFactory.readConfig.mockReturnValue({ model: 'test/model' });
+    mockConfigService.readConfig.mockReturnValue({ model: 'test/model' });
 
     const res = await request(server).get('/api/conversations/conv-001/config');
 
@@ -927,7 +941,7 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/config returns 500 on read error', async () => {
-    mockWorkspaceFactory.readConfig.mockImplementation(() => { throw new Error('read error'); });
+    mockConfigService.readConfig.mockImplementation(() => { throw new Error('read error'); });
 
     const res = await request(server).get('/api/conversations/conv-001/config');
 
@@ -937,7 +951,7 @@ describe('HTTP API Server', () => {
   // ─── POST Config 500 ───────────────────────────────────
 
   it('POST /api/conversations/:id/config returns 500 on write error', async () => {
-    mockWorkspaceFactory.writeConfig.mockImplementation(() => { throw new Error('write failed'); });
+    mockConfigService.writeConfig.mockImplementation(() => { throw new Error('write failed'); });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/config')
@@ -955,7 +969,7 @@ describe('HTTP API Server', () => {
       .send({ name: 'designer', content: 'Designer agent' });
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.writeAgent).toHaveBeenCalledWith('conv-001', 'designer', 'Designer agent');
+    expect(mockAgentService.writeAgent).toHaveBeenCalledWith('conv-001', 'designer', 'Designer agent');
   });
 
   it('PUT /api/conversations/:id/agents returns 400 for missing name or content', async () => {
@@ -968,7 +982,7 @@ describe('HTTP API Server', () => {
   });
 
   it('PUT /api/conversations/:id/agents returns 500 on write error', async () => {
-    mockWorkspaceFactory.writeAgent.mockImplementation(() => { throw new Error('write failed'); });
+    mockAgentService.writeAgent.mockImplementation(() => { throw new Error('write failed'); });
 
     const res = await request(server)
       .put('/api/conversations/conv-001/agents')
@@ -978,7 +992,7 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/agents lists agents', async () => {
-    mockWorkspaceFactory.listAgents.mockReturnValue(['designer', 'coder']);
+    mockAgentService.listAgentsWithRuntime.mockResolvedValue(['designer', 'coder']);
 
     const res = await request(server).get('/api/conversations/conv-001/agents');
 
@@ -987,7 +1001,7 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/agents/:name reads agent', async () => {
-    mockWorkspaceFactory.readAgent.mockReturnValue('Designer agent content');
+    mockAgentService.readAgent.mockReturnValue('Designer agent content');
 
     const res = await request(server).get('/api/conversations/conv-001/agents/designer');
 
@@ -997,7 +1011,7 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/agents/:name returns 404 when missing', async () => {
-    mockWorkspaceFactory.readAgent.mockImplementation(() => { throw new Error('Agent not found'); });
+    mockAgentService.readAgent.mockImplementation(() => { throw new Error('Agent not found'); });
 
     const res = await request(server).get('/api/conversations/conv-001/agents/missing');
 
@@ -1005,16 +1019,14 @@ describe('HTTP API Server', () => {
   });
 
   it('DELETE /api/conversations/:id/agents/:name deletes agent', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
-
     const res = await request(server).delete('/api/conversations/conv-001/agents/designer');
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.deleteAgent).toHaveBeenCalledWith('conv-001', 'designer');
+    expect(mockAgentService.deleteAgent).toHaveBeenCalledWith('conv-001', 'designer');
   });
 
   it('DELETE /api/conversations/:id/agents/:name returns 500 on error', async () => {
-    mockWorkspaceFactory.deleteAgent.mockImplementation(() => { throw new Error('delete failed'); });
+    mockAgentService.deleteAgent.mockImplementation(() => { throw new Error('delete failed'); });
 
     const res = await request(server).delete('/api/conversations/conv-001/agents/designer');
 

@@ -9,7 +9,7 @@ import {
   copyFileSync,
   cpSync,
 } from 'node:fs';
-import { join, dirname, basename, resolve, sep } from 'node:path';
+import { join, dirname, resolve, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { WorkspaceConfig } from '../config-loader.js';
@@ -55,7 +55,7 @@ export function validateSkillName(name: string): string {
   return name;
 }
 
-function getDirSize(dirPath: string): number {
+export function getDirSize(dirPath: string): number {
   let total = 0;
   try {
     const entries = readdirSync(dirPath, { withFileTypes: true });
@@ -191,79 +191,6 @@ export class WorkspaceFactory {
     return JSON.parse(raw) as OpencodeConfig;
   }
 
-  // ─── Agents ──────────────────────────────────────────────
-
-  writeAgent(id: string, name: string, content: string): void {
-    const wsPath = this.resolveWorkspacePath(id);
-    const agentsDir = join(wsPath, '.opencode', 'agents');
-    const filePath = join(agentsDir, `${sanitizeId(name)}.md`);
-
-    const size = Buffer.byteLength(content, 'utf-8');
-    this.assertQuota(wsPath, size);
-
-    mkdirSync(agentsDir, { recursive: true });
-    writeFileSync(filePath, content, 'utf-8');
-    logger.info(`Agent written: ${filePath}`);
-  }
-
-  readAgent(id: string, name: string): string {
-    const wsPath = this.resolveWorkspacePath(id);
-    const filePath = join(wsPath, '.opencode', 'agents', `${sanitizeId(name)}.md`);
-    if (!existsSync(filePath)) {
-      throw new Error(`Agent not found: ${name}`);
-    }
-    return readFileSync(filePath, 'utf-8');
-  }
-
-  deleteAgent(id: string, name: string): void {
-    const wsPath = this.resolveWorkspacePath(id);
-    const filePath = join(wsPath, '.opencode', 'agents', `${sanitizeId(name)}.md`);
-    if (existsSync(filePath)) {
-      rmSync(filePath, { force: true });
-      logger.info(`Agent deleted: ${filePath}`);
-    }
-  }
-
-  listAgents(id: string): string[] {
-    const wsPath = this.resolveWorkspacePath(id);
-    const agentsDir = join(wsPath, '.opencode', 'agents');
-    if (!existsSync(agentsDir)) return [];
-    return readdirSync(agentsDir)
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => basename(f, '.md'));
-  }
-
-  // ─── AGENTS.md ─────────────────────────────────────────
-
-  writeAgentsMd(id: string, content: string): void {
-    const wsPath = this.resolveWorkspacePath(id);
-    const filePath = join(wsPath, 'AGENTS.md');
-
-    const size = Buffer.byteLength(content, 'utf-8');
-    this.assertQuota(wsPath, size);
-
-    writeFileSync(filePath, content, 'utf-8');
-    logger.info(`AGENTS.md written: ${filePath}`);
-  }
-
-  readAgentsMd(id: string): string {
-    const wsPath = this.resolveWorkspacePath(id);
-    const filePath = join(wsPath, 'AGENTS.md');
-    if (!existsSync(filePath)) {
-      throw new Error('AGENTS.md not found');
-    }
-    return readFileSync(filePath, 'utf-8');
-  }
-
-  deleteAgentsMd(id: string): void {
-    const wsPath = this.resolveWorkspacePath(id);
-    const filePath = join(wsPath, 'AGENTS.md');
-    if (existsSync(filePath)) {
-      rmSync(filePath, { force: true });
-      logger.info(`AGENTS.md deleted: ${filePath}`);
-    }
-  }
-
   // ─── Generic Files ───────────────────────────────────────
 
   writeFile(id: string, relativePath: string, content: string): void {
@@ -364,87 +291,11 @@ export class WorkspaceFactory {
     return getDirSize(wsPath);
   }
 
-  private resolveWorkspacePath(id: string): string {
+  resolveWorkspacePath(id: string): string {
     return join(this.basePath, sanitizeId(id));
   }
 
-  // ─── Skills ──────────────────────────────────────────────
-
-  importSkillFromLocal(id: string, source: string, name: string): void {
-    const skillName = validateSkillName(name);
-    const wsPath = this.resolveWorkspacePath(id);
-    const destPath = join(wsPath, '.opencode', 'skills', skillName);
-
-    const resolvedSource = resolve(process.cwd(), source);
-    const isAllowed = this.allowedCopySources.some((allowed) => {
-      const resolvedAllowed = resolve(allowed);
-      return resolvedSource === resolvedAllowed || resolvedSource.startsWith(resolvedAllowed + sep);
-    });
-    if (!isAllowed) {
-      throw new Error(
-        `Source path not allowed. Must be under one of: ${this.allowedCopySources.join(', ')}`
-      );
-    }
-
-    if (!existsSync(resolvedSource)) {
-      throw new Error(`Source not found: ${source}`);
-    }
-
-    const stat = statSync(resolvedSource);
-    if (!stat.isDirectory()) {
-      throw new Error(`Source must be a directory: ${source}`);
-    }
-
-    const dirSize = getDirSize(resolvedSource);
-    this.assertQuota(wsPath, dirSize, destPath);
-
-    mkdirSync(destPath, { recursive: true });
-    cpSync(resolvedSource, destPath, { recursive: true, force: true });
-    logger.info(`Skill imported: ${resolvedSource} → ${destPath}`);
-  }
-
-  listSkills(id: string): string[] {
-    const wsPath = this.resolveWorkspacePath(id);
-    const skillsDir = join(wsPath, '.opencode', 'skills');
-    if (!existsSync(skillsDir)) return [];
-    return readdirSync(skillsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
-  }
-
-  readSkill(id: string, name: string): string {
-    const skillName = validateSkillName(name);
-    const wsPath = this.resolveWorkspacePath(id);
-    const skillPath = join(wsPath, '.opencode', 'skills', skillName, 'SKILL.md');
-    if (!existsSync(skillPath)) {
-      throw new Error(`Skill not found: ${name}`);
-    }
-    return readFileSync(skillPath, 'utf-8');
-  }
-
-  getSkillInfo(id: string, name: string): { name: string; files: string[]; totalSize: number; sha256: string } {
-    const skillName = validateSkillName(name);
-    const wsPath = this.resolveWorkspacePath(id);
-    const skillDir = join(wsPath, '.opencode', 'skills', skillName);
-    if (!existsSync(skillDir)) {
-      throw new Error(`Skill not found: ${name}`);
-    }
-    const info = hashDirectory(skillDir);
-    return { name: skillName, ...info };
-  }
-
-  deleteSkill(id: string, name: string): void {
-    const skillName = validateSkillName(name);
-    const wsPath = this.resolveWorkspacePath(id);
-    const skillDir = join(wsPath, '.opencode', 'skills', skillName);
-    if (!existsSync(skillDir)) {
-      throw new Error(`Skill not found: ${name}`);
-    }
-    rmSync(skillDir, { recursive: true, force: true });
-    logger.info(`Skill deleted: ${skillDir}`);
-  }
-
-  private assertQuota(wsPath: string, additionalBytes: number, excludingFile?: string): void {
+  assertQuota(wsPath: string, additionalBytes: number, excludingFile?: string): void {
     const currentSize = getDirSize(wsPath);
     // Exclude the file being overwritten so we don't double-count
     let excluding = 0;
@@ -463,7 +314,7 @@ export class WorkspaceFactory {
   }
 }
 
-function hashDirectory(dirPath: string): { files: string[]; totalSize: number; sha256: string } {
+export function hashDirectory(dirPath: string): { files: string[]; totalSize: number; sha256: string } {
   const hash = createHash('sha256');
   const files: string[] = [];
   let totalSize = 0;

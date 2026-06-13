@@ -3,6 +3,9 @@ import { loadConfig, loadCanonicalConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';
 import { ConversationState } from './orchestrator/conversation-state.js';
+import { ConfigService } from './services/config-service.js';
+import { AgentService } from './services/agent-service.js';
+import { SkillService } from './services/skill-service.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
 import { parseCliArgs, printHelp } from './cli.js';
@@ -39,12 +42,15 @@ export async function main(cliArgs?: string[]) {
   const workspaceFactory = new WorkspaceFactory(config.workspace, canonicalConfig);
   const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory);
   const conversationState = new ConversationState();
+  const configService = new ConfigService(workspaceFactory, conversationState);
+  const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
+  const skillService = new SkillService(workspaceFactory, conversationState);
 
   // Clean up orphan resources from previous runs (e.g., after SIGKILL/crash)
   await instanceManager.cleanupOrphanContainers();
   workspaceFactory.cleanupOrphans();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator, configService, agentService, skillService);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();
