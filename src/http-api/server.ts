@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, sep, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
+import swaggerUi from 'swagger-ui-express';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
@@ -13,6 +14,7 @@ import { listModels } from '../opencode-cli/models.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
+import { openapiSpec } from './openapi.js';
 import AdmZip from 'adm-zip';
 
 export interface HttpServer {
@@ -90,6 +92,16 @@ export function createHttpServer(
         // Instance stays running — user can reconfigure provider and restart
       });
   }
+
+  // ─── Swagger UI ─────────────────────────────────────────
+
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+    customSiteTitle: 'AgentOrchestrator API Docs',
+  }));
+
+  app.get('/api-docs.json', (_req: Request, res: Response) => {
+    res.json(openapiSpec);
+  });
 
   // ─── Health & Metrics ────────────────────────────────────
 
