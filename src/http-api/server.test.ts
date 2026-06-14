@@ -167,7 +167,7 @@ describe('HTTP API Server', () => {
       .send({});
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain('disk full');
+    expect(res.body.error.message).toContain('disk full');
   });
 
   it('DELETE /api/conversations/:id destroys instance and workspace', async () => {
@@ -189,7 +189,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).delete('/api/conversations/conv-001');
 
     expect(res.status).toBe(404);
-    expect(res.body.error).toContain('Conversation not found');
+    expect(res.body.error.message).toContain('Conversation not found');
   });
 
   it('GET /api/conversations lists conversations', async () => {
@@ -277,7 +277,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/start');
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toContain('already starting or running');
+    expect(res.body.error.message).toContain('already starting or running');
   });
 
   it('POST /api/conversations/:id/start returns 500 on instance creation failure', async () => {
@@ -288,7 +288,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/start');
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain('port allocation failed');
+    expect(res.body.error.message).toContain('port allocation failed');
   });
 
   // ─── Sessions ───────────────────────────────────────────
@@ -314,7 +314,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
 
     expect(res.status).toBe(404);
-    expect(res.body.error).toContain('Conversation not found');
+    expect(res.body.error.message).toContain('Conversation not found');
   });
 
   it('POST /api/conversations/:id/sessions returns 409 when not running', async () => {
@@ -324,7 +324,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toContain('not running');
+    expect(res.body.error.message).toContain('not running');
   });
 
   it('POST /api/conversations/:id/sessions returns 500 when instance reference lost', async () => {
@@ -335,7 +335,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain('Instance reference lost');
+    expect(res.body.error.message).toContain('Instance reference lost');
   });
 
   it('GET /api/conversations/:id/skills lists skills', async () => {
@@ -393,7 +393,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).delete('/api/conversations/conv-001/skills/web-search');
 
     expect(res.status).toBe(404);
-    expect(res.body.error).toContain('Skill not found');
+    expect(res.body.error.message).toContain('Skill not found');
   });
 
   it('POST /api/conversations/:id/skills/import imports skill', async () => {
@@ -418,7 +418,7 @@ describe('HTTP API Server', () => {
       .send({ source: '../outside', name: 'outside' });
 
     expect(res.status).toBe(403);
-    expect(res.body.error).toContain('Source path not allowed');
+    expect(res.body.error.message).toContain('Source path not allowed');
   });
 
   it('POST /api/conversations/:id/skills/import returns 404 for missing source', async () => {
@@ -432,7 +432,7 @@ describe('HTTP API Server', () => {
       .send({ source: 'skills/missing', name: 'missing' });
 
     expect(res.status).toBe(404);
-    expect(res.body.error).toContain('Source not found');
+    expect(res.body.error.message).toContain('Source not found');
   });
 
   it('POST /api/conversations/:id/skills/import returns 413 for quota exceeded', async () => {
@@ -446,7 +446,7 @@ describe('HTTP API Server', () => {
       .send({ source: 'skills/huge', name: 'huge' });
 
     expect(res.status).toBe(413);
-    expect(res.body.error).toContain('Workspace quota exceeded');
+    expect(res.body.error.message).toContain('Workspace quota exceeded');
   });
 
   it('POST /api/conversations/:id/skills/import returns 400 for invalid name', async () => {
@@ -457,7 +457,7 @@ describe('HTTP API Server', () => {
       .send({ source: 'skills/web-search', name: 'foo/bar' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid skill name');
+    expect(res.body.error.message).toBe('Invalid skill name');
     expect(mockSkillService.importSkill).not.toHaveBeenCalled();
   });
 
@@ -472,7 +472,7 @@ describe('HTTP API Server', () => {
       .send({ source: 'skills_evil/web-search', name: 'web-search' });
 
     expect(res.status).toBe(403);
-    expect(res.body.error).toContain('Source path not allowed');
+    expect(res.body.error.message).toContain('Source path not allowed');
   });
 
   it('POST /api/conversations/:id/skills/import returns 403 for absolute external path', async () => {
@@ -486,7 +486,7 @@ describe('HTTP API Server', () => {
       .send({ source: 'C:\\temp\\external-skill', name: 'ext' });
 
     expect(res.status).toBe(403);
-    expect(res.body.error).toContain('Source path not allowed');
+    expect(res.body.error.message).toContain('Source path not allowed');
   });
 
   it('GET /api/conversations/:id/skills/:name returns 400 for invalid name', async () => {
@@ -495,7 +495,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).get('/api/conversations/conv-001/skills/foo%5Cbar');
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid skill name');
+    expect(res.body.error.message).toBe('Invalid skill name');
     expect(mockSkillService.readSkill).not.toHaveBeenCalled();
   });
 
@@ -505,7 +505,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).get('/api/conversations/conv-001/skills/foo%5Cbar/info');
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid skill name');
+    expect(res.body.error.message).toBe('Invalid skill name');
     expect(mockSkillService.getSkillInfo).not.toHaveBeenCalled();
   });
 
@@ -515,7 +515,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).delete('/api/conversations/conv-001/skills/foo%5Cbar');
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid skill name');
+    expect(res.body.error.message).toBe('Invalid skill name');
     expect(mockSkillService.deleteSkill).not.toHaveBeenCalled();
   });
 
@@ -528,7 +528,7 @@ describe('HTTP API Server', () => {
       .send(Buffer.from('PK'));
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid skill name');
+    expect(res.body.error.message).toBe('Invalid skill name');
     expect(mockSkillService.uploadSkill).not.toHaveBeenCalled();
   });
 
@@ -541,7 +541,7 @@ describe('HTTP API Server', () => {
       .send(Buffer.from('PK'));
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Missing name query parameter');
+    expect(res.body.error.message).toBe('Missing name query parameter');
   });
 
   it('POST /api/conversations/:id/skills/upload returns 400 for missing SKILL.md', async () => {
@@ -559,7 +559,7 @@ describe('HTTP API Server', () => {
       .send(zip.toBuffer());
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Skill archive must contain SKILL.md at the root');
+    expect(res.body.error.message).toBe('Skill archive must contain SKILL.md at the root');
     expect(mockSkillService.uploadSkill).toHaveBeenCalledWith('conv-001', 'bad-skill', expect.any(Buffer));
   });
 
@@ -579,7 +579,7 @@ describe('HTTP API Server', () => {
       .send(zip.toBuffer());
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Invalid zip entry path');
+    expect(res.body.error.message).toContain('Invalid zip entry path');
     expect(mockSkillService.uploadSkill).toHaveBeenCalledWith('conv-001', 'slip-skill', expect.any(Buffer));
   });
 
@@ -598,7 +598,7 @@ describe('HTTP API Server', () => {
       .send(zip.toBuffer());
 
     expect(res.status).toBe(413);
-    expect(res.body.error).toBe('Skill archive exceeds workspace quota');
+    expect(res.body.error.message).toBe('Skill archive exceeds workspace quota');
     expect(mockSkillService.uploadSkill).toHaveBeenCalledWith('conv-001', 'quota-skill', expect.any(Buffer));
   });
 
@@ -655,7 +655,7 @@ describe('HTTP API Server', () => {
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('content');
+    expect(res.body.error.message).toContain('content');
   });
 
   it('GET /api/conversations/:id/agent/config reads AGENTS.md', async () => {
@@ -748,7 +748,7 @@ describe('HTTP API Server', () => {
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('text');
+    expect(res.body.error.message).toContain('text');
   });
 
   it('POST /api/conversations/:id/message returns 409 when not running', async () => {
@@ -759,7 +759,7 @@ describe('HTTP API Server', () => {
       .send({ text: 'Hi' });
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toContain('not running');
+    expect(res.body.error.message).toContain('not running');
   });
 
   it('POST /api/conversations/:id/message returns 500 when instance reference lost', async () => {
@@ -771,7 +771,7 @@ describe('HTTP API Server', () => {
       .send({ text: 'Hi' });
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain('Instance reference lost');
+    expect(res.body.error.message).toContain('Instance reference lost');
   });
 
   it('closeWebSockets does not throw', () => {
@@ -794,7 +794,7 @@ describe('HTTP API Server', () => {
       .send({ id: 'conv-001' });
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toContain('already exists');
+    expect(res.body.error.message).toContain('already exists');
   });
 
   // ─── Stop ──────────────────────────────────────────────
@@ -816,7 +816,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/stop');
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toContain('Cannot stop');
+    expect(res.body.error.message).toContain('Cannot stop');
   });
 
   it('POST /api/conversations/:id/stop returns 500 on instance destruction failure', async () => {
@@ -826,7 +826,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/stop');
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain('kill failed');
+    expect(res.body.error.message).toContain('kill failed');
   });
 
   // ─── Restart ───────────────────────────────────────────
@@ -858,7 +858,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/restart');
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toContain('Cannot restart');
+    expect(res.body.error.message).toContain('Cannot restart');
   });
 
   it('POST /api/conversations/:id/restart returns 500 on instance creation failure', async () => {
@@ -868,7 +868,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/restart');
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain('port busy');
+    expect(res.body.error.message).toContain('port busy');
   });
 
   it('POST /api/conversations/:id/restart uses restartInstance for Docker runtime', async () => {
@@ -915,7 +915,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).get('/api/conversations/conv-001');
 
     expect(res.status).toBe(404);
-    expect(res.body.error).toContain('Conversation not found');
+    expect(res.body.error.message).toContain('Conversation not found');
   });
 
   // ─── Events ────────────────────────────────────────────
@@ -968,7 +968,7 @@ describe('HTTP API Server', () => {
       .send({ model: 'test' });
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toContain('write failed');
+    expect(res.body.error.message).toContain('write failed');
   });
 
   // ─── Agents ────────────────────────────────────────────
@@ -988,7 +988,7 @@ describe('HTTP API Server', () => {
       .send({ name: 'designer' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Missing name or content');
+    expect(res.body.error.message).toContain('Missing name or content');
   });
 
   it('PUT /api/conversations/:id/agents returns 500 on write error', async () => {
@@ -1060,7 +1060,7 @@ describe('HTTP API Server', () => {
       .send({ path: 'test.txt' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Missing path or content');
+    expect(res.body.error.message).toContain('Missing path or content');
   });
 
   it('PUT /api/conversations/:id/files returns 500 on write error', async () => {
@@ -1090,7 +1090,7 @@ describe('HTTP API Server', () => {
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Missing path');
+    expect(res.body.error.message).toContain('Missing path');
   });
 
   it('POST /api/conversations/:id/files/read returns 404 when file not found', async () => {
@@ -1118,7 +1118,7 @@ describe('HTTP API Server', () => {
       .send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Missing path');
+    expect(res.body.error.message).toContain('Missing path');
   });
 
   it('POST /api/conversations/:id/files/delete returns 500 on error', async () => {
@@ -1146,7 +1146,7 @@ describe('HTTP API Server', () => {
       .send({ source: 'src.txt' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Missing source or dest');
+    expect(res.body.error.message).toContain('Missing source or dest');
   });
 
   it('POST /api/conversations/:id/files/copy returns 500 on error', async () => {
@@ -1178,7 +1178,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/message').send({ text: 'hi' });
 
     expect(res.status).toBe(404);
-    expect(res.body.error).toContain('Conversation not found');
+    expect(res.body.error.message).toContain('Conversation not found');
   });
 
   it('ensureRunning returns 409 when not running for message endpoint', async () => {
@@ -1195,7 +1195,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).post('/api/conversations/conv-001/message').send({ text: 'hi' });
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toContain('not ready');
+    expect(res.body.error.message).toContain('not ready');
   });
 
   // ─── Session endpoints ─────────────────────────────────

@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(errors): add AppError class with statusCode, code, and structured error responses (#59)
+- feat(errors): add error code constants (ErrorCodes) for all HTTP and WS error types (#59)
 - feat(agent-runtime): add AgentRuntime interface with spawn/kill/restart/cleanupOrphans (#57)
 - feat(agent-runtime): add RuntimeRegistry for runtime lookup by agentType (#57)
 - feat(agent-runtime): add OpenCodeRuntime with Docker container lifecycle (#57)
 
 ### Changed
 
+- feat(http-api): change REST error format from `{ error: "msg" }` to `{ error: { code, message } }` (#59)
+- feat(websocket): enrich JSON-RPC errors with `data.code` when error is AppError (#59)
+- docs: update error format documentation in API.md (#59)
 - refactor(orchestrator): replace flat `opencodeBinary`/`docker` fields with `runtime`+`runtimeConfig` in OrchestratorConfig (#57)
 - refactor(orchestrator): InstanceManager uses RuntimeRegistry exclusively, no config.runtime conditionals (#57)
 - refactor(orchestrator): config shape consolidated — runtime config nested under `runtimeConfig` (#57)

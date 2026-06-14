@@ -16,6 +16,7 @@ import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
 import { openapiSpec } from './openapi.js';
+import { ErrorCodes, isAppError, toHttpErrorResponse } from '../utils/errors.js';
 
 export interface HttpServer {
   server: Server;
@@ -69,9 +70,22 @@ export function createHttpServer(
     return req.params.id;
   }
 
+  function sendError(res: Response, status: number, code: string, message: string): void {
+    res.status(status).json({ error: { code, message } });
+  }
+
+  function handleControllerError(res: Response, err: unknown, defaultStatus = 500): void {
+    if (isAppError(err)) {
+      sendError(res, err.statusCode, err.code, err.message);
+    } else {
+      const message = err instanceof Error ? err.message : String(err);
+      sendError(res, defaultStatus, ErrorCodes.INTERNAL_ERROR, message);
+    }
+  }
+
   function ensureConversation(res: Response, id: string): boolean {
     if (!conversationState.has(id)) {
-      res.status(404).json({ error: 'Conversation not found' });
+      sendError(res, 404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
       return false;
     }
     return true;
@@ -125,13 +139,13 @@ export function createHttpServer(
     try {
       const id = req.body.id ?? generateId();
       if (conversationState.has(id)) {
-        res.status(409).json({ error: `Conversation already exists: ${id}` });
+        sendError(res, 409, ErrorCodes.CONVERSATION_ALREADY_EXISTS, `Conversation already exists: ${id}`);
         return;
       }
 
       const agentType = typeof req.body.agentType === 'string' ? req.body.agentType : orchestratorConfig.agentType;
       if (!runtimeRegistry.get(agentType)) {
-        res.status(400).json({ error: `Unknown agent type: ${agentType}. Available: ${runtimeRegistry.list().join(', ')}` });
+        sendError(res, 400, ErrorCodes.UNKNOWN_AGENT_TYPE, `Unknown agent type: ${agentType}. Available: ${runtimeRegistry.list().join(', ')}`);
         return;
       }
 
@@ -148,7 +162,7 @@ export function createHttpServer(
       });
     } catch (err) {
       logger.error('Failed to create conversation:', err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -159,7 +173,7 @@ export function createHttpServer(
 
     const state = conversationState.get(id)!;
     if (state.status === 'running' || state.status === 'starting') {
-      res.status(409).json({ error: 'Conversation is already starting or running' });
+      sendError(res, 409, ErrorCodes.CONVERSATION_ALREADY_RUNNING, 'Conversation is already starting or running');
       return;
     }
 
@@ -189,7 +203,7 @@ export function createHttpServer(
     } catch (err) {
       conversationState.transition(id, 'error', { error: (err as Error).message });
       logger.error(`Failed to start conversation ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -200,7 +214,7 @@ export function createHttpServer(
 
     const state = conversationState.get(id)!;
     if (state.status !== 'running' && state.status !== 'starting' && state.status !== 'error') {
-      res.status(409).json({ error: `Cannot stop conversation in status: ${state.status}` });
+      sendError(res, 409, ErrorCodes.CANNOT_STOP, `Cannot stop conversation in status: ${state.status}`);
       return;
     }
 
@@ -211,7 +225,7 @@ export function createHttpServer(
       res.json({ id, status: 'stopped' });
     } catch (err) {
       logger.error(`Failed to stop conversation ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -223,7 +237,7 @@ export function createHttpServer(
     const state = conversationState.get(id)!;
     const previousStatus = state.status;
     if (previousStatus !== 'running' && previousStatus !== 'stopped' && previousStatus !== 'error') {
-      res.status(409).json({ error: `Cannot restart conversation in status: ${previousStatus}` });
+      sendError(res, 409, ErrorCodes.CANNOT_RESTART, `Cannot restart conversation in status: ${previousStatus}`);
       return;
     }
 
@@ -283,7 +297,7 @@ export function createHttpServer(
     } catch (err) {
       conversationState.transition(id, 'error', { error: (err as Error).message });
       logger.error(`Failed to restart conversation ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -293,13 +307,11 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      // Always try to destroy the instance (no-op if none running)
       try {
         await instanceManager.destroyInstance(id);
       } catch {
         // ignore if no instance or already cleaned up
       }
-      // Always try to remove the workspace (no-op if already gone)
       try {
         workspaceFactory.destroy(id);
       } catch (wsErr) {
@@ -310,7 +322,7 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to delete conversation ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -370,7 +382,7 @@ export function createHttpServer(
       const config = configService.readConfig(id);
       res.json(config);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -381,14 +393,14 @@ export function createHttpServer(
     try {
       const config = req.body;
       if (typeof config !== 'object' || config === null) {
-        res.status(400).json({ error: 'Request body must be a JSON object' });
+        sendError(res, 400, ErrorCodes.INVALID_REQUEST_BODY, 'Request body must be a JSON object');
         return;
       }
       configService.writeConfig(id, config);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to write config for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -399,7 +411,7 @@ export function createHttpServer(
     try {
       const patch = req.body;
       if (typeof patch !== 'object' || patch === null) {
-        res.status(400).json({ error: 'Request body must be a JSON object' });
+        sendError(res, 400, ErrorCodes.INVALID_REQUEST_BODY, 'Request body must be a JSON object');
         return;
       }
 
@@ -407,7 +419,7 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to patch config for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -421,7 +433,7 @@ export function createHttpServer(
     const content = typeof req.body.content === 'string' ? req.body.content : undefined;
 
     if (!name || content === undefined) {
-      res.status(400).json({ error: 'Missing name or content' });
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing name or content');
       return;
     }
 
@@ -430,7 +442,7 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to register agent ${name} for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -442,7 +454,7 @@ export function createHttpServer(
       const result = await agentService.listAgentsWithRuntime(id);
       res.json(result);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -454,7 +466,7 @@ export function createHttpServer(
       const content = agentService.readAgent(id, req.params.name);
       res.json({ name: req.params.name, content });
     } catch (err) {
-      res.status(404).json({ error: (err as Error).message });
+      handleControllerError(res, err, 404);
     }
   });
 
@@ -466,7 +478,7 @@ export function createHttpServer(
       agentService.deleteAgent(id, req.params.name);
       res.status(204).send();
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -478,7 +490,7 @@ export function createHttpServer(
 
     const content = typeof req.body.content === 'string' ? req.body.content : undefined;
     if (content === undefined) {
-      res.status(400).json({ error: 'Missing content' });
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing content');
       return;
     }
 
@@ -487,7 +499,7 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to write AGENTS.md for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -499,7 +511,7 @@ export function createHttpServer(
       const content = agentService.readAgentsMd(id);
       res.json({ content });
     } catch (err) {
-      res.status(404).json({ error: (err as Error).message });
+      handleControllerError(res, err, 404);
     }
   });
 
@@ -512,7 +524,7 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to delete AGENTS.md for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -526,7 +538,7 @@ export function createHttpServer(
     const content = typeof req.body.content === 'string' ? req.body.content : undefined;
 
     if (path === undefined || content === undefined) {
-      res.status(400).json({ error: 'Missing path or content' });
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing path or content');
       return;
     }
 
@@ -536,11 +548,15 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       const msg = (err as Error).message;
-      if (msg.includes('path traversal') || msg.includes('Invalid path')) {
-        res.status(400).json({ error: msg });
+      if (isAppError(err)) {
+        sendError(res, err.statusCode, err.code, err.message);
+      } else if (msg.includes('path traversal')) {
+        sendError(res, 400, ErrorCodes.PATH_TRAVERSAL, msg);
+      } else if (msg.includes('Invalid path')) {
+        sendError(res, 400, ErrorCodes.INVALID_PATH, msg);
       } else {
         logger.error(`Failed to write file ${path} for ${id}:`, err);
-        res.status(500).json({ error: msg });
+        handleControllerError(res, err);
       }
     }
   });
@@ -551,7 +567,7 @@ export function createHttpServer(
 
     const path = typeof req.body.path === 'string' ? req.body.path : undefined;
     if (!path) {
-      res.status(400).json({ error: 'Missing path' });
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing path');
       return;
     }
 
@@ -559,7 +575,7 @@ export function createHttpServer(
       const content = workspaceFactory.readFile(id, path);
       res.json({ path, content });
     } catch (err) {
-      res.status(404).json({ error: (err as Error).message });
+      handleControllerError(res, err, 404);
     }
   });
 
@@ -569,7 +585,7 @@ export function createHttpServer(
 
     const path = typeof req.body.path === 'string' ? req.body.path : undefined;
     if (!path) {
-      res.status(400).json({ error: 'Missing path' });
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing path');
       return;
     }
 
@@ -578,7 +594,7 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to delete file ${path} for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -590,7 +606,7 @@ export function createHttpServer(
     const dest = typeof req.body.dest === 'string' ? req.body.dest : undefined;
 
     if (!source || !dest) {
-      res.status(400).json({ error: 'Missing source or dest' });
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing source or dest');
       return;
     }
 
@@ -600,7 +616,7 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to copy file for ${id}:`, err);
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -614,7 +630,7 @@ export function createHttpServer(
       const files = workspaceFactory.listFiles(id, path);
       res.json({ path: path || '.', files });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -624,7 +640,7 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return false;
     const state = conversationState.get(id)!;
     if (state.status !== 'running') {
-      res.status(409).json({ error: `Conversation is not running (status: ${state.status})` });
+      sendError(res, 409, ErrorCodes.CONVERSATION_NOT_RUNNING, `Conversation is not running (status: ${state.status})`);
       return false;
     }
     return true;
@@ -634,7 +650,7 @@ export function createHttpServer(
     if (!ensureRunning(res, id)) return false;
     const state = conversationState.get(id)!;
     if (!state.ready) {
-      res.status(409).json({ error: 'Instance is not ready yet. OpenCode is still initializing.' });
+      sendError(res, 409, ErrorCodes.INSTANCE_NOT_READY, 'Instance is not ready yet. OpenCode is still initializing.');
       return false;
     }
     return true;
@@ -647,7 +663,7 @@ export function createHttpServer(
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
       const session = await instance.client.createSession({
@@ -656,7 +672,7 @@ export function createHttpServer(
       });
       res.status(201).json(session);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -667,13 +683,13 @@ export function createHttpServer(
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
       const sessions = await instance.client.listSessions();
       res.json(sessions);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -684,13 +700,13 @@ export function createHttpServer(
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
       const session = await instance.client.getSession(req.params.sid);
       res.json(session);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -701,13 +717,13 @@ export function createHttpServer(
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
       const children = await instance.client.getSessionChildren(req.params.sid);
       res.json(children);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -718,13 +734,13 @@ export function createHttpServer(
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
       const session = await instance.client.forkSession(req.params.sid, req.body.messageID);
       res.status(201).json(session);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -735,13 +751,13 @@ export function createHttpServer(
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
       await instance.client.deleteSession(req.params.sid);
       res.status(204).send();
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -752,14 +768,14 @@ export function createHttpServer(
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
       const messages = await instance.client.listMessages(req.params.sid, limit);
       res.json(messages);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -772,13 +788,13 @@ export function createHttpServer(
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
       const providers = await instance.client.listProviders();
       res.json(providers);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -790,14 +806,14 @@ export function createHttpServer(
 
     const { text, model: rawModel, agent: rawAgent } = req.body as { text?: string; model?: string; agent?: string };
     if (!text || typeof text !== 'string') {
-      res.status(400).json({ error: 'Missing or invalid text field' });
+      sendError(res, 400, ErrorCodes.INVALID_TEXT, 'Missing or invalid text field');
       return;
     }
 
     try {
       const instance = instanceManager.getInstance(id);
       if (!instance) {
-        res.status(500).json({ error: 'Instance reference lost' });
+        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
         return;
       }
 
@@ -812,7 +828,7 @@ export function createHttpServer(
       const agent = typeof rawAgent === 'string' ? rawAgent : undefined;
 
       if (!instance.sessionId) {
-        res.status(503).json({ error: 'Session not ready yet' });
+        sendError(res, 503, ErrorCodes.SESSION_NOT_READY, 'Session not ready yet');
         return;
       }
 
@@ -835,7 +851,7 @@ export function createHttpServer(
       });
       res.json({ messageId: response.info.id, text: texts, parts: response.parts });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
@@ -848,14 +864,14 @@ export function createHttpServer(
 
     const rawName = typeof req.query.name === 'string' ? req.query.name : undefined;
     if (!rawName) {
-      res.status(400).json({ error: 'Missing name query parameter' });
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing name query parameter');
       return;
     }
 
     try {
       validateSkillName(rawName);
     } catch {
-      res.status(400).json({ error: 'Invalid skill name' });
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
       return;
     }
 
@@ -865,14 +881,16 @@ export function createHttpServer(
     } catch (err) {
       const message = (err as Error).message;
       logger.error(`Failed to upload skill for ${id}:`, err);
-      if (message.includes('Skill archive must contain SKILL.md')) {
-        res.status(400).json({ error: message });
+      if (isAppError(err)) {
+        sendError(res, err.statusCode, err.code, err.message);
+      } else if (message.includes('Skill archive must contain SKILL.md')) {
+        sendError(res, 400, ErrorCodes.SKILL_INVALID_ARCHIVE, message);
       } else if (message.includes('Invalid zip entry path')) {
-        res.status(400).json({ error: message });
+        sendError(res, 400, ErrorCodes.SKILL_INVALID_ARCHIVE, message);
       } else if (message.includes('Workspace quota exceeded')) {
-        res.status(413).json({ error: 'Skill archive exceeds workspace quota' });
+        sendError(res, 413, ErrorCodes.SKILL_QUOTA_EXCEEDED, 'Skill archive exceeds workspace quota');
       } else {
-        res.status(500).json({ error: message });
+        sendError(res, 500, ErrorCodes.INTERNAL_ERROR, message);
       }
     }
   });
@@ -886,14 +904,14 @@ export function createHttpServer(
     const name = typeof req.body.name === 'string' ? req.body.name : undefined;
 
     if (!source || !name) {
-      res.status(400).json({ error: 'Missing source or name' });
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing source or name');
       return;
     }
 
     try {
       validateSkillName(name);
     } catch {
-      res.status(400).json({ error: 'Invalid skill name' });
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
       return;
     }
 
@@ -903,14 +921,16 @@ export function createHttpServer(
     } catch (err) {
       const message = (err as Error).message;
       logger.error(`Failed to import skill for ${id}:`, err);
-      if (message.includes('Source path not allowed')) {
-        res.status(403).json({ error: message });
+      if (isAppError(err)) {
+        sendError(res, err.statusCode, err.code, err.message);
+      } else if (message.includes('Source path not allowed')) {
+        sendError(res, 403, ErrorCodes.SOURCE_NOT_ALLOWED, message);
       } else if (message.includes('Source not found') || message.includes('Source must be a directory')) {
-        res.status(404).json({ error: message });
+        sendError(res, 404, ErrorCodes.SOURCE_NOT_FOUND, message);
       } else if (message.includes('Workspace quota exceeded')) {
-        res.status(413).json({ error: message });
+        sendError(res, 413, ErrorCodes.WORKSPACE_QUOTA_EXCEEDED, message);
       } else {
-        res.status(500).json({ error: message });
+        sendError(res, 500, ErrorCodes.INTERNAL_ERROR, message);
       }
     }
   });
@@ -924,11 +944,10 @@ export function createHttpServer(
       const skills = skillService.listSkills(id);
       res.json(skills);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      handleControllerError(res, err);
     }
   });
 
-  // Read skill content (SKILL.md)
   app.get('/api/conversations/:id/skills/:name', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
@@ -936,7 +955,7 @@ export function createHttpServer(
     try {
       validateSkillName(req.params.name);
     } catch {
-      res.status(400).json({ error: 'Invalid skill name' });
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
       return;
     }
 
@@ -944,11 +963,10 @@ export function createHttpServer(
       const content = skillService.readSkill(id, req.params.name);
       res.json({ name: req.params.name, content });
     } catch (err) {
-      res.status(404).json({ error: (err as Error).message });
+      handleControllerError(res, err, 404);
     }
   });
 
-  // Get skill info (files, size, hash)
   app.get('/api/conversations/:id/skills/:name/info', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
@@ -956,7 +974,7 @@ export function createHttpServer(
     try {
       validateSkillName(req.params.name);
     } catch {
-      res.status(400).json({ error: 'Invalid skill name' });
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
       return;
     }
 
@@ -964,11 +982,10 @@ export function createHttpServer(
       const info = skillService.getSkillInfo(id, req.params.name);
       res.json(info);
     } catch (err) {
-      res.status(404).json({ error: (err as Error).message });
+      handleControllerError(res, err, 404);
     }
   });
 
-  // Delete skill
   app.delete('/api/conversations/:id/skills/:name', (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
@@ -976,7 +993,7 @@ export function createHttpServer(
     try {
       validateSkillName(req.params.name);
     } catch {
-      res.status(400).json({ error: 'Invalid skill name' });
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
       return;
     }
 
@@ -985,10 +1002,12 @@ export function createHttpServer(
       res.status(204).send();
     } catch (err) {
       const message = (err as Error).message;
-      if (message.includes('Skill not found')) {
-        res.status(404).json({ error: message });
+      if (isAppError(err)) {
+        sendError(res, err.statusCode, err.code, err.message);
+      } else if (message.includes('Skill not found')) {
+        sendError(res, 404, ErrorCodes.SKILL_NOT_FOUND, message);
       } else {
-        res.status(500).json({ error: message });
+        sendError(res, 500, ErrorCodes.INTERNAL_ERROR, message);
       }
     }
   });
@@ -996,8 +1015,8 @@ export function createHttpServer(
   // Global error handler
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error('HTTP error:', err);
-    const status = (err as any).status ?? (err as any).statusCode ?? 500;
-    res.status(status).json({ error: err.message });
+    const status = isAppError(err) ? err.statusCode : (err as any).status ?? (err as any).statusCode ?? 500;
+    res.status(status).json(toHttpErrorResponse(err));
   });
 
   // ─── HTTP & WebSocket Server ───────────────────────────
