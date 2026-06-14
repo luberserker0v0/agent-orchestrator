@@ -1,5 +1,6 @@
 import type { WebSocket } from 'ws';
 import { logger } from '../utils/logger.js';
+import { isAppError } from '../utils/errors.js';
 
 export interface JSONRPCRequest {
   jsonrpc: '2.0';
@@ -91,7 +92,8 @@ export class WSConnection {
       const message = err instanceof Error ? err.message : String(err);
       logger.error(`[WS ${this.conversationId}] method ${req.method} failed:`, message);
       if (req.id !== undefined && req.id !== null) {
-        this.sendError(req.id, -32000, message);
+        const data = isAppError(err) ? { code: err.code } : undefined;
+        this.sendError(req.id, -32000, message, data);
       }
     }
   }
@@ -108,8 +110,10 @@ export class WSConnection {
     }
   }
 
-  private sendError(id: number | string | null | undefined, code: number, message: string): void {
-    this.send({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
+  private sendError(id: number | string | null | undefined, code: number, message: string, data?: { code: string }): void {
+    const error: { code: number; message: string; data?: { code: string } } = { code, message };
+    if (data) error.data = data;
+    this.send({ jsonrpc: '2.0', id: id ?? null, error });
   }
 
   private startHeartbeat(): void {

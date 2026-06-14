@@ -1908,10 +1908,40 @@ You are a senior UI/UX designer. Your responsibilities include:
 | `413` | Payload Too Large（Skill 壓縮包未壓縮大小超過 50 MB 配額） |
 | `500` | Server Error |
 
-**REST 錯誤回應格式**：
+**REST 錯誤回應格式**（v2 — 結構化錯誤）：
 ```json
-{ "error": "錯誤訊息" }
+{ "error": { "code": "ERROR_CODE", "message": "錯誤訊息" } }
 ```
+
+**常見錯誤碼**：
+
+| 錯誤碼 | HTTP 狀態 | 說明 |
+|--------|-----------|------|
+| `CONVERSATION_NOT_FOUND` | 404 | 指定的對話不存在 |
+| `CONVERSATION_ALREADY_EXISTS` | 409 | 對話已存在（建立時） |
+| `CONVERSATION_ALREADY_RUNNING` | 409 | 對話已在運行中（啟動時） |
+| `CONVERSATION_NOT_RUNNING` | 409 | 對話未在運行狀態 |
+| `CANNOT_STOP` | 409 | 當前狀態不允許停止 |
+| `CANNOT_RESTART` | 409 | 當前狀態不允許重啟 |
+| `UNKNOWN_AGENT_TYPE` | 400 | 指定的 agent type 未註冊 |
+| `MISSING_FIELD` | 400 | 缺少必要欄位 |
+| `INVALID_REQUEST_BODY` | 400 | Request body 格式不正確 |
+| `INVALID_SKILL_NAME` | 400 | Skill 名稱格式無效 |
+| `INSTANCE_NOT_READY` | 409 | OpenCode 實例尚未就緒 |
+| `INSTANCE_REFERENCE_LOST` | 500 | 內部實例引用遺失 |
+| `SESSION_NOT_READY` | 503 | Session 尚未就緒 |
+| `PATH_TRAVERSAL` | 400 | 路徑穿越攻擊偵測 |
+| `INVALID_PATH` | 400 | 無效的路徑 |
+| `SKILL_INVALID_ARCHIVE` | 400 | Skill 壓縮包結構錯誤 |
+| `SKILL_QUOTA_EXCEEDED` | 413 | Skill 超過配額 |
+| `SOURCE_NOT_ALLOWED` | 403 | 複製來源不允許 |
+| `SOURCE_NOT_FOUND` | 404 | 複製來源不存在 |
+| `SKILL_NOT_FOUND` | 404 | Skill 不存在 |
+| `FILE_NOT_FOUND` | 404 | 檔案不存在 |
+| `AGENT_NOT_FOUND` | 404 | Agent 不存在 |
+| `WORKSPACE_QUOTA_EXCEEDED` | 413 | Workspace 配額超額 |
+| `INVALID_TEXT` | 400 | 無效的 text 欄位 |
+| `INTERNAL_ERROR` | 500 | 內部伺服器錯誤（未預期） |
 
 ### WebSocket JSON-RPC 錯誤
 
@@ -1919,15 +1949,21 @@ You are a senior UI/UX designer. Your responsibilities include:
 |--------|------|
 | `-32700` | Parse error：無法解析 JSON |
 | `-32600` | Invalid Request：jsonrpc 版本不對或缺少 method |
-| `-32000` | Server error：未知的 WebSocket method（回傳 `-32000`） |
-| `-32000` | Server error：一般伺服器錯誤 |
-| `-32001` | Invalid state：對話狀態不允許此操作（如未運行時呼叫 `message.send`） |
+| `-32000` | Server error：所有應用層錯誤（含狀態錯誤、缺少參數、內部錯誤） |
+
+所有應用層錯誤（validation、state、internal）統一使用 `-32000`，並在 `data.code` 中提供結構化錯誤碼：
 
 **WebSocket JSON-RPC 錯誤回應格式**：
 ```json
 {
   "jsonrpc": "2.0",
   "id": 1,
-  "error": { "code": -32001, "message": "Conversation not running" }
+  "error": {
+    "code": -32000,
+    "message": "Conversation not running (status: stopped)",
+    "data": { "code": "CONVERSATION_NOT_RUNNING" }
+  }
 }
 ```
+
+`data.code` 的值與 REST HTTP 錯誤碼共用同一組常數（見上方表格）。
