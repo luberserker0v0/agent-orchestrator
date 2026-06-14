@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(agent-runtime): add AgentRuntime interface with spawn/kill/restart/cleanupOrphans (#57)
+- feat(agent-runtime): add RuntimeRegistry for runtime lookup by agentType (#57)
+- feat(agent-runtime): add OpenCodeRuntime with Docker container lifecycle (#57)
+
+### Changed
+
+- refactor(orchestrator): replace flat `opencodeBinary`/`docker` fields with `runtime`+`runtimeConfig` in OrchestratorConfig (#57)
+- refactor(orchestrator): InstanceManager uses RuntimeRegistry exclusively, no config.runtime conditionals (#57)
+- refactor(orchestrator): config shape consolidated — runtime config nested under `runtimeConfig` (#57)
+
+### Added
+
 - feat(api): add GET /api/conversations/:id/providers endpoint (#54)
 - feat(api): add PATCH /api/conversations/:id/config endpoint (#54)
 - feat(api): enhance GET /api/conversations/:id/agents with runtime data (#54)

@@ -168,6 +168,11 @@ Example:
 src/
   config-loader.ts           # Configuration loading with env overrides
   index.ts                   # Application entry point
+  agent-runtime/
+    types.ts                 # AgentRuntime interface, SpawnResult type
+    registry.ts              # RuntimeRegistry — runtime lookup by agentType
+    runtimes/
+      opencode.ts            # OpenCodeRuntime — Docker container lifecycle (spawn, kill, restart, cleanupOrphans)
   http-api/
     server.ts                # Express HTTP server with conversation lifecycle, config, agents, files, sessions, events endpoints
   orchestrator/
@@ -228,6 +233,9 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `idleSweepIntervalMs` | integer | 60000 | How often the background sweep checks for idle instances |
 | `portRange.start` | integer | 30000 | First port in the dynamic allocation range |
 | `portRange.end` | integer | 30100 | Last port in the dynamic allocation range |
+| `runtime` | string | 'direct' | Runtime mode: `direct` (spawn binary) or `docker` (Docker container) |
+| `runtimeConfig` | object | `{ binary: 'opencode' }` | Runtime-specific configuration (`{ binary }` for direct; `{ binary, docker: { image, containerPort } }` for docker) |
+| `agentType` | string | 'opencode' | Key used to look up the runtime implementation in RuntimeRegistry |
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
 

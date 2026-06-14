@@ -79,7 +79,8 @@ AgentOrchestrator
   │ 2. InstanceManager.createInstance(id)
   │    │ 2a. 若 workspace 已存在 → 跳過 create，直接使用
   │    │ 2b. PortPool.allocate() → 動態端口
-  │    │ 2c. spawn("opencode serve --port 30000", cwd=workspace/{id}/)
+  │    │ 2c. runtimeRegistry.getOrThrow(agentType).spawn(id, port, workspacePath, agentType)
+  │    │     → 啟動 OpenCode（direct spawn 或 Docker 容器）
   │    │ 2d. 輪詢 GET /global/health 直到通過
   │    │ 2e. POST /session → 建立初始 Session
   │    ▼
@@ -123,7 +124,7 @@ Client → DELETE /api/conversations/{id}
   ▼
 AgentOrchestrator
   │ 1. InstanceManager.destroyInstance(id) (若 running)
-  │    │ 1a. treeKill(proc.pid) → 終止 OpenCode 進程樹
+  │    │ 1a. runtime.kill(id) → 終止 OpenCode（direct 模式 tree-kill，docker 模式 kill container）
   │    │ 1b. PortPool.release(port)
   │ 2. ConversationState.transition(id, 'destroyed')
   │    → emit 'conversation.destroyed'
@@ -217,21 +218,49 @@ AgentOrchestrator
 
 ---
 
+### `src/agent-runtime/`
+
+提供可插拔的 Runtime 抽象層，將 `InstanceManager` 與具體的進程/容器管理邏輯解耦。
+
+**`src/agent-runtime/types.ts`** — `AgentRuntime` 介面與 `SpawnResult` 型別：
+
+```ts
+interface AgentRuntime {
+  spawn(id: string, port: number, workspacePath: string, agentType: string): Promise<SpawnResult>;
+  kill(id: string): Promise<void>;
+  restart(id: string, port: number, workspacePath: string): Promise<SpawnResult>;
+  cleanupOrphans(): Promise<void>;
+}
+
+interface SpawnResult {
+  process?: ChildProcess;   // 本地進程（direct 模式）；可選（如 docker 模式無直接子進程）
+  client: OpenCodeClient;   // HTTP 客戶端（連到該實例）
+  dispose?: () => Promise<void>;  // 清理回呼
+}
+```
+
+**`src/agent-runtime/registry.ts`** — `RuntimeRegistry`：依 `agentType` 字串查詢對應的 Runtime 實作。
+
+**`src/agent-runtime/runtimes/opencode.ts`** — `OpenCodeRuntime`：實作 `AgentRuntime`，支援 direct spawn 與 Docker 容器兩種模式。
+
+---
+
 ### `src/orchestrator/instance-manager.ts`
 
-管理所有 OpenCode 實例的生命周期。
+管理所有 OpenCode 實例的生命周期，透過 `RuntimeRegistry` 呼叫對應的 runtime 實作。
 
 **關鍵類別**：`InstanceManager`
 
 | 方法 | 職責 |
 |------|------|
-| `createInstance(id)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、spawn OpenCode、健康檢查、建立 Session |
+| `createInstance(id)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、透過 runtime.spawn() 啟動 OpenCode、健康檢查、建立 Session |
 | `getInstance(id)` | 取得實例資訊，並更新 `lastUsedAt` |
-| `destroyInstance(id)` | 銷毀實例：kill 進程、釋放端口、**移除 workspace** |
-| `stopInstance(id)` | 停止實例：kill 進程、釋放端口，**保留 workspace** |
-| `restartInstance(id)` | Docker 模式：原地重啟容器（相同 port、workspace），10 秒超時後 fallback 到 kill + respawn |
+| `destroyInstance(id)` | 銷毀實例：呼叫 runtime.kill() 或 dispose()、釋放端口、**移除 workspace** |
+| `stopInstance(id)` | 停止實例：呼叫 runtime.kill()、釋放端口，**保留 workspace** |
+| `restartInstance(id)` | 透過 runtime.restart() 原地重啟（相同 port、workspace），10 秒超時後 fallback 到 kill + respawn |
 | `listInstances()` | 列出所有活躍實例 |
 | `evictLRU()` | 私有方法：達上限時淘汰最久未使用的實例 |
+| `cleanupOrphanContainers()` | 迭代所有已註冊 runtime，呼叫其 cleanupOrphans() |
 
 **`InstanceInfo` 結構**：
 ```ts
@@ -239,7 +268,7 @@ AgentOrchestrator
   id: string;              // conversation ID
   port: number;             // OpenCode 實例端口
   workspacePath: string;    // workspace 路徑
-  process: ChildProcess;    // OpenCode 子進程（direct 模式）
+  process?: ChildProcess;   // OpenCode 子進程（可選，runtime 可能無本地進程）
   client: OpenCodeClient;    // HTTP 客戶端（連到該實例）
   lastUsedAt: number;       // 最後使用時間戳
 }
