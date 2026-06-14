@@ -98,11 +98,10 @@ aor [options]
       "allowDynamicFallback": true
     },
     "runtime": "direct",
-    "opencodeBinary": "opencode",
-    "docker": {
-      "image": "ghcr.io/anomalyco/opencode",
-      "containerPort": 3000
+    "runtimeConfig": {
+      "binary": "opencode"
     },
+    "agentType": "opencode",
     "healthCheck": {
       "retries": 10,
       "intervalMs": 500
@@ -131,9 +130,11 @@ aor [options]
 | `orchestrator.portRange.end` | `number` | 動態端口範圍結束 | `30100` |
 | `orchestrator.portRange.allowDynamicFallback` | `boolean` | 範圍耗盡時是否使用 OS 分配端口 | `true` |
 | `orchestrator.runtime` | `"direct"\|"docker"` | 執行環境（直接執行或 Docker 容器） | `"direct"` |
-| `orchestrator.opencodeBinary` | `string` | OpenCode CLI 指令或絕對路徑（`direct` 模式） | `opencode` |
-| `orchestrator.docker.image` | `string` | Docker 映像名稱（`docker` 模式） | `ghcr.io/anomalyco/opencode` |
-| `orchestrator.docker.containerPort` | `number` | 容器內 OpenCode 監聽端口 | `3000` |
+| `orchestrator.runtimeConfig` | `object` | Runtime 特定設定。`direct`：`{ binary }`；`docker`：`{ binary, docker: { image, containerPort } }` | `{ binary: "opencode" }` |
+| `orchestrator.runtimeConfig.binary` | `string` | OpenCode CLI 指令或絕對路徑（所有 runtime 共用） | `opencode` |
+| `orchestrator.runtimeConfig.docker.image` | `string` | Docker 映像名稱（僅 `docker` 模式） | `ghcr.io/anomalyco/opencode` |
+| `orchestrator.runtimeConfig.docker.containerPort` | `number` | 容器內 OpenCode 監聽端口（僅 `docker` 模式） | `3000` |
+| `orchestrator.agentType` | `string` | Runtime registry 中對應的 agent 類型識別符 | `"opencode"` |
 | `orchestrator.healthCheck.retries` | `number` | 健康檢查重試次數 | `10` |
 | `orchestrator.healthCheck.intervalMs` | `number` | 健康檢查重試間隔 | `500` |
 | `workspace.basePath` | `string` | Workspace 資料夾根目錄 | `./workspace` |
@@ -150,8 +151,8 @@ AGENTORCHESTRATOR_SERVER_PORT=8080
 # 覆寫 orchestrator.maxInstances
 AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
 
-# 覆寫 opencodeBinary 為絕對路徑
-AGENTORCHESTRATOR_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
+# 覆寫 runtimeConfig.binary 為絕對路徑
+AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIME_CONFIG_BINARY=/usr/local/bin/opencode
 ```
 
 ---
@@ -405,7 +406,7 @@ wscat -c ws://127.0.0.1:11697/ws/demo
 
 - **原因**：OpenCode 實例未能在指定重試次數內通過健康檢查。
 - **排查**：
-  - 確認 `opencodeBinary` 路徑正確（`which opencode` 或 `where opencode`）
+  - 確認 `runtimeConfig.binary` 路徑正確（`which opencode` 或 `where opencode`）
   - 確認 `portRange` 內的端口未被占用
   - 檢查 OpenCode 日誌（`~/.local/share/opencode/log/`）
 
@@ -414,13 +415,13 @@ wscat -c ws://127.0.0.1:11697/ws/demo
 若 `opencode` 不在系統 PATH 中，修改 `config/agentorchestrator.json`：
 
 ```json
-"opencodeBinary": "C:\\Users\\<user>\\AppData\\Roaming\\npm\\opencode.cmd"
+"runtimeConfig": { "binary": "C:\\Users\\<user>\\AppData\\Roaming\\npm\\opencode.cmd" }
 ```
 
 或使用環境變數：
 
 ```bash
-AGENTORCHESTRATOR_ORCHESTRATOR_OPENCODE_BINARY=/usr/local/bin/opencode
+AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIME_CONFIG_BINARY=/usr/local/bin/opencode
 ```
 
 ### 3. 端口被占用
