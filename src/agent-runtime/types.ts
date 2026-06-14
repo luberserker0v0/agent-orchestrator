@@ -121,8 +121,9 @@ export interface AgentCapabilities {
 // ─── SpawnResult ───────────────────────────────────────────────────────
 
 export interface SpawnResult {
-  process: ChildProcess;
   client: AgentClient;
+  process?: ChildProcess;
+  dispose?: () => Promise<void>;
 }
 
 // ─── AgentRuntime ──────────────────────────────────────────────────────
@@ -137,5 +138,7 @@ export interface AgentRuntime {
     auth: { username: string; password: string },
     healthCheckConfig: { retries: number; intervalMs: number; clientTimeoutMs: number },
   ): Promise<SpawnResult>;
-  kill(process: ChildProcess, signal?: string | number): Promise<void>;
+  kill(process?: ChildProcess, signal?: string | number): Promise<void>;
+  cleanupOrphans?(): Promise<void>;
+  restart?(id: string, client: AgentClient): Promise<void>;
 }

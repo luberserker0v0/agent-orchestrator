@@ -409,7 +409,7 @@ export class WSRouter {
           const newInstance = await this.instanceManager.createInstance(conversationId, state.agentType);
           this.conversationState.setInstanceInfo(conversationId, { port: newInstance.port });
           this.conversationState.setRunningInstance(conversationId, {
-            process: newInstance.process,
+            process: newInstance.process!,
             client: newInstance.client,
           });
           this.conversationState.transition(conversationId, 'running');
@@ -483,7 +483,7 @@ export class WSRouter {
             newInstance = await this.instanceManager.createInstance(conversationId, state.agentType);
             this.conversationState.setInstanceInfo(conversationId, { port: newInstance.port });
             this.conversationState.setRunningInstance(conversationId, {
-              process: newInstance.process,
+              process: newInstance.process!,
               client: newInstance.client,
             });
           }

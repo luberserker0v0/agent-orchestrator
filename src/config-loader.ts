@@ -18,13 +18,6 @@ export interface HealthCheckConfig {
   intervalMs: number;
 }
 
-export type Runtime = 'direct' | 'docker';
-
-export interface DockerConfig {
-  image: string;
-  containerPort: number;
-}
-
 export interface OrchestratorConfig {
   maxInstances: number;
   idleTimeoutMs: number;
@@ -35,10 +28,9 @@ export interface OrchestratorConfig {
     /** When true (default), PortPool falls back to OS-assigned port when the configured range is exhausted */
     allowDynamicFallback?: boolean;
   };
-  runtime: Runtime;
-  opencodeBinary: string;
+  runtime: string;
+  runtimeConfig: Record<string, unknown>;
   agentType: string;
-  docker?: DockerConfig;
   healthCheck: HealthCheckConfig;
 }
 
@@ -154,22 +146,6 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     throw new Error(`Config validation failed: healthCheck.intervalMs must be positive, got ${orchestrator.healthCheck.intervalMs}`);
   }
 
-  // Runtime validation
-  if (orchestrator.runtime !== 'direct' && orchestrator.runtime !== 'docker') {
-    throw new Error(`Config validation failed: runtime must be "direct" or "docker", got ${orchestrator.runtime}`);
-  }
-  if (orchestrator.runtime === 'docker') {
-    if (!orchestrator.docker) {
-      throw new Error('Config validation failed: docker config is required when runtime is "docker"');
-    }
-    if (!orchestrator.docker.image || typeof orchestrator.docker.image !== 'string') {
-      throw new Error('Config validation failed: docker.image must be a non-empty string');
-    }
-    if (typeof orchestrator.docker.containerPort !== 'number' || !Number.isInteger(orchestrator.docker.containerPort) || orchestrator.docker.containerPort <= 0) {
-      throw new Error(`Config validation failed: docker.containerPort must be a positive integer, got ${orchestrator.docker.containerPort}`);
-    }
-  }
-
   // Workspace validation
   if (!config.workspace.basePath || typeof config.workspace.basePath !== 'string') {
     throw new Error('Config validation failed: workspace.basePath must be a non-empty string');
@@ -217,7 +193,7 @@ export function defaultConfig(): AgentOrchestratorConfig {
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100, allowDynamicFallback: true },
       runtime: 'direct',
-      opencodeBinary: 'opencode',
+      runtimeConfig: { binary: 'opencode' },
       agentType: 'opencode',
       healthCheck: { retries: 10, intervalMs: 500 },
     },

@@ -46,9 +46,8 @@ export async function main(cliArgs?: string[]) {
   // Set up runtime registry
   const runtimeRegistry = new RuntimeRegistry();
   const opencodeRuntime = new OpenCodeRuntime(
-    config.orchestrator.opencodeBinary,
     config.orchestrator.runtime,
-    config.orchestrator.docker,
+    config.orchestrator.runtimeConfig,
   );
   runtimeRegistry.register(opencodeRuntime);
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);

@@ -170,7 +170,7 @@ export function createHttpServer(
       const instance = await instanceManager.createInstance(id, state.agentType);
       conversationState.setInstanceInfo(id, { port: instance.port });
       conversationState.setRunningInstance(id, {
-        process: instance.process,
+        process: instance.process!,
         client: instance.client,
       });
       conversationState.transition(id, 'running');
@@ -262,7 +262,7 @@ export function createHttpServer(
         instance = await instanceManager.createInstance(id, state.agentType);
         conversationState.setInstanceInfo(id, { port: instance.port });
         conversationState.setRunningInstance(id, {
-          process: instance.process,
+          process: instance.process!,
           client: instance.client,
         });
       }

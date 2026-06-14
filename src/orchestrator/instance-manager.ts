@@ -1,5 +1,4 @@
 import { type ChildProcess } from 'node:child_process';
-import { spawn } from 'cross-spawn';
 import { rmSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { logger } from '../utils/logger.js';
@@ -18,8 +17,9 @@ export interface InstanceInfo {
   id: string;
   port: number;
   workspacePath: string;
-  process: ChildProcess;
+  process?: ChildProcess;
   client: AgentClient;
+  dispose?: () => Promise<void>;
   sessionId?: string;
   lastUsedAt: number;
 }
@@ -78,8 +78,7 @@ export class InstanceManager {
 
     const password = generatePassword();
 
-    // Delegate spawn to the runtime
-    const { process: proc, client } = await runtime.spawn(
+    const { process: proc, client, dispose } = await runtime.spawn(
       id,
       port,
       workspace.path,
@@ -87,14 +86,13 @@ export class InstanceManager {
       { retries: this.config.healthCheck.retries, intervalMs: this.config.healthCheck.intervalMs, clientTimeoutMs: 5000 },
     );
 
-    // Attach lifecycle cleanup events for direct processes
-    if (this.config.runtime !== 'docker') {
+    if (proc) {
       proc.on('exit', (code: number | null) => {
-        logger.warn(`[OpenCode ${id}] process exited with code ${code}`);
+        logger.warn(`[${id}] process exited with code ${code}`);
         this.cleanupInstance(id, false);
       });
       proc.on('error', (err: Error) => {
-        logger.error(`[OpenCode ${id}] process error: ${err.message}`);
+        logger.error(`[${id}] process error: ${err.message}`);
         this.cleanupInstance(id, false);
       });
     }
@@ -105,6 +103,7 @@ export class InstanceManager {
       workspacePath: workspace.path,
       process: proc,
       client,
+      dispose,
       lastUsedAt: Date.now(),
     };
 
@@ -160,19 +159,16 @@ export class InstanceManager {
 
     this.instances.delete(id);
 
-    if (this.config.runtime === 'docker') {
-      const containerName = `agentorchestrator-${id}`;
-      try {
-        const rm = spawn('docker', ['rm', '-f', containerName], { stdio: 'ignore' });
-        await this.waitForExit(rm, 10000);
-      } catch {
-        logger.warn(`[Docker ${id}] failed to remove container`);
-      }
-    } else {
-      await this.safeKill(inst.process);
-      await this.waitForExit(inst.process, 5000);
-      if (!inst.process.killed && inst.process.exitCode === null) {
-        await this.safeKill(inst.process, 'SIGKILL');
+    if (inst.dispose) {
+      await inst.dispose();
+    } else if (inst.process) {
+      const runtime = this.runtimes.get(this.config.agentType);
+      if (runtime) {
+        await this.safeKill(runtime, inst.process);
+        await this.waitForExit(inst.process, 5000);
+        if (!inst.process.killed && inst.process.exitCode === null) {
+          await this.safeKill(runtime, inst.process, 'SIGKILL');
+        }
       }
     }
 
@@ -191,12 +187,9 @@ export class InstanceManager {
     logger.info(`Instance ${id} destroyed`);
   }
 
-  private async safeKill(process: ChildProcess, signal?: string | number): Promise<void> {
+  private async safeKill(runtime: { kill(process?: ChildProcess, signal?: string | number): Promise<void> }, process: ChildProcess, signal?: string | number): Promise<void> {
     try {
-      const runtime = this.runtimes.get(this.config.agentType);
-      if (runtime) {
-        await runtime.kill(process, signal);
-      }
+      await runtime.kill(process, signal);
     } catch (err) {
       logger.warn(`kill error: ${(err as Error).message}`);
     }
@@ -234,88 +227,18 @@ export class InstanceManager {
     const inst = this.instances.get(id);
     if (!inst) throw new Error(`Instance not found: ${id}`);
 
-    if (this.config.runtime !== 'docker') {
-      throw new Error('restartInstance is only supported for Docker runtime');
+    const runtime = this.runtimes.get(this.config.agentType);
+    if (!runtime?.restart) {
+      throw new Error(`Runtime ${this.config.agentType} does not support restart`);
     }
 
-    const containerName = `agentorchestrator-${id}`;
-    logger.info(`Restarting container ${containerName}...`);
-
-    const restart = spawn('docker', ['restart', containerName], { stdio: 'ignore' });
-    await this.waitForExit(restart, 10000);
-    if (restart.exitCode !== 0) {
-      throw new Error(`docker restart failed for container ${containerName}`);
-    }
-
-    let healthy = false;
-    for (let i = 0; i < this.config.healthCheck.retries; i++) {
-      await this.delay(this.config.healthCheck.intervalMs);
-      try {
-        const result = await inst.client.health();
-        if (result.healthy) {
-          healthy = true;
-          logger.info(`[OpenCode ${id}] restart health check passed (attempt ${i + 1})`);
-          break;
-        }
-      } catch {
-        logger.warn(`[OpenCode ${id}] restart health check attempt ${i + 1} failed`);
-      }
-    }
-
-    if (!healthy) {
-      throw new Error(`Container restart health check failed for ${id} after ${this.config.healthCheck.retries} retries`);
-    }
-
+    await runtime.restart(id, inst.client);
     inst.lastUsedAt = Date.now();
   }
 
   async cleanupOrphanContainers(): Promise<void> {
-    if (this.config.runtime !== 'docker') {
-      logger.info('Runtime is not docker, skipping orphan container cleanup');
-      return;
-    }
-
-    return new Promise<void>((resolve) => {
-      const ps = spawn('docker', ['ps', '-a', '--filter', 'name=agentorchestrator-', '--format', '{{.Names}}'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      let output = '';
-      ps.stdout!.on('data', (chunk: Buffer) => {
-        output += chunk.toString();
-      });
-
-      ps.on('error', (err) => {
-        logger.error('Failed to list Docker containers for orphan cleanup', err);
-        resolve();
-      });
-
-      ps.on('exit', () => {
-        const names = output.trim().split('\n').filter(Boolean);
-        if (names.length === 0) {
-          logger.info('No orphan Docker containers found');
-          resolve();
-          return;
-        }
-
-        logger.info(`Found ${names.length} orphan Docker container(s), removing...`);
-        let completed = 0;
-        for (const name of names) {
-          const rm = spawn('docker', ['rm', '-f', name], { stdio: 'ignore' });
-          rm.on('error', () => {
-            completed++;
-            if (completed === names.length) resolve();
-          });
-          rm.on('exit', () => {
-            completed++;
-            if (completed === names.length) {
-              logger.info(`Cleaned up ${names.length} orphan Docker container(s)`);
-              resolve();
-            }
-          });
-        }
-      });
-    });
+    const runtimes = this.runtimes.getAll();
+    await Promise.all(runtimes.map((r) => r.cleanupOrphans?.()));
   }
 
   private startIdleSweep(): void {
@@ -335,7 +258,4 @@ export class InstanceManager {
     logger.info(`Idle sweep started: interval=${this.config.idleSweepIntervalMs}ms, timeout=${this.config.idleTimeoutMs}ms`);
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }

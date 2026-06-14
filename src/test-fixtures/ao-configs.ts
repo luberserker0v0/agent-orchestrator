@@ -10,7 +10,7 @@ export const defaultOrchestratorConfig: OrchestratorConfig = {
   idleTimeoutMs: 600000,
   idleSweepIntervalMs: 60000,
   portRange: { start: 41000, end: 41050 },
-  opencodeBinary: 'opencode',
+  runtimeConfig: { binary: 'opencode' },
   agentType: 'opencode',
   healthCheck: { retries: 10, intervalMs: 500 },
   runtime: 'direct',
@@ -19,5 +19,5 @@ export const defaultOrchestratorConfig: OrchestratorConfig = {
 export const dockerOrchestratorConfig: OrchestratorConfig = {
   ...defaultOrchestratorConfig,
   runtime: 'docker',
-  docker: { image: TEST_DOCKER_IMAGE, containerPort: TEST_CONTAINER_PORT },
+  runtimeConfig: { binary: 'opencode', docker: { image: TEST_DOCKER_IMAGE, containerPort: TEST_CONTAINER_PORT } },
 };
