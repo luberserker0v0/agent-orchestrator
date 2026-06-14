@@ -4,7 +4,7 @@ import { ConversationState } from './conversation-state.js';
 describe('ConversationState', () => {
   it('should create a prepared conversation', () => {
     const state = new ConversationState();
-    const data = state.create('conv-001', 'ws://localhost:8080/ws/conv-001');
+    const data = state.create('conv-001', 'opencode', 'ws://localhost:8080/ws/conv-001');
 
     expect(data.id).toBe('conv-001');
     expect(data.status).toBe('prepared');

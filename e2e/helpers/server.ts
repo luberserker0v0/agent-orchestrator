@@ -7,6 +7,11 @@ import { createHttpServer, type HttpServer } from '../../src/http-api/server.js'
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
 import { ConversationState } from '../../src/orchestrator/conversation-state.js';
+import { ConfigService } from '../../src/services/config-service.js';
+import { AgentService } from '../../src/services/agent-service.js';
+import { SkillService } from '../../src/services/skill-service.js';
+import { RuntimeRegistry } from '../../src/agent-runtime/registry.js';
+import { OpenCodeRuntime } from '../../src/agent-runtime/runtimes/opencode.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE } from '../../src/test-fixtures/ao-configs.js';
 
 export interface E2EServer {
@@ -48,8 +53,16 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   };
 
   const workspaceFactory = new WorkspaceFactory(workspaceConfig);
-  const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory);
+
+  const runtimeRegistry = new RuntimeRegistry();
+  const opencodeRuntime = new OpenCodeRuntime(orchestratorConfig.runtime, orchestratorConfig.runtimeConfig);
+  runtimeRegistry.register(opencodeRuntime);
+
+  const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory, runtimeRegistry);
   const conversationState = new ConversationState();
+  const configService = new ConfigService(workspaceFactory, conversationState);
+  const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
+  const skillService = new SkillService(workspaceFactory, conversationState);
 
   const httpServer: HttpServer = createHttpServer(
     serverConfig,
@@ -58,6 +71,10 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     workspaceFactory,
     conversationState,
     orchestratorConfig,
+    configService,
+    agentService,
+    skillService,
+    runtimeRegistry,
   );
 
   await instanceManager.cleanupOrphanContainers();

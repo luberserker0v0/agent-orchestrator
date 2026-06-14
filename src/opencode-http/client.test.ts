@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { OpenCodeClient } from './client.js';
+import { OpenCodeAgentClient } from './client.js';
 
 function mockFetch(response?: Partial<Response>) {
   const defaultResponse: Partial<Response> = {
@@ -14,12 +14,12 @@ function mockFetch(response?: Partial<Response>) {
   return fetchFn;
 }
 
-describe('OpenCodeClient', () => {
-  let client: OpenCodeClient;
+describe('OpenCodeAgentClient', () => {
+  let client: OpenCodeAgentClient;
   let fetchFn: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    client = new OpenCodeClient('http://localhost:3000');
+    client = new OpenCodeAgentClient('http://localhost:3000');
   });
 
   afterEach(() => {
@@ -28,12 +28,12 @@ describe('OpenCodeClient', () => {
   });
 
   it('constructs with trailing slash removed', () => {
-    const c = new OpenCodeClient('http://localhost:3000/');
+    const c = new OpenCodeAgentClient('http://localhost:3000/');
     expect((c as any).baseUrl).toBe('http://localhost:3000');
   });
 
   it('sets auth header when username and password provided', () => {
-    const c = new OpenCodeClient('http://localhost:3000', 'user', 'pass');
+    const c = new OpenCodeAgentClient('http://localhost:3000', 'user', 'pass');
     expect((c as any).authHeader).toContain('Basic ');
   });
 

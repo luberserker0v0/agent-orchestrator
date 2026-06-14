@@ -1,10 +1,9 @@
 import { type ChildProcess } from 'node:child_process';
-import { spawn } from 'cross-spawn';
-import treeKill from 'tree-kill';
 import { rmSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { logger } from '../utils/logger.js';
-import { OpenCodeClient } from '../opencode-http/client.js';
+import type { AgentClient } from '../agent-runtime/types.js';
+import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { PortPool } from './port-pool.js';
 import { WorkspaceFactory, type WorkspaceInfo } from './workspace-factory.js';
@@ -18,8 +17,9 @@ export interface InstanceInfo {
   id: string;
   port: number;
   workspacePath: string;
-  process: ChildProcess;
-  client: OpenCodeClient;
+  process?: ChildProcess;
+  client: AgentClient;
+  dispose?: () => Promise<void>;
   sessionId?: string;
   lastUsedAt: number;
 }
@@ -29,19 +29,23 @@ export class InstanceManager {
   private portPool: PortPool;
   private workspaceFactory: WorkspaceFactory;
   private config: OrchestratorConfig;
+  private runtimes: RuntimeRegistry;
   private idleSweepTimer?: NodeJS.Timeout;
 
-  constructor(config: OrchestratorConfig, workspaceFactory: WorkspaceFactory) {
+  constructor(config: OrchestratorConfig, workspaceFactory: WorkspaceFactory, runtimes: RuntimeRegistry) {
     this.config = config;
+    this.runtimes = runtimes;
     this.portPool = new PortPool(config.portRange.start, config.portRange.end, config.portRange.allowDynamicFallback);
     this.workspaceFactory = workspaceFactory;
     this.startIdleSweep();
   }
 
-  async createInstance(id: string): Promise<InstanceInfo> {
+  async createInstance(id: string, agentType = this.config.agentType): Promise<InstanceInfo> {
     if (this.instances.has(id)) {
       throw new Error(`Instance already exists: ${id}`);
     }
+
+    const runtime = this.runtimes.getOrThrow(agentType);
 
     // Strict maxInstances enforcement: evict LRU if at capacity
     if (this.instances.size >= this.config.maxInstances) {
@@ -73,45 +77,24 @@ export class InstanceManager {
     }
 
     const password = generatePassword();
-    const baseUrl = `http://127.0.0.1:${port}`;
-    const client = new OpenCodeClient(baseUrl, 'opencode', password);
 
-    let proc: ChildProcess;
-    if (this.config.runtime === 'docker') {
-      proc = this._spawnDocker(id, port, workspace.path, password);
-    } else {
-      proc = this._spawnDirect(id, port, workspace.path, password);
-    }
+    const { process: proc, client, dispose } = await runtime.spawn(
+      id,
+      port,
+      workspace.path,
+      { username: 'opencode', password },
+      { retries: this.config.healthCheck.retries, intervalMs: this.config.healthCheck.intervalMs, clientTimeoutMs: 5000 },
+    );
 
-    // Wait for health check (use short timeout for polling)
-    const healthClient = new OpenCodeClient(baseUrl, 'opencode', password, 5000);
-    let healthy = false;
-    for (let i = 0; i < this.config.healthCheck.retries; i++) {
-      await this.delay(this.config.healthCheck.intervalMs);
-      try {
-        const result = await healthClient.health();
-        if (result.healthy) {
-          healthy = true;
-          logger.info(`[OpenCode ${id}] health check passed (version ${result.version})`);
-          break;
-        } else {
-          logger.warn(`[OpenCode ${id}] health check returned healthy=false (attempt ${i + 1})`);
-        }
-      } catch (err) {
-        logger.warn(`[OpenCode ${id}] health check attempt ${i + 1} failed: ${(err as Error).message}`);
-      }
-    }
-
-    if (!healthy) {
-      if (this.config.runtime === 'docker') {
-        const rm = spawn('docker', ['rm', '-f', `agentorchestrator-${id}`], { stdio: 'ignore' });
-        await this.waitForExit(rm, 10000);
-      } else {
-        this.safeKill(proc);
-      }
-      this.portPool.release(port);
-      try { rmSync(workspace.path, { recursive: true, force: true }); } catch { /* ignore cleanup errors */ }
-      throw new Error(`OpenCode instance failed health check after ${this.config.healthCheck.retries} retries`);
+    if (proc) {
+      proc.on('exit', (code: number | null) => {
+        logger.warn(`[${id}] process exited with code ${code}`);
+        this.cleanupInstance(id, false);
+      });
+      proc.on('error', (err: Error) => {
+        logger.error(`[${id}] process error: ${err.message}`);
+        this.cleanupInstance(id, false);
+      });
     }
 
     const instance: InstanceInfo = {
@@ -120,6 +103,7 @@ export class InstanceManager {
       workspacePath: workspace.path,
       process: proc,
       client,
+      dispose,
       lastUsedAt: Date.now(),
     };
 
@@ -145,113 +129,6 @@ export class InstanceManager {
     }
   }
 
-  private _spawnDirect(id: string, port: number, workspacePath: string, password: string): ChildProcess {
-    logger.info(`Spawning OpenCode instance on port ${port} at ${workspacePath} (binary: ${this.config.opencodeBinary})`);
-    const proc = spawn(this.config.opencodeBinary, ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
-      cwd: workspacePath,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: false,
-      env: {
-        ...process.env,
-        OPENCODE_SERVER_USERNAME: 'opencode',
-        OPENCODE_SERVER_PASSWORD: password,
-      },
-    });
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      logger.info(`[OpenCode ${id}] stdout: ${data.toString().trim()}`);
-    });
-    proc.stderr?.on('data', (data: Buffer) => {
-      logger.warn(`[OpenCode ${id}] stderr: ${data.toString().trim()}`);
-    });
-    proc.on('exit', (code: number | null) => {
-      logger.warn(`[OpenCode ${id}] process exited with code ${code}`);
-      this.cleanupInstance(id, false);
-    });
-    proc.on('error', (err: Error) => {
-      logger.error(`[OpenCode ${id}] process error: ${err.message}`);
-      this.cleanupInstance(id, false);
-    });
-
-    return proc;
-  }
-
-  private _spawnDocker(id: string, port: number, workspacePath: string, password: string): ChildProcess {
-    const { image, containerPort } = this.config.docker!;
-    const containerName = `agentorchestrator-${id}`;
-
-    logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${image})`);
-    const proc = spawn('docker', [
-      'run', '-d',
-      '--name', containerName,
-      '-p', `127.0.0.1:${port}:${containerPort}`,
-      '-v', `${workspacePath}:/workspace`,
-      '-w', '/workspace',
-      '-e', `OPENCODE_SERVER_USERNAME=opencode`,
-      '-e', `OPENCODE_SERVER_PASSWORD=${password}`,
-      image,
-      'serve', '--port', String(containerPort), '--hostname', '0.0.0.0',
-    ], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: false,
-    });
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      logger.info(`[Docker ${id}] ${data.toString().trim()}`);
-    });
-    proc.stderr?.on('data', (data: Buffer) => {
-      logger.warn(`[Docker ${id}] ${data.toString().trim()}`);
-    });
-    // docker run -d exits immediately; don't attach lifecycle cleanup here
-    return proc;
-  }
-
-  async destroyInstance(id: string): Promise<void> {
-    await this.cleanupInstance(id, true);
-  }
-
-  /** Kill process and release port, but preserve workspace on disk */
-  async stopInstance(id: string): Promise<void> {
-    await this.cleanupInstance(id, false);
-  }
-
-  /** Docker-only: restart container in-place (same port, same workspace, same container) */
-  async restartInstance(id: string): Promise<void> {
-    const inst = this.instances.get(id);
-    if (!inst) throw new Error(`Instance not found: ${id}`);
-
-    const containerName = `agentorchestrator-${id}`;
-    logger.info(`Restarting container ${containerName}...`);
-
-    const restart = spawn('docker', ['restart', containerName], { stdio: 'ignore' });
-    await this.waitForExit(restart, 10000);
-    if (restart.exitCode !== 0) {
-      throw new Error(`docker restart failed for container ${containerName}`);
-    }
-
-    // Health check after restart
-    let healthy = false;
-    for (let i = 0; i < this.config.healthCheck.retries; i++) {
-      await this.delay(this.config.healthCheck.intervalMs);
-      try {
-        const result = await inst.client.health();
-        if (result.healthy) {
-          healthy = true;
-          logger.info(`[OpenCode ${id}] restart health check passed (attempt ${i + 1})`);
-          break;
-        }
-      } catch {
-        logger.warn(`[OpenCode ${id}] restart health check attempt ${i + 1} failed`);
-      }
-    }
-
-    if (!healthy) {
-      throw new Error(`Container restart health check failed for ${id} after ${this.config.healthCheck.retries} retries`);
-    }
-
-    inst.lastUsedAt = Date.now();
-  }
-
   listInstances(): Pick<InstanceInfo, 'id' | 'port' | 'lastUsedAt'>[] {
     return Array.from(this.instances.values()).map((inst) => ({
       id: inst.id,
@@ -272,7 +149,7 @@ export class InstanceManager {
 
     if (oldest) {
       logger.warn(`LRU eviction: destroying instance ${oldest.id} (idle since ${new Date(oldest.lastUsedAt).toISOString()})`);
-      await this.destroyInstance(oldest.id);
+      await this.cleanupInstance(oldest.id, true);
     }
   }
 
@@ -282,18 +159,17 @@ export class InstanceManager {
 
     this.instances.delete(id);
 
-    if (this.config.runtime === 'docker') {
-      const containerName = `agentorchestrator-${id}`;
-      try {
-        const rm = spawn('docker', ['rm', '-f', containerName], { stdio: 'ignore' });
-        await this.waitForExit(rm, 10000);
-      } catch {
-        logger.warn(`[Docker ${id}] failed to remove container`);
+    if (inst.dispose) {
+      await inst.dispose();
+    } else if (inst.process) {
+      const runtime = this.runtimes.get(this.config.agentType);
+      if (runtime) {
+        await this.safeKill(runtime, inst.process);
+        await this.waitForExit(inst.process, 5000);
+        if (!inst.process.killed && inst.process.exitCode === null) {
+          await this.safeKill(runtime, inst.process, 'SIGKILL');
+        }
       }
-    } else {
-      this.safeKill(inst.process);
-      await this.waitForExit(inst.process, 5000);
-      this.safeKill(inst.process, 'SIGKILL');
     }
 
     this.portPool.release(inst.port);
@@ -311,27 +187,24 @@ export class InstanceManager {
     logger.info(`Instance ${id} destroyed`);
   }
 
-  private safeKill(proc: ChildProcess, signal?: string | number): void {
-    if (proc.killed || proc.exitCode !== null || proc.pid === undefined) return;
+  private async safeKill(runtime: { kill(process?: ChildProcess, signal?: string | number): Promise<void> }, process: ChildProcess, signal?: string | number): Promise<void> {
     try {
-      treeKill(proc.pid, signal);
-    } catch {
-      // ignore kill errors (e.g., process already finished)
+      await runtime.kill(process, signal);
+    } catch (err) {
+      logger.warn(`kill error: ${(err as Error).message}`);
     }
   }
 
   private waitForExit(proc: ChildProcess, timeoutMs: number): Promise<void> {
-    // If process already exited, resolve immediately
     if (proc.exitCode !== null || proc.killed) {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
       const timer = setTimeout(() => resolve(), timeoutMs);
-      const onExit = () => {
+      proc.once('exit', () => {
         clearTimeout(timer);
         resolve();
-      };
-      proc.once('exit', onExit);
+      });
     });
   }
 
@@ -342,53 +215,30 @@ export class InstanceManager {
     }
   }
 
-  async cleanupOrphanContainers(): Promise<void> {
-    if (this.config.runtime !== 'docker') {
-      logger.info('Runtime is not docker, skipping orphan container cleanup');
-      return;
+  async destroyInstance(id: string): Promise<void> {
+    await this.cleanupInstance(id, true);
+  }
+
+  async stopInstance(id: string): Promise<void> {
+    await this.cleanupInstance(id, false);
+  }
+
+  async restartInstance(id: string): Promise<void> {
+    const inst = this.instances.get(id);
+    if (!inst) throw new Error(`Instance not found: ${id}`);
+
+    const runtime = this.runtimes.get(this.config.agentType);
+    if (!runtime?.restart) {
+      throw new Error(`Runtime ${this.config.agentType} does not support restart`);
     }
 
-    return new Promise<void>((resolve) => {
-      const ps = spawn('docker', ['ps', '-a', '--filter', 'name=agentorchestrator-', '--format', '{{.Names}}'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+    await runtime.restart(id, inst.client);
+    inst.lastUsedAt = Date.now();
+  }
 
-      let output = '';
-      ps.stdout!.on('data', (chunk: Buffer) => {
-        output += chunk.toString();
-      });
-
-      ps.on('error', (err) => {
-        logger.error('Failed to list Docker containers for orphan cleanup', err);
-        resolve();
-      });
-
-      ps.on('exit', () => {
-        const names = output.trim().split('\n').filter(Boolean);
-        if (names.length === 0) {
-          logger.info('No orphan Docker containers found');
-          resolve();
-          return;
-        }
-
-        logger.info(`Found ${names.length} orphan Docker container(s), removing...`);
-        let completed = 0;
-        for (const name of names) {
-          const rm = spawn('docker', ['rm', '-f', name], { stdio: 'ignore' });
-          rm.on('error', () => {
-            completed++;
-            if (completed === names.length) resolve();
-          });
-          rm.on('exit', () => {
-            completed++;
-            if (completed === names.length) {
-              logger.info(`Cleaned up ${names.length} orphan Docker container(s)`);
-              resolve();
-            }
-          });
-        }
-      });
-    });
+  async cleanupOrphanContainers(): Promise<void> {
+    const runtimes = this.runtimes.getAll();
+    await Promise.all(runtimes.map((r) => r.cleanupOrphans?.()));
   }
 
   private startIdleSweep(): void {
@@ -401,14 +251,11 @@ export class InstanceManager {
       for (const inst of this.instances.values()) {
         if (now - inst.lastUsedAt > this.config.idleTimeoutMs) {
           logger.warn(`Idle timeout: destroying instance ${inst.id} (idle for ${now - inst.lastUsedAt}ms)`);
-          this.destroyInstance(inst.id).catch(() => {});
+          this.cleanupInstance(inst.id, true).catch(() => {});
         }
       }
     }, this.config.idleSweepIntervalMs);
     logger.info(`Idle sweep started: interval=${this.config.idleSweepIntervalMs}ms, timeout=${this.config.idleTimeoutMs}ms`);
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }

@@ -1,7 +1,7 @@
 import { logger } from '../utils/logger.js';
-import type { GlobalHealth, Session, CreateSessionBody, PromptBody, PromptResponse, Agent, ProviderInfo, ConfigInfo, Message, Part } from './types.js';
+import type { AgentClient, SessionInfo, MessageEntry, SendPromptResult, AgentDefinition, ProviderListResult, AgentConfig, HealthInfo, SendPromptParams, CreateSessionParams } from '../agent-runtime/types.js';
 
-export class OpenCodeClient {
+export class OpenCodeAgentClient implements AgentClient {
   private baseUrl: string;
   private authHeader?: string;
   private timeoutMs: number;
@@ -58,59 +58,58 @@ export class OpenCodeClient {
     }
   }
 
-  async health(signal?: AbortSignal): Promise<GlobalHealth> {
-    return this.request<GlobalHealth>('GET', '/global/health', undefined, signal);
+  async health(signal?: AbortSignal): Promise<HealthInfo> {
+    return this.request<HealthInfo>('GET', '/global/health', undefined, signal);
   }
 
-  async createSession(body: CreateSessionBody): Promise<Session> {
-    return this.request<Session>('POST', '/session', body);
+  async createSession(body: CreateSessionParams): Promise<SessionInfo> {
+    return this.request<SessionInfo>('POST', '/session', body);
   }
 
-  async getSession(id: string): Promise<Session> {
-    return this.request<Session>('GET', `/session/${id}`);
+  async getSession(id: string): Promise<SessionInfo> {
+    return this.request<SessionInfo>('GET', `/session/${id}`);
   }
 
   async deleteSession(id: string): Promise<boolean> {
     return this.request<boolean>('DELETE', `/session/${id}`);
   }
 
-  async listMessages(sessionId: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
+  async listMessages(sessionId: string, limit?: number): Promise<MessageEntry[]> {
     const query = limit !== undefined ? `?limit=${limit}` : '';
-    return this.request<{ info: Message; parts: Part[] }[]>('GET', `/session/${sessionId}/message${query}`);
+    return this.request<MessageEntry[]>('GET', `/session/${sessionId}/message${query}`);
   }
 
-  async sendPrompt(sessionId: string, body: PromptBody): Promise<PromptResponse> {
-    return this.request<PromptResponse>('POST', `/session/${sessionId}/message`, body);
+  async sendPrompt(sessionId: string, body: SendPromptParams): Promise<SendPromptResult> {
+    return this.request<SendPromptResult>('POST', `/session/${sessionId}/message`, body);
   }
 
   async abortSession(sessionId: string): Promise<boolean> {
     return this.request<boolean>('POST', `/session/${sessionId}/abort`);
   }
 
-  async listSessions(): Promise<Session[]> {
-    return this.request<Session[]>('GET', '/session');
+  async listSessions(): Promise<SessionInfo[]> {
+    return this.request<SessionInfo[]>('GET', '/session');
   }
 
-  async getSessionChildren(id: string): Promise<Session[]> {
-    return this.request<Session[]>('GET', `/session/${id}/children`);
+  async getSessionChildren(id: string): Promise<SessionInfo[]> {
+    return this.request<SessionInfo[]>('GET', `/session/${id}/children`);
   }
 
-  async forkSession(id: string, messageID?: string): Promise<Session> {
-    return this.request<Session>('POST', `/session/${id}/fork`, messageID ? { messageID } : undefined);
+  async forkSession(id: string, messageID?: string): Promise<SessionInfo> {
+    return this.request<SessionInfo>('POST', `/session/${id}/fork`, messageID ? { messageID } : undefined);
   }
 
-  async listAgents(): Promise<Agent[]> {
-    return this.request<Agent[]>('GET', '/agent');
+  async listAgents(): Promise<AgentDefinition[]> {
+    return this.request<AgentDefinition[]>('GET', '/agent');
   }
 
-  async listProviders(): Promise<{ providers: ProviderInfo[]; default: Record<string, string> }> {
-    return this.request('GET', '/config/providers');
+  async listProviders(): Promise<ProviderListResult> {
+    return this.request<ProviderListResult>('GET', '/config/providers');
   }
 
-  async getConfig(): Promise<ConfigInfo> {
-    return this.request<ConfigInfo>('GET', '/config');
+  async getConfig(): Promise<AgentConfig> {
+    return this.request<AgentConfig>('GET', '/config');
   }
 }
 
-// Re-export types
 export type { Message, Part } from './types.js';

@@ -6,6 +6,8 @@ import { ConversationState } from './orchestrator/conversation-state.js';
 import { ConfigService } from './services/config-service.js';
 import { AgentService } from './services/agent-service.js';
 import { SkillService } from './services/skill-service.js';
+import { RuntimeRegistry } from './agent-runtime/registry.js';
+import { OpenCodeRuntime } from './agent-runtime/runtimes/opencode.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
 import { parseCliArgs, printHelp } from './cli.js';
@@ -40,7 +42,17 @@ export async function main(cliArgs?: string[]) {
   logger.info('Configuration loaded');
 
   const workspaceFactory = new WorkspaceFactory(config.workspace, canonicalConfig);
-  const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory);
+
+  // Set up runtime registry
+  const runtimeRegistry = new RuntimeRegistry();
+  const opencodeRuntime = new OpenCodeRuntime(
+    config.orchestrator.runtime,
+    config.orchestrator.runtimeConfig,
+  );
+  runtimeRegistry.register(opencodeRuntime);
+  logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);
+
+  const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeRegistry);
   const conversationState = new ConversationState();
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
@@ -50,7 +62,7 @@ export async function main(cliArgs?: string[]) {
   await instanceManager.cleanupOrphanContainers();
   workspaceFactory.cleanupOrphans();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator, configService, agentService, skillService);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator, configService, agentService, skillService, runtimeRegistry);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();

@@ -16,7 +16,7 @@ function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentO
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100 },
       runtime: 'direct',
-      opencodeBinary: 'opencode',
+      runtimeConfig: { binary: 'opencode' },
       healthCheck: { retries: 10, intervalMs: 500 },
     },
     workspace: { basePath: './workspace', enforceCanonicalConfig: true },
@@ -150,51 +150,15 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('healthCheck.intervalMs must be positive');
   });
 
-  it('rejects invalid runtime value', () => {
-    const config = createValidConfig({
-      orchestrator: { ...createValidConfig().orchestrator, runtime: 'invalid' as 'direct' },
-    });
-    expect(() => validateConfig(config)).toThrow('runtime must be "direct" or "docker"');
-  });
-
-  it('requires docker config when runtime is docker', () => {
-    const config = createValidConfig({
-      orchestrator: { ...createValidConfig().orchestrator, runtime: 'docker', docker: undefined },
-    });
-    expect(() => validateConfig(config)).toThrow('docker config is required when runtime is "docker"');
-  });
-
-  it('accepts valid docker runtime config', () => {
+  it('accepts runtimeConfig with docker fields', () => {
     const config = createValidConfig({
       orchestrator: {
         ...createValidConfig().orchestrator,
         runtime: 'docker',
-        docker: { image: 'opencode:latest', containerPort: 3000 },
+        runtimeConfig: { binary: 'opencode', docker: { image: 'opencode:latest', containerPort: 3000 } },
       },
     });
     expect(() => validateConfig(config)).not.toThrow();
-  });
-
-  it('rejects empty docker.image', () => {
-    const config = createValidConfig({
-      orchestrator: {
-        ...createValidConfig().orchestrator,
-        runtime: 'docker',
-        docker: { image: '', containerPort: 3000 },
-      },
-    });
-    expect(() => validateConfig(config)).toThrow('docker.image must be a non-empty string');
-  });
-
-  it('rejects non-positive docker.containerPort', () => {
-    const config = createValidConfig({
-      orchestrator: {
-        ...createValidConfig().orchestrator,
-        runtime: 'docker',
-        docker: { image: 'opencode:latest', containerPort: 0 },
-      },
-    });
-    expect(() => validateConfig(config)).toThrow('docker.containerPort must be a positive integer');
   });
 
   it('rejects empty workspace.basePath', () => {

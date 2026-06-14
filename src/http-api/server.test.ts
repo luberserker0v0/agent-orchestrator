@@ -13,8 +13,16 @@ describe('HTTP API Server', () => {
   let mockConfigService: any;
   let mockAgentService: any;
   let mockSkillService: any;
+  let mockRuntimeRegistry: any;
 
   beforeEach(() => {
+    mockRuntimeRegistry = {
+      get: vi.fn().mockReturnValue({ spawn: vi.fn(), kill: vi.fn() }),
+      getOrThrow: vi.fn().mockReturnValue({ spawn: vi.fn(), kill: vi.fn() }),
+      list: vi.fn().mockReturnValue(['opencode']),
+      has: vi.fn().mockReturnValue(true),
+    };
+
     mockInstanceManager = {
       createInstance: vi.fn(),
       destroyInstance: vi.fn().mockResolvedValue(undefined),
@@ -96,7 +104,8 @@ describe('HTTP API Server', () => {
       defaultOrchestratorConfig,
       mockConfigService,
       mockAgentService,
-      mockSkillService
+      mockSkillService,
+      mockRuntimeRegistry
     );
     server = httpServer.server;
   });
@@ -249,7 +258,7 @@ describe('HTTP API Server', () => {
 
   it('POST /api/conversations/:id/start returns 200 and transitions to running', async () => {
     mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared', agentType: 'opencode' });
     mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30000, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
 
     const res = await request(server).post('/api/conversations/conv-001/start');
@@ -258,7 +267,7 @@ describe('HTTP API Server', () => {
     expect(res.body.status).toBe('running');
     expect(res.body.port).toBe(30000);
     expect(res.body.sessionId).toBeUndefined();
-    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001', 'opencode');
   });
 
   it('POST /api/conversations/:id/start returns 409 when already running', async () => {
@@ -872,7 +881,8 @@ describe('HTTP API Server', () => {
       dockerOrchestratorConfig,
       mockConfigService,
       mockAgentService,
-      mockSkillService
+      mockSkillService,
+      mockRuntimeRegistry
     );
     mockConversationState.get.mockReturnValue({ id: 'conv-docker', status: 'running' });
     mockInstanceManager.restartInstance.mockResolvedValue(undefined);

@@ -1,7 +1,8 @@
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import { logger } from '../utils/logger.js';
-import type { OpenCodeClient } from '../opencode-http/client.js';
+import type { AgentClient } from '../agent-runtime/types.js';
+import type { RuntimeRegistry } from '../agent-runtime/registry.js';
 import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
 import { WorkspaceFactory } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
@@ -24,6 +25,7 @@ export class WSRouter {
   private configService: ConfigService;
   private agentService: AgentService;
   private skillService: SkillService;
+  private runtimeRegistry: RuntimeRegistry;
   private connections: Map<string, WSConnection> = new Map();
   private eventUnsubscribers: Map<string, () => void> = new Map();
 
@@ -37,7 +39,8 @@ export class WSRouter {
     orchestratorConfig: OrchestratorConfig,
     configService: ConfigService,
     agentService: AgentService,
-    skillService: SkillService
+    skillService: SkillService,
+    runtimeRegistry: RuntimeRegistry
   ) {
     this.wss = wss;
     this.instanceManager = instanceManager;
@@ -49,6 +52,7 @@ export class WSRouter {
     this.configService = configService;
     this.agentService = agentService;
     this.skillService = skillService;
+    this.runtimeRegistry = runtimeRegistry;
 
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
   }
@@ -65,7 +69,7 @@ export class WSRouter {
     this.wss.close();
   }
 
-  private createSessionInBackground(id: string, client: OpenCodeClient): void {
+  private createSessionInBackground(id: string, client: AgentClient): void {
     client.createSession({ title: `AgentOrchestrator-${id}` })
       .then((session) => {
         this.conversationState.setInstanceInfo(id, { sessionId: session.id });
@@ -178,7 +182,7 @@ export class WSRouter {
         });
         const texts = response.parts
           .filter((p) => p.type === 'text')
-          .map((p) => (p as { text: string }).text)
+          .map((p) => (p as unknown as { text: string }).text)
           .join('');
 
         this.conversationState.emitEvent(conversationId, 'conversation.message', {
@@ -402,10 +406,10 @@ export class WSRouter {
         this.conversationState.transition(conversationId, 'starting');
 
         try {
-          const newInstance = await this.instanceManager.createInstance(conversationId);
+          const newInstance = await this.instanceManager.createInstance(conversationId, state.agentType);
           this.conversationState.setInstanceInfo(conversationId, { port: newInstance.port });
           this.conversationState.setRunningInstance(conversationId, {
-            process: newInstance.process,
+            process: newInstance.process!,
             client: newInstance.client,
           });
           this.conversationState.transition(conversationId, 'running');
@@ -476,10 +480,10 @@ export class WSRouter {
           if (dockerRestarted) {
             newInstance = this.instanceManager.getInstance(conversationId)!;
           } else {
-            newInstance = await this.instanceManager.createInstance(conversationId);
+            newInstance = await this.instanceManager.createInstance(conversationId, state.agentType);
             this.conversationState.setInstanceInfo(conversationId, { port: newInstance.port });
             this.conversationState.setRunningInstance(conversationId, {
-              process: newInstance.process,
+              process: newInstance.process!,
               client: newInstance.client,
             });
           }

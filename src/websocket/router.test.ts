@@ -69,6 +69,7 @@ describe('WSRouter', () => {
   let mockConfigService: any;
   let mockAgentService: any;
   let mockSkillService: any;
+  let mockRuntimeRegistry: any;
 
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -133,6 +134,13 @@ describe('WSRouter', () => {
       deleteSkill: vi.fn(),
     };
 
+    mockRuntimeRegistry = {
+      get: vi.fn().mockReturnValue({ spawn: vi.fn(), kill: vi.fn() }),
+      getOrThrow: vi.fn().mockReturnValue({ spawn: vi.fn(), kill: vi.fn() }),
+      list: vi.fn().mockReturnValue(['opencode']),
+      has: vi.fn().mockReturnValue(true),
+    };
+
     router = new WSRouter(
       mockWss as any,
       mockInstanceManager,
@@ -140,10 +148,11 @@ describe('WSRouter', () => {
       mockConversationState,
       { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
       { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
-      { runtime: 'direct', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest', containerPort: 30000 } },
+      { runtime: 'direct', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, runtimeConfig: { binary: 'opencode', docker: { image: 'opencode:latest', containerPort: 30000 } }, agentType: 'opencode' },
       mockConfigService,
       mockAgentService,
-      mockSkillService
+      mockSkillService,
+      mockRuntimeRegistry
     );
   });
 
@@ -1710,7 +1719,7 @@ describe('WSRouter', () => {
 
   it('handles conversation.start', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'prepared', ready: false, wsUrl: 'ws://host/ws/conv-001' });
+    mockConversationState.get.mockReturnValue({ status: 'prepared', ready: false, wsUrl: 'ws://host/ws/conv-001', agentType: 'opencode' });
     mockInstanceManager.createInstance.mockResolvedValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
@@ -1722,7 +1731,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001', 'opencode');
     expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'starting');
     expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'running');
     expect(mockConversationState.startReadyCheck).toHaveBeenCalledWith('conv-001');
@@ -1809,7 +1818,7 @@ describe('WSRouter', () => {
 
   it('handles conversation.restart in direct runtime', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'running', ready: true, wsUrl: 'ws://host/ws/conv-001' });
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: true, wsUrl: 'ws://host/ws/conv-001', agentType: 'opencode' });
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
     mockInstanceManager.stopInstance.mockResolvedValue(undefined);
     mockInstanceManager.createInstance.mockResolvedValue(createMockInstance());
@@ -1824,7 +1833,7 @@ describe('WSRouter', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(mockInstanceManager.stopInstance).toHaveBeenCalledWith('conv-001');
-    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001', 'opencode');
     expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'restarting');
     expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'running');
 
@@ -1851,10 +1860,11 @@ describe('WSRouter', () => {
       mockConversationState,
       { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
       { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
-      { runtime: 'docker', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, opencodeBinary: 'opencode', docker: { image: 'opencode:latest', containerPort: 3000 } },
+      { runtime: 'docker', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, runtimeConfig: { binary: 'opencode', docker: { image: 'opencode:latest', containerPort: 3000 } }, agentType: 'opencode' },
       mockConfigService,
       mockAgentService,
-      mockSkillService
+      mockSkillService,
+      mockRuntimeRegistry
     );
 
     dockerMockWss.emit('connection', dockerWs, createMockReq('/ws/conv-001'));
