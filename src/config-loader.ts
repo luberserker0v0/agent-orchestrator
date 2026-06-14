@@ -37,6 +37,7 @@ export interface OrchestratorConfig {
   };
   runtime: Runtime;
   opencodeBinary: string;
+  agentType: string;
   docker?: DockerConfig;
   healthCheck: HealthCheckConfig;
 }
@@ -217,6 +218,7 @@ export function defaultConfig(): AgentOrchestratorConfig {
       portRange: { start: 30000, end: 30100, allowDynamicFallback: true },
       runtime: 'direct',
       opencodeBinary: 'opencode',
+      agentType: 'opencode',
       healthCheck: { retries: 10, intervalMs: 500 },
     },
     workspace: {

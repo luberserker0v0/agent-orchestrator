@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import type { OpenCodeClient } from '../opencode-http/client.js';
+import type { AgentClient } from '../agent-runtime/types.js';
 
 export type ConversationStatus =
   | 'prepared'
@@ -19,6 +19,7 @@ export interface ConversationEvent {
 
 export interface ConversationStateData {
   id: string;
+  agentType: string;
   status: ConversationStatus;
   ready: boolean;
   needsRestart: boolean;
@@ -33,7 +34,7 @@ export interface ConversationStateData {
 
 export interface RunningInstanceInfo {
   process: ChildProcess;
-  client: OpenCodeClient;
+  client: AgentClient;
 }
 
 const MAX_EVENTS = 100;
@@ -50,9 +51,10 @@ export class ConversationState {
   private listeners = new Map<string, Set<(event: ConversationEvent) => void>>();
   private readyTokens = new Map<string, ReadyCheckToken>();
 
-  create(id: string, wsUrl?: string): ConversationStateData {
+  create(id: string, agentType = 'opencode', wsUrl?: string): ConversationStateData {
     const state: ConversationStateData = {
       id,
+      agentType,
       status: 'prepared',
       ready: false,
       needsRestart: false,
@@ -62,7 +64,7 @@ export class ConversationState {
       updatedAt: Date.now(),
     };
     this.states.set(id, state);
-    this.emitEvent(id, 'conversation.prepared', { status: 'prepared' });
+    this.emitEvent(id, 'conversation.prepared', { status: 'prepared', agentType });
     return state;
   }
 

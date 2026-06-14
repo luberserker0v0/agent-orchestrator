@@ -5,7 +5,8 @@ import swaggerUi from 'swagger-ui-express';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
-import type { OpenCodeClient } from '../opencode-http/client.js';
+import type { AgentClient } from '../agent-runtime/types.js';
+import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { ConfigService } from '../services/config-service.js';
@@ -31,7 +32,8 @@ export function createHttpServer(
   orchestratorConfig: OrchestratorConfig,
   configService: ConfigService,
   agentService: AgentService,
-  skillService: SkillService
+  skillService: SkillService,
+  runtimeRegistry: RuntimeRegistry
 ): HttpServer {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
@@ -82,7 +84,7 @@ export function createHttpServer(
     }
   }
 
-  function createSessionInBackground(id: string, client: OpenCodeClient): void {
+  function createSessionInBackground(id: string, client: AgentClient): void {
     client.createSession({ title: `AgentOrchestrator-${id}` })
       .then((session) => {
         conversationState.setInstanceInfo(id, { sessionId: session.id });
@@ -118,7 +120,7 @@ export function createHttpServer(
 
   // ─── Conversation Lifecycle ──────────────────────────────
 
-  // Create conversation (prepare workspace, do NOT start OpenCode)
+  // Create conversation (prepare workspace, do NOT start agent instance)
   app.post('/api/conversations', async (req: Request, res: Response, _next: NextFunction) => {
     try {
       const id = req.body.id ?? generateId();
@@ -127,13 +129,20 @@ export function createHttpServer(
         return;
       }
 
+      const agentType = typeof req.body.agentType === 'string' ? req.body.agentType : orchestratorConfig.agentType;
+      if (!runtimeRegistry.get(agentType)) {
+        res.status(400).json({ error: `Unknown agent type: ${agentType}. Available: ${runtimeRegistry.list().join(', ')}` });
+        return;
+      }
+
       workspaceFactory.create(id);
 
       const wsUrl = `ws://${serverConfig.host}:${serverConfig.port}/ws/${id}`;
-      const state = conversationState.create(id, wsUrl);
+      const state = conversationState.create(id, agentType, wsUrl);
 
       res.status(201).json({
         id: state.id,
+        agentType: state.agentType,
         status: state.status,
         wsUrl: state.wsUrl,
       });
@@ -158,7 +167,7 @@ export function createHttpServer(
     conversationState.transition(id, 'starting');
 
     try {
-      const instance = await instanceManager.createInstance(id);
+      const instance = await instanceManager.createInstance(id, state.agentType);
       conversationState.setInstanceInfo(id, { port: instance.port });
       conversationState.setRunningInstance(id, {
         process: instance.process,
@@ -168,6 +177,7 @@ export function createHttpServer(
       conversationState.startReadyCheck(id);
       res.json({
         id,
+        agentType: state.agentType,
         status: 'running',
         ready: false,
         port: instance.port,
@@ -249,7 +259,7 @@ export function createHttpServer(
         // Docker restart succeeded — reuse existing instance (same port, same container)
         instance = instanceManager.getInstance(id)!;
       } else {
-        instance = await instanceManager.createInstance(id);
+        instance = await instanceManager.createInstance(id, state.agentType);
         conversationState.setInstanceInfo(id, { port: instance.port });
         conversationState.setRunningInstance(id, {
           process: instance.process,
@@ -261,6 +271,7 @@ export function createHttpServer(
       conversationState.startReadyCheck(id);
       res.json({
         id,
+        agentType: state.agentType,
         status: 'running',
         ready: false,
         port: instance.port,
@@ -307,6 +318,7 @@ export function createHttpServer(
   app.get('/api/conversations', (_req: Request, res: Response) => {
     const conversations = conversationState.list().map((s) => ({
       id: s.id,
+      agentType: s.agentType,
       status: s.status,
       ready: s.ready,
       needsRestart: s.needsRestart,
@@ -326,6 +338,7 @@ export function createHttpServer(
     const s = conversationState.get(id)!;
     res.json({
       id: s.id,
+      agentType: s.agentType,
       status: s.status,
       ready: s.ready,
       needsRestart: s.needsRestart,
@@ -811,7 +824,7 @@ export function createHttpServer(
 
       const texts = response.parts
         .filter((p) => p.type === 'text')
-        .map((p) => (p as { text: string }).text)
+        .map((p) => (p as unknown as { text: string }).text)
         .join('');
 
       conversationState.emitEvent(id, 'conversation.message', {
@@ -992,7 +1005,7 @@ export function createHttpServer(
   const httpServer = createServer(app);
 
   const wss = new WebSocketServer({ noServer: true });
-  const wsRouter = new WSRouter(wss, instanceManager, workspaceFactory, conversationState, wsConfig, serverConfig, orchestratorConfig, configService, agentService, skillService);
+  const wsRouter = new WSRouter(wss, instanceManager, workspaceFactory, conversationState, wsConfig, serverConfig, orchestratorConfig, configService, agentService, skillService, runtimeRegistry);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ?? '';

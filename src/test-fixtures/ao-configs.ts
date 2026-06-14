@@ -11,6 +11,7 @@ export const defaultOrchestratorConfig: OrchestratorConfig = {
   idleSweepIntervalMs: 60000,
   portRange: { start: 41000, end: 41050 },
   opencodeBinary: 'opencode',
+  agentType: 'opencode',
   healthCheck: { retries: 10, intervalMs: 500 },
   runtime: 'direct',
 };
