@@ -349,7 +349,25 @@ wscat -c ws://127.0.0.1:11697/ws/demo
        | PUT  /api/conversations/:id/files
        | POST /api/conversations/:id/start
        v
-[AgentOrchestrator HTTP API]  ←── Express (port 0 = auto-allocated)
+[Transport Layer]
+  • Express HTTP Server (route handlers)
+  • WebSocket JSON-RPC Router (method dispatch)
+  Both delegate to Service Layer — no direct domain access
+       |
+       v
+[Service Layer]
+  • ConversationService  • FileService  • MessageService
+  • SessionService       • ConfigService • AgentService
+  • SkillService
+  Business logic, validation, orchestration of domain calls
+       |
+       v
+[Domain Layer]
+  • ConversationState (event-driven lifecycle)
+  • InstanceManager   (workspace reuse, LRU eviction)
+  • WorkspaceFactory  (config/agent/file CRUD, quota)
+  • PortPool          (dynamic allocation)
+  • RuntimeRegistry   (runtime lookup by agentType)
        |
        | spawn(...)
        v
@@ -359,29 +377,26 @@ wscat -c ws://127.0.0.1:11697/ws/demo
        v
 [OpenCode Server]
 
-[ConversationState] ←── event-driven lifecycle
-       |
-       | subscribe(id, cb) → push events
-       v
-[Client / Frontend]
-       |
-       | WebSocket /ws/{id}
-       v
-[AgentOrchestrator WS Router] → checks status via ConversationState
-                                → forwards to OpenCode Instance #1
+Event Stream (WebSocket push via conversationState.subscribe):
+  conversation.prepared → starting → running → ready
+  → readyLost → stopped → restarting → destroyed
 ```
 
 ### 核心模組
 
 | 模組 | 職責 |
 |------|------|
+| `src/services/conversation-service.ts` | 對話生命週期編排（create/start/stop/restart/delete），委派 InstanceManager + ConversationState + WorkspaceFactory |
+| `src/services/file-service.ts` | 檔案 CRUD 含 50MB 配額強制 |
+| `src/services/session-service.ts` | Session 代理含 `ensureReady` 保護（status=running && ready=true） |
+| `src/services/message-service.ts` | 訊息發送含 model 解析、session 確保、事件發射 |
 | `src/orchestrator/conversation-state.ts` | 事件驅動對話生命周期狀態機（prepared → running → stopped/destroyed），訂閱與事件回放 |
 | `src/orchestrator/instance-manager.ts` | 管理 OpenCode 實例生命周期（啟動、健康檢查、銷毀、LRU），支援 workspace 重用 |
 | `src/orchestrator/port-pool.ts` | 動態端口分配與回收 |
 | `src/orchestrator/workspace-factory.ts` | 建立 workspace，config / agent / file CRUD，copyFromLocal，配額與路徑防護 |
 | `src/opencode-http/client.ts` | 與 OpenCode HTTP API 通訊（含 Basic Auth、會話樹 API） |
 | `src/opencode-cli/models.ts` | 執行 `opencode models` CLI，解析可用模型列表 |
-| `src/websocket/router.ts` | WebSocket 連線路由，20+ JSON-RPC 方法，事件推送，prepared-phase 處理 |
+| `src/websocket/router.ts` | WebSocket 連線路由，全數委派 Service Layer，25+ JSON-RPC 方法，事件推送 |
 | `src/websocket/connection.ts` | JSON-RPC 解析、heartbeat、idle timeout |
 | `src/config-loader.ts` | 載入 JSON 設定並支援環境變數覆寫 |
 
