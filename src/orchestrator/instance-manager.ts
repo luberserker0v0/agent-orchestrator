@@ -1,5 +1,5 @@
 import { type ChildProcess } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { AgentClient } from '../agent-runtime/types.js';
@@ -8,6 +8,26 @@ import type { OrchestratorConfig } from '../config-loader.js';
 import { PortPool } from './port-pool.js';
 import { WorkspaceFactory, type WorkspaceInfo } from './workspace-factory.js';
 import { instancesActive, instancesTotalCreated } from '../metrics/registry.js';
+
+async function retryRm(dirPath: string, maxRetries = 10): Promise<void> {
+  let lastErr: Error | undefined;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await rm(dirPath, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      lastErr = err as Error;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'ENOTEMPTY') {
+        throw err;
+      }
+      if (i < maxRetries - 1) {
+        await new Promise(r => setTimeout(r, 200 * Math.pow(2, i)));
+      }
+    }
+  }
+  throw lastErr;
+}
 
 function generatePassword(): string {
   return randomBytes(16).toString('hex');
@@ -176,7 +196,7 @@ export class InstanceManager {
 
     if (removeWorkspace) {
       try {
-        rmSync(inst.workspacePath, { recursive: true, force: true });
+        await retryRm(inst.workspacePath);
         logger.info(`Workspace removed: ${inst.workspacePath}`);
       } catch (err) {
         logger.error(`Failed to remove workspace: ${inst.workspacePath}`, err);

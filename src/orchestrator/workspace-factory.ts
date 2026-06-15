@@ -9,6 +9,7 @@ import {
   copyFileSync,
   cpSync,
 } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join, dirname, resolve, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { logger } from '../utils/logger.js';
@@ -25,6 +26,26 @@ const MAX_WORKSPACE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 function sanitizeId(raw: string): string {
   return raw.replace(/[\\/]/g, '_').replace(/\.{2,}/g, '_');
+}
+
+async function retryRm(dirPath: string, maxRetries = 10): Promise<void> {
+  let lastErr: Error | undefined;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await rm(dirPath, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      lastErr = err as Error;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'ENOTEMPTY') {
+        throw err;
+      }
+      if (i < maxRetries - 1) {
+        await new Promise(r => setTimeout(r, 200 * Math.pow(2, i)));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function sanitizeRelativePath(raw: string): string {
@@ -118,12 +139,16 @@ export class WorkspaceFactory {
     return { id: wsId, path: wsPath, opencodeDir };
   }
 
-  destroy(id: string): void {
+  async destroy(id: string): Promise<void> {
     const wsId = sanitizeId(id);
     const wsPath = join(this.basePath, wsId);
     if (existsSync(wsPath)) {
-      rmSync(wsPath, { recursive: true, force: true });
-      logger.info(`Workspace destroyed: ${wsPath}`);
+      try {
+        await retryRm(wsPath);
+        logger.info(`Workspace destroyed: ${wsPath}`);
+      } catch (err) {
+        logger.warn(`Failed to destroy workspace: ${wsPath}`, err);
+      }
     } else {
       logger.warn(`Workspace not found for destruction: ${wsPath}`);
     }

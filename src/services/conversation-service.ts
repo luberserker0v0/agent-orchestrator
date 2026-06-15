@@ -216,7 +216,7 @@ export class ConversationService {
       // ignore
     }
     try {
-      this.workspaceFactory.destroy(id);
+      await this.workspaceFactory.destroy(id);
     } catch (wsErr) {
       logger.warn(`Failed to remove workspace for ${id}:`, wsErr);
     }

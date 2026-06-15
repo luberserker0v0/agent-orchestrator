@@ -81,7 +81,7 @@ describe('WorkspaceFactory', () => {
     expect(() => factory.create('conv-004')).not.toThrow();
   });
 
-  it('should destroy workspace and remove files', () => {
+  it('should destroy workspace and remove files', async () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
       enforceCanonicalConfig: true,
@@ -90,17 +90,17 @@ describe('WorkspaceFactory', () => {
     const info = factory.create('conv-005');
     expect(existsSync(info.path)).toBe(true);
 
-    factory.destroy('conv-005');
+    await factory.destroy('conv-005');
     expect(existsSync(info.path)).toBe(false);
   });
 
-  it('should not throw when destroying non-existent workspace', () => {
+  it('should not throw when destroying non-existent workspace', async () => {
     const factory = new WorkspaceFactory({
       basePath: 'test-workspace',
       enforceCanonicalConfig: true,
     });
 
-    expect(() => factory.destroy('non-existent')).not.toThrow();
+    await expect(factory.destroy('non-existent')).resolves.not.toThrow();
   });
 
   it('should ensure workspace directory exists without config', () => {
