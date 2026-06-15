@@ -28,7 +28,7 @@ function sanitizeId(raw: string): string {
   return raw.replace(/[\\/]/g, '_').replace(/\.{2,}/g, '_');
 }
 
-async function retryRm(dirPath: string, maxRetries = 3): Promise<void> {
+async function retryRm(dirPath: string, maxRetries = 3, baseDelay = 500): Promise<void> {
   let lastErr: Error | undefined;
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -41,7 +41,7 @@ async function retryRm(dirPath: string, maxRetries = 3): Promise<void> {
         throw err;
       }
       if (i < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, Math.min(200 * Math.pow(2, i), 2000)));
+        await new Promise(r => setTimeout(r, Math.min(baseDelay * Math.pow(2, i), 2000)));
       }
     }
   }
@@ -161,17 +161,17 @@ export class WorkspaceFactory {
     if (this.cleanupAttempts.has(key)) return;
     this.cleanupAttempts.set(key, 0);
 
-    const retry = (): void => {
+    const attempt = (): void => {
       setTimeout(async () => {
+        const n = this.cleanupAttempts.get(key) ?? 0;
         try {
-          await rm(wsPath, { recursive: true, force: true });
+          await retryRm(wsPath, 5, 1000);
           logger.info(`Background workspace cleanup succeeded: ${wsPath}`);
           this.cleanupAttempts.delete(key);
         } catch {
-          const attempt = (this.cleanupAttempts.get(key) ?? 0) + 1;
-          if (attempt < 10) {
-            this.cleanupAttempts.set(key, attempt);
-            retry();
+          if (n < 10) {
+            this.cleanupAttempts.set(key, n + 1);
+            attempt();
           } else {
             logger.error(`Background cleanup failed after 10 attempts: ${wsPath}`);
             this.cleanupAttempts.delete(key);
@@ -180,7 +180,7 @@ export class WorkspaceFactory {
       }, 10000);
     };
 
-    retry();
+    attempt();
   }
 
   cleanupOrphans(): void {

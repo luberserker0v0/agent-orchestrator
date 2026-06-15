@@ -167,6 +167,7 @@ export class InstanceManager {
         await this.waitForExit(inst.process, 5000);
         if (!inst.process.killed && inst.process.exitCode === null) {
           await this.safeKill(runtime, inst.process, 'SIGKILL');
+          await this.waitForExit(inst.process, 5000);
         }
       }
     }
