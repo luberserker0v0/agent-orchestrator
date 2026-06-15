@@ -32,25 +32,33 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
 │  • SkillService                                             │
 │  Business logic, validation, orchestration of domain calls  │
 └────────────┬─────────────────────┬──────────────────────────┘
-             │                     │
-             ▼                     ▼
+              │                     │
+              ▼                     ▼
 ┌─────────────────────────┐  ┌──────────────────┐
 │    Domain Layer         │  │  OpenCode HTTP   │
 │  • ConversationState    │  │  API (internal)  │
 │  • InstanceManager      │  │  /session        │
 │  • WorkspaceFactory     │  │  /global/health  │
 │  • PortPool             │  │  /provider       │
-│  • RuntimeRegistry      │  └──────────────────┘
-│  • AgentRuntime         │
-└────────────┬────────────┘
-             │
-             │ spawn(...)
-             ▼
-┌─────────────────────┐
-│ OpenCode Instance   │
-│  port: 30000        │
-│  cwd: workspace/... │
-└─────────────────────┘
+└─────────────────────────┘  └──────────────────┘
+              │
+              │ RuntimeRegistry.getOrThrow(agentType)
+              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                Runtime Abstraction Layer                     │
+│  • RuntimeRegistry (agentType → AgentRuntime)               │
+│  • AgentRuntime (interface: spawn, kill, restart, cleanup)  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  OpenCodeRuntime (direct spawn / Docker container)    │  │
+│  └──────────────────────────┬────────────────────────────┘  │
+└─────────────────────────────┼───────────────────────────────┘
+                               │ spawn() / kill()
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     OpenCode Instance                        │
+│  port: 30000   cwd: workspace/...                           │
+│  process | container   client: OpenCodeClient                │
+└─────────────────────────────────────────────────────────────┘
 
 Event Stream (WebSocket push via conversationState.subscribe):
   conversation.prepared
@@ -283,7 +291,13 @@ OpenCode Session 代理，含 `ensureReady` 保護。
 
 ---
 
-### `src/orchestrator/conversation-state.ts`
+### Domain Layer (`src/orchestrator/`)
+
+對話生命周期管理、進程編排、端口分配與 workspace 檔案操作的核心領域邏輯。不直接依賴 Runtime 實作，而是透過 `RuntimeRegistry` 間接操作。
+
+---
+
+#### `src/orchestrator/conversation-state.ts`
 
 事件驅動的對話生命周期狀態機，管理從 `prepared` 到 `destroyed` 的所有狀態轉換，並提供訂閱機制供 WebSocket 推送即時事件。
 
@@ -309,9 +323,9 @@ OpenCode Session 代理，含 `ensureReady` 保護。
 
 ---
 
-### `src/agent-runtime/`
+### Runtime Abstraction Layer (`src/agent-runtime/`)
 
-提供可插拔的 Runtime 抽象層，將 `InstanceManager` 與具體的進程/容器管理邏輯解耦。
+獨立的可插拔 Runtime 抽象層，定義 `AgentRuntime` 介面並提供 `OpenCodeRuntime` 實作。`InstanceManager` 不直接操作進程，而是透過 `RuntimeRegistry` 查詢對應的 `AgentRuntime` 實作來委派 spawn/kill/restart。
 
 **`src/agent-runtime/types.ts`** — `AgentRuntime` 介面與 `SpawnResult` 型別：
 
@@ -336,7 +350,7 @@ interface SpawnResult {
 
 ---
 
-### `src/orchestrator/instance-manager.ts`
+#### `src/orchestrator/instance-manager.ts`
 
 管理所有 OpenCode 實例的生命周期，透過 `RuntimeRegistry` 呼叫對應的 runtime 實作。
 
@@ -368,7 +382,7 @@ interface SpawnResult {
 
 ---
 
-### `src/orchestrator/port-pool.ts`
+#### `src/orchestrator/port-pool.ts`
 
 動態端口分配器，確保 OpenCode 實例端口不衝突。
 
@@ -380,7 +394,7 @@ interface SpawnResult {
 
 ---
 
-### `src/orchestrator/workspace-factory.ts`
+#### `src/orchestrator/workspace-factory.ts`
 
 建立與管理每個對話的獨立 workspace，支援配置、Agent、檔案與 Skill 的 CRUD，以及本地檔案複製與配額管理。
 
