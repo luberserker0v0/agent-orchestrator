@@ -22,7 +22,7 @@ async function retryRm(dirPath: string, maxRetries = 10): Promise<void> {
         throw err;
       }
       if (i < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 200 * Math.pow(2, i)));
+        await new Promise(r => setTimeout(r, Math.min(200 * Math.pow(2, i), 2000)));
       }
     }
   }
