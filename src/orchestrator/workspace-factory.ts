@@ -162,22 +162,23 @@ export class WorkspaceFactory {
     this.cleanupAttempts.set(key, 0);
 
     const attempt = (): void => {
+      const n = this.cleanupAttempts.get(key) ?? 0;
+      const delay = Math.min(10000 * Math.pow(1.5, n), 120000);
       setTimeout(async () => {
-        const n = this.cleanupAttempts.get(key) ?? 0;
         try {
           await retryRm(wsPath, 5, 1000);
           logger.info(`Background workspace cleanup succeeded: ${wsPath}`);
           this.cleanupAttempts.delete(key);
         } catch {
-          if (n < 10) {
+          if (n < 30) {
             this.cleanupAttempts.set(key, n + 1);
             attempt();
           } else {
-            logger.error(`Background cleanup failed after 10 attempts: ${wsPath}`);
+            logger.error(`Background cleanup failed after 30 attempts: ${wsPath}`);
             this.cleanupAttempts.delete(key);
           }
         }
-      }, 10000);
+      }, delay);
     };
 
     attempt();
