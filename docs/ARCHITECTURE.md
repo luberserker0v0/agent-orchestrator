@@ -18,23 +18,39 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
             │  /api/conversations│                   │
             ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    AgentOrchestrator HTTP API                │
-│  • Express Server (port 0 = auto-allocated)                 │
-│  • WebSocket upgrade handling                               │
-│  • JSON-RPC 2.0 dispatch                                    │
-│  • ConversationState (event-driven lifecycle)               │
+│                    Transport Layer                           │
+│  • Express HTTP Server (route handlers)                     │
+│  • WebSocket JSON-RPC Router (method dispatch)              │
+│  Both delegate to Service Layer — no direct domain access   │
 └──────────────────────────────┬──────────────────────────────┘
                                 │
-            ┌───────────────────┼───────────────────┐
-            │                   │                   │
-            │ spawn(...)        │ HTTP              │
-            │                   │ (internal)        │
-            ▼                   ▼
-┌─────────────────────┐  ┌──────────────┐
-│ OpenCode Instance #1│  │  OpenCode   │
-│  port: 30000        │  │  HTTP API   │
-│  cwd: workspace/... │  │  /session   │
-└─────────────────────┘  └──────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Service Layer                            │
+│  • ConversationService  • FileService   • MessageService    │
+│  • SessionService       • ConfigService • AgentService      │
+│  • SkillService                                             │
+│  Business logic, validation, orchestration of domain calls  │
+└────────────┬─────────────────────┬──────────────────────────┘
+             │                     │
+             ▼                     ▼
+┌─────────────────────────┐  ┌──────────────────┐
+│    Domain Layer         │  │  OpenCode HTTP   │
+│  • ConversationState    │  │  API (internal)  │
+│  • InstanceManager      │  │  /session        │
+│  • WorkspaceFactory     │  │  /global/health  │
+│  • PortPool             │  │  /provider       │
+│  • RuntimeRegistry      │  └──────────────────┘
+│  • AgentRuntime         │
+└────────────┬────────────┘
+             │
+             │ spawn(...)
+             ▼
+┌─────────────────────┐
+│ OpenCode Instance   │
+│  port: 30000        │
+│  cwd: workspace/... │
+└─────────────────────┘
 
 Event Stream (WebSocket push via conversationState.subscribe):
   conversation.prepared
@@ -57,11 +73,11 @@ Event Stream (WebSocket push via conversationState.subscribe):
 Client → POST /api/conversations
   │
   ▼
-AgentOrchestrator
-  │ 1. 產生 UUID → workspace/{id}/
-  │ 2. WorkspaceFactory.create(id) → 建立資料夾（`opencode.json` 僅在用戶 POST 時寫入）
-  │ 3. ConversationState.create(id) → status = 'prepared'
-  │ 4. 註冊 wsUrl (尚未分配 port，不啟動 OpenCode)
+AgentOrchestrator HTTP Server
+  │ 1. 呼叫 ConversationService.create(id?)
+  │    │ 1a. WorkspaceFactory.create(id) → 建立資料夾（`opencode.json` 僅在用戶 POST 時寫入）
+  │    │ 1b. ConversationState.create(id) → status = 'prepared'
+  │    │ 1c. 註冊 wsUrl (尚未分配 port，不啟動 OpenCode)
   │
   ▼
 回傳 { id, status: 'prepared', wsUrl }
@@ -73,19 +89,16 @@ AgentOrchestrator
 Client → POST /api/conversations/{id}/start
   │
   ▼
-AgentOrchestrator
-  │ 1. ConversationState.transition(id, 'starting')
-  │    → emit 'conversation.starting'
-  │ 2. InstanceManager.createInstance(id)
-  │    │ 2a. 若 workspace 已存在 → 跳過 create，直接使用
-  │    │ 2b. PortPool.allocate() → 動態端口
-  │    │ 2c. runtimeRegistry.getOrThrow(agentType).spawn(id, port, workspacePath, agentType)
+AgentOrchestrator HTTP Server → ConversationService.start(id)
+  │ 1. ConversationService 呼叫 InstanceManager.createInstance(id)
+  │    │ 1a. 若 workspace 已存在 → 跳過 create，直接使用
+  │    │ 1b. PortPool.allocate() → 動態端口
+  │    │ 1c. runtimeRegistry.getOrThrow(agentType).spawn(id, port, workspacePath, agentType)
   │    │     → 啟動 OpenCode（direct spawn 或 Docker 容器）
-  │    │ 2d. 輪詢 GET /global/health 直到通過
-  │    │ 2e. POST /session → 建立初始 Session
+  │    │ 1d. 輪詢 GET /global/health 直到通過
+  │    │ 1e. POST /session → 建立初始 Session（background）
   │    ▼
-  │ 3. ConversationState.transition(id, 'running')
-  │    → setRunningInstance(port, sessionId)
+  │ 2. ConversationService 更新 ConversationState → status = 'running'
   │    → emit 'conversation.running'
   │    → push to WebSocket subscribers
   │
@@ -100,20 +113,23 @@ Client → WS connect /ws/{conversationId}
   │
   ▼
 AgentOrchestrator WS Router
-  │ 1. 檢查 ConversationState.has(id)；若不存在 → reject (1011)
+  │ 1. 呼叫 ConversationService.get(id) 檢查對話是否存在；若不存在 → reject (1011)
   │ 2. 訂閱 conversationState.subscribe(id, cb) → 接收事件推送
   │ 3. 接收 JSON-RPC 請求 (e.g. message.send)
-  │ 4. 檢查 status === 'running'；若否 → reject (-32001 invalid state)
-  │ 5. 查找 InstanceInfo (Map<conversationId>)
-  │ 6. model 字串 → { providerID, modelID } (或 fallback 到 defaultModel)
-  │ 7. agent → fallback 到 defaultAgent
+  │ 4. 透過 ConversationService.get(id) 檢查 status === 'running'；若否 → reject error
+  │ 5. 呼叫 MessageService.send(id, text, model?, agent?)
+  │    │ 5a. 檢查 status === 'running' && ready === true；若否 → reject
+  │    │ 5b. 透過 SessionService.ensureReady(id) 確保 session 可用
+  │    │ 5c. ModelParser.parse(model) → { providerID, modelID }
+  │    │ 5d. HTTP POST → OpenCode /session/{sid}/message
+  │    │ 5e. emit 'conversation.message' event
   │
   ▼
 HTTP POST → OpenCode /session/{sid}/message
   │ (OpenCode 內部處理 tool calling loop)
   │
   ▼
-回傳 AI 回應 → AgentOrchestrator → WebSocket JSON-RPC result
+回傳 AI 回應 → MessageService → WS Router → WebSocket JSON-RPC result
 ```
 
 ### 3. 刪除對話
@@ -122,13 +138,14 @@ HTTP POST → OpenCode /session/{sid}/message
 Client → DELETE /api/conversations/{id}
   │
   ▼
-AgentOrchestrator
-  │ 1. InstanceManager.destroyInstance(id) (若 running)
+AgentOrchestrator HTTP Server → ConversationService.delete(id)
+  │ 1. ConversationService 呼叫 InstanceManager.destroyInstance(id) (若 running)
   │    │ 1a. runtime.kill(id) → 終止 OpenCode（direct 模式 tree-kill，docker 模式 kill container）
   │    │ 1b. PortPool.release(port)
-  │ 2. ConversationState.transition(id, 'destroyed')
+  │ 2. ConversationService 更新 ConversationState → status = 'destroyed'
   │    → emit 'conversation.destroyed'
-  │ 3. WorkspaceFactory.destroy(id) → rmSync(workspace/{id}/)
+  │ 3. ConversationService 呼叫 WorkspaceFactory.destroy(id) → rmSync(workspace/{id}/)
+  │    (若步驟 1 或 2 失敗，仍嘗試執行步驟 3)
   │
   ▼
 回傳 204 No Content
@@ -191,6 +208,80 @@ AgentOrchestrator
 ---
 
 ## 核心模組
+
+### `src/services/` — Service Layer
+
+Service Layer 是 transport（HTTP/WS）與 domain（InstanceManager、ConversationState、WorkspaceFactory）之間的中間層。Transport 層不直接操作 domain 元件，全部透過 Service 委派。
+
+---
+
+#### `src/services/conversation-service.ts`
+
+對話生命週期編排（prepared → running → stopped → destroyed）。
+
+**`ConversationService`**：
+
+| 方法 | 職責 |
+|------|------|
+| `create(id?)` | 建立 workspace + ConversationState，回傳對話資訊 |
+| `start(id)` | 啟動 OpenCode：InstanceManager.createInstance → ConversationState transition |
+| `stop(id)` | 停止 OpenCode：InstanceManager.destroyInstance → ConversationState transition（保留 workspace） |
+| `restart(id)` | 重啟：先 stop 再 start（保留 workspace） |
+| `delete(id)` | 刪除：InstanceManager.destroyInstance → ConversationState transition → WorkspaceFactory.destroy（catch 各步驟錯誤） |
+| `get(id)` | 取得對話狀態與實例資訊 |
+| `list()` | 列出所有對話 |
+| `getEvents(id, limit?)` | 取得最近事件歷史 |
+
+---
+
+#### `src/services/file-service.ts`
+
+檔案 CRUD，含 50MB 配額強制。
+
+**`FileService`**：
+
+| 方法 | 職責 |
+|------|------|
+| `write(id, path, content)` | 寫入檔案前檢查配額，拒絕超過 50MB 的操作 |
+| `read(id, path)` | 讀取檔案內容 |
+| `delete(id, path)` | 刪除檔案 |
+| `copy(id, source, dest)` | 從本地白名單路徑複製檔案到 workspace |
+| `list(id, path?)` | 列出目錄內容 |
+
+---
+
+#### `src/services/session-service.ts`
+
+OpenCode Session 代理，含 `ensureReady` 保護。
+
+**`SessionService`**：
+
+| 方法 | 職責 |
+|------|------|
+| `create(id, params?)` | 建立新會話，檢查 status=running && ready=true |
+| `list(id)` | 列出所有會話 |
+| `get(id, sessionId)` | 取得指定會話 |
+| `delete(id, sessionId)` | 刪除會話 |
+| `fork(id, sessionId, messageID?)` | 從指定會話分支 |
+| `getChildren(id, sessionId)` | 取得子會話 |
+| `abort(id)` | 中止當前生成 |
+| `listProviders(id)` | 取得模型提供商列表 |
+| `ensureReady(id)` | 內部保護：確認 OpenCode 已就緒（status=running && ready=true） |
+
+---
+
+#### `src/services/message-service.ts`
+
+訊息發送與歷史，含 model 字串解析與事件發射。
+
+**`MessageService`**：
+
+| 方法 | 職責 |
+|------|------|
+| `send(id, text, model?, agent?)` | 發送訊息：解析 model→providerID/modelID，確保 session 就緒，呼叫 OpenCode API，emit conversation.message 事件 |
+| `getHistory(id, sessionId?, limit?)` | 取得對話歷史 |
+
+---
 
 ### `src/orchestrator/conversation-state.ts`
 
@@ -360,20 +451,20 @@ interface SpawnResult {
 
 ### `src/websocket/router.ts`
 
-WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話；**不再自動建立實例**，所有操作都透過 `ConversationState` 檢查與事件訂閱。
+WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話。**不再自動建立實例**，所有操作都透過 Service Layer 委派。
 
 **`WSRouter`**：
 - 解析 URL 中的 `conversationId`
-- 檢查 `conversationState.has(id)`；若不存在 → 關閉連線（code `1011`）
+- 呼叫 `ConversationService.get(id)` 檢查對話是否存在；若不存在 → 關閉連線（code `1011`）
 - 訂閱 `conversationState.subscribe(id)`，將事件即時推送給客戶端
-- 處理 25+ JSON-RPC 方法，包括：
-  - 會話類：`session.create`, `session.delete`, `session.list`, `session.get`, `session.children`, `session.fork`, `session.abort`
-  - 訊息類：`message.send`, `message.history`
-  - 對話控制類：`conversation.status`, `conversation.start`, `conversation.stop`, `conversation.restart`
-  - 配置類：`config.get`, `config.update`
-  - Agent 類：`agent.list`, `agent.read`, `agent.write`, `agent.delete`, `agent.config.get`, `agent.config.write`, `agent.config.delete`
-  - 檔案類：`file.list`, `file.read`, `file.write`, `file.delete`
-  - Skill 類：`skills.import`, `skills.list`, `skills.get`, `skills.info`, `skills.delete`
+- 處理 25+ JSON-RPC 方法，全數委派給對應 Service：
+  - 會話類 → `SessionService`
+  - 訊息類 → `MessageService`
+  - 對話控制類 → `ConversationService`
+  - 配置類 → `ConfigService`
+  - Agent 類 → `AgentService`
+  - 檔案類 → `FileService`
+  - Skill 類 → `SkillService`
   - 事件類：自動推送（連線即訂閱，無需顯式 RPC）
 - 若對話狀態非 `running`，執行需實例操作的方法時回傳 `-32001` invalid state
 

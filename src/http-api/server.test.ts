@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { createHttpServer, type HttpServer } from './server.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig } from '../test-fixtures/ao-configs.js';
+import { AppError, ErrorCodes } from '../utils/errors.js';
 import AdmZip from 'adm-zip';
 
 describe('HTTP API Server', () => {
@@ -13,6 +14,10 @@ describe('HTTP API Server', () => {
   let mockConfigService: any;
   let mockAgentService: any;
   let mockSkillService: any;
+  let mockConversationService: any;
+  let mockFileService: any;
+  let mockSessionService: any;
+  let mockMessageService: any;
   let mockRuntimeRegistry: any;
 
   beforeEach(() => {
@@ -95,6 +100,55 @@ describe('HTTP API Server', () => {
       deleteSkill: vi.fn(),
     };
 
+    mockConversationService = {
+      create: vi.fn().mockImplementation((id, agentType) => {
+        const convId = id ?? 'test-id';
+        return {
+          id: convId,
+          agentType: agentType ?? 'opencode',
+          status: 'prepared',
+          ready: false,
+          needsRestart: false,
+          port: undefined,
+          sessionId: undefined,
+          wsUrl: `ws://127.0.0.1:8080/ws/${convId}`,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+      }),
+      start: vi.fn().mockResolvedValue({ id: 'conv-001', agentType: 'opencode', status: 'running', ready: false, port: 30000, sessionId: undefined }),
+      stop: vi.fn().mockResolvedValue(undefined),
+      restart: vi.fn().mockResolvedValue({ id: 'conv-001', agentType: 'opencode', status: 'running', ready: false, port: 30000, sessionId: undefined }),
+      delete: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockReturnValue({ id: 'conv-001', status: 'ready', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://localhost/ws/conv-001', createdAt: 100, updatedAt: 200 }),
+      list: vi.fn().mockReturnValue([]),
+      getEvents: vi.fn().mockReturnValue([]),
+    };
+
+    mockFileService = {
+      write: vi.fn(),
+      read: vi.fn().mockReturnValue('file content'),
+      delete: vi.fn(),
+      copy: vi.fn(),
+      list: vi.fn().mockReturnValue(['file1.txt', 'file2.txt']),
+    };
+
+    mockSessionService = {
+      create: vi.fn().mockResolvedValue({ id: 'ses_new' }),
+      list: vi.fn().mockResolvedValue([{ id: 'ses_1' }]),
+      get: vi.fn().mockResolvedValue({ id: 'ses_1' }),
+      delete: vi.fn().mockResolvedValue(undefined),
+      fork: vi.fn().mockResolvedValue({ id: 'forked_ses' }),
+      getChildren: vi.fn().mockResolvedValue([{ id: 'child_1' }]),
+      abort: vi.fn().mockResolvedValue({ aborted: true }),
+      listProviders: vi.fn().mockResolvedValue({ providers: [], default: {} }),
+    };
+
+    mockMessageService = {
+      send: vi.fn().mockResolvedValue({ messageId: 'msg_1', text: 'Hello back!', parts: [{ type: 'text', text: 'Hello back!' }] }),
+      getHistory: vi.fn().mockResolvedValue([]),
+    };
+
     httpServer = createHttpServer(
       { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
       { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
@@ -105,7 +159,11 @@ describe('HTTP API Server', () => {
       mockConfigService,
       mockAgentService,
       mockSkillService,
-      mockRuntimeRegistry
+      mockRuntimeRegistry,
+      mockConversationService,
+      mockFileService,
+      mockSessionService,
+      mockMessageService
     );
     server = httpServer.server;
   });
@@ -144,7 +202,10 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations prepares workspace', async () => {
-    mockConversationState.has.mockReturnValue(false);
+    mockConversationService.create.mockReturnValue({
+      id: 'conv-001', agentType: 'opencode', status: 'prepared', ready: false,
+      wsUrl: 'ws://127.0.0.1:8080/ws/conv-001', createdAt: Date.now(), updatedAt: Date.now(),
+    });
 
     const res = await request(server)
       .post('/api/conversations')
@@ -157,8 +218,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations returns 500 on workspace failure', async () => {
-    mockConversationState.has.mockReturnValue(false);
-    mockWorkspaceFactory.create.mockImplementation(() => {
+    mockConversationService.create.mockImplementation(() => {
       throw new Error('disk full');
     });
 
@@ -171,20 +231,14 @@ describe('HTTP API Server', () => {
   });
 
   it('DELETE /api/conversations/:id destroys instance and workspace', async () => {
-    mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ status: 'stopped' });
-
     const res = await request(server).delete('/api/conversations/conv-001');
 
     expect(res.status).toBe(204);
-    // destroyInstance is always called (no-op if already destroyed)
-    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
-    expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith('conv-001');
-    expect(mockConversationState.remove).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationService.delete).toHaveBeenCalledWith('conv-001');
   });
 
   it('DELETE /api/conversations/:id returns 404 when not found', async () => {
-    mockConversationState.has.mockReturnValue(false);
+    mockConversationService.delete.mockRejectedValue(new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found'));
 
     const res = await request(server).delete('/api/conversations/conv-001');
 
@@ -193,8 +247,8 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations lists conversations', async () => {
-    mockConversationState.list.mockReturnValue([
-      { id: 'conv-001', status: 'prepared', needsRestart: false, port: undefined, sessionId: undefined, wsUrl: 'ws://localhost:8080/ws/conv-001', createdAt: Date.now(), updatedAt: Date.now() },
+    mockConversationService.list.mockReturnValue([
+      { id: 'conv-001', agentType: 'opencode', status: 'prepared', ready: false, needsRestart: false, port: undefined, sessionId: undefined, wsUrl: 'ws://localhost:8080/ws/conv-001', createdAt: Date.now(), updatedAt: Date.now() },
     ]);
 
     const res = await request(server).get('/api/conversations');
@@ -257,22 +311,18 @@ describe('HTTP API Server', () => {
   // ─── Start / Stop / Restart ──────────────────────────────
 
   it('POST /api/conversations/:id/start returns 200 and transitions to running', async () => {
-    mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared', agentType: 'opencode' });
-    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30000, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
+    mockConversationService.start.mockResolvedValue({ id: 'conv-001', agentType: 'opencode', status: 'running', ready: false, port: 30000 });
 
     const res = await request(server).post('/api/conversations/conv-001/start');
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('running');
     expect(res.body.port).toBe(30000);
-    expect(res.body.sessionId).toBeUndefined();
-    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001', 'opencode');
+    expect(mockConversationService.start).toHaveBeenCalledWith('conv-001');
   });
 
   it('POST /api/conversations/:id/start returns 409 when already running', async () => {
-    mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockConversationService.start.mockRejectedValue(new AppError(409, ErrorCodes.CONVERSATION_ALREADY_RUNNING, 'Conversation is already starting or running'));
 
     const res = await request(server).post('/api/conversations/conv-001/start');
 
@@ -281,9 +331,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/start returns 500 on instance creation failure', async () => {
-    mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
-    mockInstanceManager.createInstance.mockRejectedValue(new Error('port allocation failed'));
+    mockConversationService.start.mockRejectedValue(new Error('port allocation failed'));
 
     const res = await request(server).post('/api/conversations/conv-001/start');
 
@@ -294,10 +342,7 @@ describe('HTTP API Server', () => {
   // ─── Sessions ───────────────────────────────────────────
 
   it('POST /api/conversations/:id/sessions creates a session', async () => {
-    mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const mockClient = { createSession: vi.fn().mockResolvedValue({ id: 'ses_new', title: 'test', status: 'active', created_at: '2026-01-01', updated_at: '2026-01-01' }) };
-    mockInstanceManager.getInstance.mockReturnValue({ client: mockClient });
+    mockSessionService.create.mockResolvedValue({ id: 'ses_new', title: 'test', status: 'active', created_at: '2026-01-01', updated_at: '2026-01-01' });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/sessions')
@@ -305,11 +350,11 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.id).toBe('ses_new');
-    expect(mockClient.createSession).toHaveBeenCalledWith({ title: 'test', parentID: undefined });
+    expect(mockSessionService.create).toHaveBeenCalledWith('conv-001', { title: 'test' });
   });
 
   it('POST /api/conversations/:id/sessions returns 404 when conversation not found', async () => {
-    mockConversationState.has.mockReturnValue(false);
+    mockSessionService.create.mockRejectedValue(new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found'));
 
     const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
 
@@ -318,8 +363,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/sessions returns 409 when not running', async () => {
-    mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+    mockSessionService.create.mockRejectedValue(new AppError(409, ErrorCodes.CONVERSATION_NOT_RUNNING, 'Conversation is not running (status: prepared)'));
 
     const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
 
@@ -328,9 +372,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/sessions returns 500 when instance reference lost', async () => {
-    mockConversationState.has.mockReturnValue(true);
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    mockInstanceManager.getInstance.mockReturnValue(undefined);
+    mockSessionService.create.mockRejectedValue(new Error('Instance reference lost'));
 
     const res = await request(server).post('/api/conversations/conv-001/sessions').send({});
 
@@ -686,12 +728,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/message sends text and returns result', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const sendPrompt = vi.fn().mockResolvedValue({
-      info: { id: 'msg_1', role: 'assistant', session_id: 'ses_1', created_at: '', updated_at: '' },
-      parts: [{ type: 'text', text: 'Hello back!' }],
-    });
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: { sendPrompt } });
+    mockMessageService.send.mockResolvedValue({ messageId: 'msg_1', text: 'Hello back!', parts: [{ type: 'text', text: 'Hello back!' }] });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/message')
@@ -701,43 +738,18 @@ describe('HTTP API Server', () => {
     expect(res.body.messageId).toBe('msg_1');
     expect(res.body.text).toBe('Hello back!');
     expect(res.body.parts).toEqual([{ type: 'text', text: 'Hello back!' }]);
-    expect(sendPrompt).toHaveBeenCalledWith('ses_1', {
-      model: undefined,
-      agent: undefined,
-      parts: [{ type: 'text', text: 'Hello' }],
-    });
-    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.message', {
-      messageId: 'msg_1',
-      text: 'Hello back!',
-      parts: [{ type: 'text', text: 'Hello back!' }],
-      role: 'assistant',
-    });
+    expect(mockMessageService.send).toHaveBeenCalledWith('conv-001', 'Hello', undefined, undefined);
   });
 
   it('POST /api/conversations/:id/message passes model and agent to OpenCode', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const sendPrompt = vi.fn().mockResolvedValue({
-      info: { id: 'msg_2', role: 'assistant', session_id: 'ses_1', created_at: '', updated_at: '' },
-      parts: [{ type: 'text', text: 'Done' }],
-    });
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: { sendPrompt } });
+    mockMessageService.send.mockResolvedValue({ messageId: 'msg_2', text: 'Done', parts: [{ type: 'text', text: 'Done' }] });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/message')
       .send({ text: 'Build it', model: 'google/gemini-2.0', agent: 'build' });
 
     expect(res.status).toBe(200);
-    expect(sendPrompt).toHaveBeenCalledWith('ses_1', {
-      model: { providerID: 'google', modelID: 'gemini-2.0' },
-      agent: 'build',
-      parts: [{ type: 'text', text: 'Build it' }],
-    });
-    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.message', {
-      messageId: 'msg_2',
-      text: 'Done',
-      parts: [{ type: 'text', text: 'Done' }],
-      role: 'assistant',
-    });
+    expect(mockMessageService.send).toHaveBeenCalledWith('conv-001', 'Build it', 'google/gemini-2.0', 'build');
   });
 
   it('POST /api/conversations/:id/message returns 400 for missing text', async () => {
@@ -752,7 +764,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/message returns 409 when not running', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+    mockMessageService.send.mockRejectedValue(new AppError(409, ErrorCodes.CONVERSATION_NOT_RUNNING, 'Conversation is not running (status: prepared)'));
 
     const res = await request(server)
       .post('/api/conversations/conv-001/message')
@@ -763,8 +775,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/message returns 500 when instance reference lost', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    mockInstanceManager.getInstance.mockReturnValue(undefined);
+    mockMessageService.send.mockRejectedValue(new Error('Instance reference lost'));
 
     const res = await request(server)
       .post('/api/conversations/conv-001/message')
@@ -787,7 +798,9 @@ describe('HTTP API Server', () => {
   // ─── Conversation already exists ──────────────────────
 
   it('POST /api/conversations returns 409 when conversation already exists', async () => {
-    mockConversationState.has.mockReturnValue(true);
+    mockConversationService.create.mockImplementation(() => {
+      throw new AppError(409, ErrorCodes.CONVERSATION_ALREADY_EXISTS, 'Conversation already exists');
+    });
 
     const res = await request(server)
       .post('/api/conversations')
@@ -800,18 +813,17 @@ describe('HTTP API Server', () => {
   // ─── Stop ──────────────────────────────────────────────
 
   it('POST /api/conversations/:id/stop stops a running conversation', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
+    mockConversationService.stop.mockResolvedValue(undefined);
 
     const res = await request(server).post('/api/conversations/conv-001/stop');
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('stopped');
-    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
-    expect(mockConversationState.removeRunningInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationService.stop).toHaveBeenCalledWith('conv-001');
   });
 
   it('POST /api/conversations/:id/stop returns 409 when in prepared status', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+    mockConversationService.stop.mockRejectedValue(new AppError(409, ErrorCodes.CANNOT_STOP, 'Cannot stop conversation in status: prepared'));
 
     const res = await request(server).post('/api/conversations/conv-001/stop');
 
@@ -820,8 +832,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/stop returns 500 on instance destruction failure', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
-    mockInstanceManager.destroyInstance.mockRejectedValue(new Error('kill failed'));
+    mockConversationService.stop.mockRejectedValue(new Error('kill failed'));
 
     const res = await request(server).post('/api/conversations/conv-001/stop');
 
@@ -832,28 +843,26 @@ describe('HTTP API Server', () => {
   // ─── Restart ───────────────────────────────────────────
 
   it('POST /api/conversations/:id/restart restarts from stopped status', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30001, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
+    mockConversationService.restart.mockResolvedValue({ id: 'conv-001', agentType: 'opencode', status: 'running', ready: false, port: 30001 });
 
     const res = await request(server).post('/api/conversations/conv-001/restart');
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('running');
-    expect(mockConversationState.clearNeedsRestart).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationService.restart).toHaveBeenCalledWith('conv-001');
   });
 
   it('POST /api/conversations/:id/restart restarts from running status', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
-    mockInstanceManager.createInstance.mockResolvedValue({ id: 'conv-001', port: 30002, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
+    mockConversationService.restart.mockResolvedValue({ id: 'conv-001', agentType: 'opencode', status: 'running', ready: false, port: 30002 });
 
     const res = await request(server).post('/api/conversations/conv-001/restart');
 
     expect(res.status).toBe(200);
-    expect(mockInstanceManager.stopInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationService.restart).toHaveBeenCalledWith('conv-001');
   });
 
   it('POST /api/conversations/:id/restart returns 409 when in prepared status', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared' });
+    mockConversationService.restart.mockRejectedValue(new AppError(409, ErrorCodes.CANNOT_RESTART, 'Cannot restart conversation in status: prepared'));
 
     const res = await request(server).post('/api/conversations/conv-001/restart');
 
@@ -862,8 +871,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/restart returns 500 on instance creation failure', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'stopped' });
-    mockInstanceManager.createInstance.mockRejectedValue(new Error('port busy'));
+    mockConversationService.restart.mockRejectedValue(new Error('port busy'));
 
     const res = await request(server).post('/api/conversations/conv-001/restart');
 
@@ -882,24 +890,25 @@ describe('HTTP API Server', () => {
       mockConfigService,
       mockAgentService,
       mockSkillService,
-      mockRuntimeRegistry
+      mockRuntimeRegistry,
+      mockConversationService,
+      mockFileService,
+      mockSessionService,
+      mockMessageService
     );
-    mockConversationState.get.mockReturnValue({ id: 'conv-docker', status: 'running' });
-    mockInstanceManager.restartInstance.mockResolvedValue(undefined);
-    mockInstanceManager.getInstance.mockReturnValue({ port: 30010, process: {}, client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) } });
+    mockConversationService.restart.mockResolvedValue({ id: 'conv-docker', agentType: 'opencode', status: 'running', ready: false, port: 30010 });
 
     const res = await request(dockerHttp.server).post('/api/conversations/conv-docker/restart');
 
     expect(res.status).toBe(200);
-    expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith('conv-docker');
-    expect(mockInstanceManager.stopInstance).not.toHaveBeenCalled();
+    expect(mockConversationService.restart).toHaveBeenCalledWith('conv-docker');
     dockerHttp.server.close();
   });
 
   // ─── Single conversation GET ───────────────────────────
 
   it('GET /api/conversations/:id returns conversation', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://localhost/ws/conv-001', createdAt: 100, updatedAt: 200 });
+    mockConversationService.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://localhost/ws/conv-001', createdAt: 100, updatedAt: 200 });
 
     const res = await request(server).get('/api/conversations/conv-001');
 
@@ -910,7 +919,9 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id returns 404 when not found', async () => {
-    mockConversationState.has.mockReturnValue(false);
+    mockConversationService.get.mockImplementation(() => {
+      throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
+    });
 
     const res = await request(server).get('/api/conversations/conv-001');
 
@@ -921,7 +932,7 @@ describe('HTTP API Server', () => {
   // ─── Events ────────────────────────────────────────────
 
   it('GET /api/conversations/:id/events returns events', async () => {
-    mockConversationState.getRecentEvents.mockReturnValue([
+    mockConversationService.getEvents.mockReturnValue([
       { type: 'conversation.started', timestamp: 100 },
     ]);
 
@@ -932,7 +943,9 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/events returns 404 when not found', async () => {
-    mockConversationState.has.mockReturnValue(false);
+    mockConversationService.getEvents.mockImplementation(() => {
+      throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
+    });
 
     const res = await request(server).get('/api/conversations/conv-001/events');
 
@@ -1051,7 +1064,7 @@ describe('HTTP API Server', () => {
       .send({ path: 'test.txt', content: 'hello' });
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.writeFile).toHaveBeenCalledWith('conv-001', 'test.txt', 'hello');
+    expect(mockFileService.write).toHaveBeenCalledWith('conv-001', 'test.txt', 'hello');
   });
 
   it('PUT /api/conversations/:id/files returns 400 for missing path or content', async () => {
@@ -1064,7 +1077,7 @@ describe('HTTP API Server', () => {
   });
 
   it('PUT /api/conversations/:id/files returns 500 on write error', async () => {
-    mockWorkspaceFactory.writeFile.mockImplementation(() => { throw new Error('write failed'); });
+    mockFileService.write.mockImplementation(() => { throw new Error('write failed'); });
 
     const res = await request(server)
       .put('/api/conversations/conv-001/files')
@@ -1074,7 +1087,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/files/read reads a file', async () => {
-    mockWorkspaceFactory.readFile.mockReturnValue('file content');
+    mockFileService.read.mockReturnValue('file content');
 
     const res = await request(server)
       .post('/api/conversations/conv-001/files/read')
@@ -1094,7 +1107,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/files/read returns 404 when file not found', async () => {
-    mockWorkspaceFactory.readFile.mockImplementation(() => { throw new Error('File not found'); });
+    mockFileService.read.mockImplementation(() => { throw new Error('File not found'); });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/files/read')
@@ -1109,7 +1122,7 @@ describe('HTTP API Server', () => {
       .send({ path: 'test.txt' });
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.deleteFile).toHaveBeenCalledWith('conv-001', 'test.txt');
+    expect(mockFileService.delete).toHaveBeenCalledWith('conv-001', 'test.txt');
   });
 
   it('POST /api/conversations/:id/files/delete returns 400 for missing path', async () => {
@@ -1122,7 +1135,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/files/delete returns 500 on error', async () => {
-    mockWorkspaceFactory.deleteFile.mockImplementation(() => { throw new Error('delete failed'); });
+    mockFileService.delete.mockImplementation(() => { throw new Error('delete failed'); });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/files/delete')
@@ -1137,7 +1150,7 @@ describe('HTTP API Server', () => {
       .send({ source: 'src.txt', dest: 'dst.txt' });
 
     expect(res.status).toBe(204);
-    expect(mockWorkspaceFactory.copyFromLocal).toHaveBeenCalledWith('conv-001', 'src.txt', 'dst.txt');
+    expect(mockFileService.copy).toHaveBeenCalledWith('conv-001', 'src.txt', 'dst.txt');
   });
 
   it('POST /api/conversations/:id/files/copy returns 400 for missing source or dest', async () => {
@@ -1150,7 +1163,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/files/copy returns 500 on error', async () => {
-    mockWorkspaceFactory.copyFromLocal.mockImplementation(() => { throw new Error('copy failed'); });
+    mockFileService.copy.mockImplementation(() => { throw new Error('copy failed'); });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/files/copy')
@@ -1160,7 +1173,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/files/list lists files', async () => {
-    mockWorkspaceFactory.listFiles.mockReturnValue(['file1.txt', 'file2.txt']);
+    mockFileService.list.mockReturnValue(['file1.txt', 'file2.txt']);
 
     const res = await request(server)
       .post('/api/conversations/conv-001/files/list')
@@ -1173,7 +1186,7 @@ describe('HTTP API Server', () => {
   // ─── Helpers ──────────────────────────────────────────
 
   it('ensureConversation returns 404 when conversation not found', async () => {
-    mockConversationState.has.mockReturnValue(false);
+    mockMessageService.send.mockRejectedValue(new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found'));
 
     const res = await request(server).post('/api/conversations/conv-001/message').send({ text: 'hi' });
 
@@ -1182,7 +1195,7 @@ describe('HTTP API Server', () => {
   });
 
   it('ensureRunning returns 409 when not running for message endpoint', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'prepared', ready: false });
+    mockMessageService.send.mockRejectedValue(new AppError(409, ErrorCodes.CONVERSATION_NOT_RUNNING, 'Conversation is not running (status: prepared)'));
 
     const res = await request(server).post('/api/conversations/conv-001/message').send({ text: 'hi' });
 
@@ -1190,7 +1203,7 @@ describe('HTTP API Server', () => {
   });
 
   it('ensureReady returns 409 when not ready', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: false });
+    mockMessageService.send.mockRejectedValue(new AppError(409, ErrorCodes.INSTANCE_NOT_READY, 'Instance is not ready yet. OpenCode is still initializing.'));
 
     const res = await request(server).post('/api/conversations/conv-001/message').send({ text: 'hi' });
 
@@ -1201,9 +1214,7 @@ describe('HTTP API Server', () => {
   // ─── Session endpoints ─────────────────────────────────
 
   it('GET /api/conversations/:id/sessions lists sessions', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const mockClient = { listSessions: vi.fn().mockResolvedValue([{ id: 'ses_1' }]) };
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+    mockSessionService.list.mockResolvedValue([{ id: 'ses_1' }]);
 
     const res = await request(server).get('/api/conversations/conv-001/sessions');
 
@@ -1212,9 +1223,7 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/sessions/:sid gets a session', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const mockClient = { getSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) };
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+    mockSessionService.get.mockResolvedValue({ id: 'ses_1' });
 
     const res = await request(server).get('/api/conversations/conv-001/sessions/ses_1');
 
@@ -1223,9 +1232,7 @@ describe('HTTP API Server', () => {
   });
 
   it('GET /api/conversations/:id/sessions/:sid/children lists session children', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const mockClient = { getSessionChildren: vi.fn().mockResolvedValue([{ id: 'child_1' }]) };
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+    mockSessionService.getChildren.mockResolvedValue([{ id: 'child_1' }]);
 
     const res = await request(server).get('/api/conversations/conv-001/sessions/ses_1/children');
 
@@ -1234,9 +1241,7 @@ describe('HTTP API Server', () => {
   });
 
   it('POST /api/conversations/:id/sessions/:sid/fork forks a session', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const mockClient = { forkSession: vi.fn().mockResolvedValue({ id: 'forked_ses' }) };
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+    mockSessionService.fork.mockResolvedValue({ id: 'forked_ses' });
 
     const res = await request(server)
       .post('/api/conversations/conv-001/sessions/ses_1/fork')
@@ -1247,49 +1252,39 @@ describe('HTTP API Server', () => {
   });
 
   it('DELETE /api/conversations/:id/sessions/:sid deletes a session', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const mockClient = { deleteSession: vi.fn().mockResolvedValue(undefined) };
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
-
     const res = await request(server).delete('/api/conversations/conv-001/sessions/ses_1');
 
     expect(res.status).toBe(204);
   });
 
   it('GET /api/conversations/:id/sessions/:sid/messages lists session messages', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
     const mockMessages = [
       { info: { id: 'msg_1', role: 'user' }, parts: [{ type: 'text', text: 'Hello' }] },
       { info: { id: 'msg_2', role: 'assistant' }, parts: [{ type: 'text', text: 'Hi!' }] },
     ];
-    const mockClient = { listMessages: vi.fn().mockResolvedValue(mockMessages) };
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+    mockMessageService.getHistory.mockResolvedValue(mockMessages);
 
     const res = await request(server).get('/api/conversations/conv-001/sessions/ses_1/messages');
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual(mockMessages);
-    expect(mockClient.listMessages).toHaveBeenCalledWith('ses_1', undefined);
+    expect(mockMessageService.getHistory).toHaveBeenCalledWith('conv-001', 'ses_1', undefined);
   });
 
   it('GET /api/conversations/:id/sessions/:sid/messages accepts limit query', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true });
-    const mockClient = { listMessages: vi.fn().mockResolvedValue([]) };
-    mockInstanceManager.getInstance.mockReturnValue({ sessionId: 'ses_1', client: mockClient });
+    mockMessageService.getHistory.mockResolvedValue([]);
 
     const res = await request(server).get('/api/conversations/conv-001/sessions/ses_1/messages?limit=5');
 
     expect(res.status).toBe(200);
-    expect(mockClient.listMessages).toHaveBeenCalledWith('ses_1', 5);
+    expect(mockMessageService.getHistory).toHaveBeenCalledWith('conv-001', 'ses_1', 5);
   });
 
   it('DELETE /api/conversations/:id destroys instance when running', async () => {
-    mockConversationState.get.mockReturnValue({ id: 'conv-001', status: 'running' });
-
     const res = await request(server).delete('/api/conversations/conv-001');
 
     expect(res.status).toBe(204);
-    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationService.delete).toHaveBeenCalledWith('conv-001');
   });
 
   // ─── Global error handler ──────────────────────────────

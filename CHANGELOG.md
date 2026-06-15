@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(services): add ConversationService, FileService, SessionService, MessageService between transport and domain layers
+- feat(utils): add ModelParser utility for providerID/modelID extraction
 - feat(errors): add AppError class with statusCode, code, and structured error responses (#59)
 - feat(errors): add error code constants (ErrorCodes) for all HTTP and WS error types (#59)
 - feat(agent-runtime): add AgentRuntime interface with spawn/kill/restart/cleanupOrphans (#57)
@@ -17,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- refactor(http-api): delegate all route handlers to service layer (~300 lines thinner)
+- refactor(websocket): delegate all 12 RPC method groups to service layer
+- test(services): add 68 unit tests for ConversationService, FileService, SessionService, MessageService (service layer now at 50%+ coverage)
+- fix(e2e): wire 4 missing services into e2e server helper to fix conversation lifecycle failures
+- fix(services): return 404 instead of 500 in FileService for missing files/directories
+- docs(architecture): update diagrams, data flows, and core modules for service layer
 - feat(http-api): change REST error format from `{ error: "msg" }` to `{ error: { code, message } }` (#59)
 - feat(websocket): enrich JSON-RPC errors with `data.code` when error is AppError (#59)
 - docs: update error format documentation in API.md (#59)

@@ -180,6 +180,14 @@ src/
     instance-manager.ts      # OpenCode instance lifecycle with workspace reuse
     port-pool.ts             # Dynamic port allocation
     workspace-factory.ts     # Workspace creation, config/agent/file CRUD, copy, quota, path sanitization
+  services/
+    agent-service.ts         # Agent CRUD and config endpoints
+    config-service.ts        # Config read/write/patch
+    conversation-service.ts  # Conversation lifecycle orchestration (start/stop/restart/delete)
+    file-service.ts          # File CRUD with 50MB quota enforcement
+    message-service.ts       # Message send and history with model parsing
+    session-service.ts       # Session proxy with ensureReady guard
+    skill-service.ts         # Skill upload, import, CRUD, info
   opencode-cli/
     models.ts                # CLI model listing
   opencode-http/

@@ -25,7 +25,11 @@ describe('Metrics', () => {
       {} as any,
       {} as any,
       {} as any,
-      { get: vi.fn(), getOrThrow: vi.fn(), list: vi.fn(), register: vi.fn() } as any
+      { get: vi.fn(), getOrThrow: vi.fn(), list: vi.fn(), register: vi.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any
     );
 
     const res = await request(server).get('/metrics');

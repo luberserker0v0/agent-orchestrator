@@ -6,6 +6,10 @@ import { ConversationState } from './orchestrator/conversation-state.js';
 import { ConfigService } from './services/config-service.js';
 import { AgentService } from './services/agent-service.js';
 import { SkillService } from './services/skill-service.js';
+import { ConversationService } from './services/conversation-service.js';
+import { FileService } from './services/file-service.js';
+import { SessionService } from './services/session-service.js';
+import { MessageService } from './services/message-service.js';
 import { RuntimeRegistry } from './agent-runtime/registry.js';
 import { OpenCodeRuntime } from './agent-runtime/runtimes/opencode.js';
 import { createHttpServer } from './http-api/server.js';
@@ -57,12 +61,16 @@ export async function main(cliArgs?: string[]) {
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
+  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeRegistry, config.server, config.orchestrator.runtime);
+  const fileService = new FileService(workspaceFactory, conversationState);
+  const sessionService = new SessionService(instanceManager, conversationState);
+  const messageService = new MessageService(instanceManager, conversationState);
 
   // Clean up orphan resources from previous runs (e.g., after SIGKILL/crash)
   await instanceManager.cleanupOrphanContainers();
   workspaceFactory.cleanupOrphans();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator, configService, agentService, skillService, runtimeRegistry);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();

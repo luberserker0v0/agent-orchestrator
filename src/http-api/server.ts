@@ -4,14 +4,17 @@ import { WebSocketServer } from 'ws';
 import swaggerUi from 'swagger-ui-express';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
 import type { OrchestratorConfig } from '../config-loader.js';
-import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
-import type { AgentClient } from '../agent-runtime/types.js';
+import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { ConfigService } from '../services/config-service.js';
 import { AgentService } from '../services/agent-service.js';
 import { SkillService } from '../services/skill-service.js';
+import { ConversationService } from '../services/conversation-service.js';
+import { FileService } from '../services/file-service.js';
+import { SessionService } from '../services/session-service.js';
+import { MessageService } from '../services/message-service.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
@@ -34,7 +37,11 @@ export function createHttpServer(
   configService: ConfigService,
   agentService: AgentService,
   skillService: SkillService,
-  runtimeRegistry: RuntimeRegistry
+  runtimeRegistry: RuntimeRegistry,
+  conversationService: ConversationService,
+  fileService: FileService,
+  sessionService: SessionService,
+  messageService: MessageService
 ): HttpServer {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
@@ -91,25 +98,7 @@ export function createHttpServer(
     return true;
   }
 
-  function markNeedsRestartIfRunning(id: string, reason: string): void {
-    const state = conversationState.get(id);
-    if (state && state.status === 'running') {
-      conversationState.markNeedsRestart(id, reason);
-    }
-  }
 
-  function createSessionInBackground(id: string, client: AgentClient): void {
-    client.createSession({ title: `AgentOrchestrator-${id}` })
-      .then((session) => {
-        conversationState.setInstanceInfo(id, { sessionId: session.id });
-        instanceManager.setSessionId(id, session.id);
-        logger.info(`[OpenCode ${id}] session created: ${session.id}`);
-      })
-      .catch((err) => {
-        logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
-        // Instance stays running — user can reconfigure provider and restart
-      });
-  }
 
   // ─── Swagger UI ─────────────────────────────────────────
 
@@ -135,31 +124,12 @@ export function createHttpServer(
   // ─── Conversation Lifecycle ──────────────────────────────
 
   // Create conversation (prepare workspace, do NOT start agent instance)
-  app.post('/api/conversations', async (req: Request, res: Response, _next: NextFunction) => {
+  app.post('/api/conversations', async (req: Request, res: Response) => {
     try {
-      const id = req.body.id ?? generateId();
-      if (conversationState.has(id)) {
-        sendError(res, 409, ErrorCodes.CONVERSATION_ALREADY_EXISTS, `Conversation already exists: ${id}`);
-        return;
-      }
-
-      const agentType = typeof req.body.agentType === 'string' ? req.body.agentType : orchestratorConfig.agentType;
-      if (!runtimeRegistry.get(agentType)) {
-        sendError(res, 400, ErrorCodes.UNKNOWN_AGENT_TYPE, `Unknown agent type: ${agentType}. Available: ${runtimeRegistry.list().join(', ')}`);
-        return;
-      }
-
-      workspaceFactory.create(id);
-
-      const wsUrl = `ws://${serverConfig.host}:${serverConfig.port}/ws/${id}`;
-      const state = conversationState.create(id, agentType, wsUrl);
-
-      res.status(201).json({
-        id: state.id,
-        agentType: state.agentType,
-        status: state.status,
-        wsUrl: state.wsUrl,
-      });
+      const id = typeof req.body.id === 'string' ? req.body.id : undefined;
+      const agentType = typeof req.body.agentType === 'string' ? req.body.agentType : undefined;
+      const data = conversationService.create(id, agentType);
+      res.status(201).json(data);
     } catch (err) {
       logger.error('Failed to create conversation:', err);
       handleControllerError(res, err);
@@ -169,39 +139,10 @@ export function createHttpServer(
   // Start OpenCode instance
   app.post('/api/conversations/:id/start', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureConversation(res, id)) return;
-
-    const state = conversationState.get(id)!;
-    if (state.status === 'running' || state.status === 'starting') {
-      sendError(res, 409, ErrorCodes.CONVERSATION_ALREADY_RUNNING, 'Conversation is already starting or running');
-      return;
-    }
-
-    conversationState.cancelReadyCheck(id);
-    conversationState.transition(id, 'starting');
-
     try {
-      const instance = await instanceManager.createInstance(id, state.agentType);
-      conversationState.setInstanceInfo(id, { port: instance.port });
-      conversationState.setRunningInstance(id, {
-        process: instance.process!,
-        client: instance.client,
-      });
-      conversationState.transition(id, 'running');
-      conversationState.startReadyCheck(id);
-      res.json({
-        id,
-        agentType: state.agentType,
-        status: 'running',
-        ready: false,
-        port: instance.port,
-        wsUrl: state.wsUrl,
-        sessionId: state.sessionId,
-      });
-
-      createSessionInBackground(id, instance.client);
+      const result = await conversationService.start(id);
+      res.json(result);
     } catch (err) {
-      conversationState.transition(id, 'error', { error: (err as Error).message });
       logger.error(`Failed to start conversation ${id}:`, err);
       handleControllerError(res, err);
     }
@@ -210,18 +151,8 @@ export function createHttpServer(
   // Stop OpenCode instance
   app.post('/api/conversations/:id/stop', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureConversation(res, id)) return;
-
-    const state = conversationState.get(id)!;
-    if (state.status !== 'running' && state.status !== 'starting' && state.status !== 'error') {
-      sendError(res, 409, ErrorCodes.CANNOT_STOP, `Cannot stop conversation in status: ${state.status}`);
-      return;
-    }
-
     try {
-      await instanceManager.destroyInstance(id);
-      conversationState.removeRunningInstance(id);
-      conversationState.transition(id, 'stopped');
+      await conversationService.stop(id);
       res.json({ id, status: 'stopped' });
     } catch (err) {
       logger.error(`Failed to stop conversation ${id}:`, err);
@@ -232,70 +163,10 @@ export function createHttpServer(
   // Restart OpenCode instance
   app.post('/api/conversations/:id/restart', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureConversation(res, id)) return;
-
-    const state = conversationState.get(id)!;
-    const previousStatus = state.status;
-    if (previousStatus !== 'running' && previousStatus !== 'stopped' && previousStatus !== 'error') {
-      sendError(res, 409, ErrorCodes.CANNOT_RESTART, `Cannot restart conversation in status: ${previousStatus}`);
-      return;
-    }
-
-    conversationState.transition(id, 'restarting');
-
     try {
-      const hadInstance = previousStatus === 'running' || previousStatus === 'error';
-      let dockerRestarted = false;
-
-      if (hadInstance) {
-        conversationState.cancelReadyCheck(id);
-        if (orchestratorConfig.runtime === 'docker') {
-          // Docker: try to restart the existing container in-place
-          try {
-            await instanceManager.restartInstance(id);
-            dockerRestarted = true;
-          } catch {
-            // Restart failed — fall back to kill + respawn
-            await instanceManager.stopInstance(id).catch(() => {});
-            conversationState.removeRunningInstance(id);
-          }
-        } else {
-          // Direct: kill old process
-          await instanceManager.stopInstance(id);
-          conversationState.removeRunningInstance(id);
-        }
-      }
-
-      conversationState.clearNeedsRestart(id);
-
-      let instance: InstanceInfo;
-      if (dockerRestarted) {
-        // Docker restart succeeded — reuse existing instance (same port, same container)
-        instance = instanceManager.getInstance(id)!;
-      } else {
-        instance = await instanceManager.createInstance(id, state.agentType);
-        conversationState.setInstanceInfo(id, { port: instance.port });
-        conversationState.setRunningInstance(id, {
-          process: instance.process!,
-          client: instance.client,
-        });
-      }
-
-      conversationState.transition(id, 'running');
-      conversationState.startReadyCheck(id);
-      res.json({
-        id,
-        agentType: state.agentType,
-        status: 'running',
-        ready: false,
-        port: instance.port,
-        wsUrl: state.wsUrl,
-        sessionId: state.sessionId,
-      });
-
-      createSessionInBackground(id, instance.client);
+      const result = await conversationService.restart(id);
+      res.json(result);
     } catch (err) {
-      conversationState.transition(id, 'error', { error: (err as Error).message });
       logger.error(`Failed to restart conversation ${id}:`, err);
       handleControllerError(res, err);
     }
@@ -304,21 +175,8 @@ export function createHttpServer(
   // Delete conversation (destroy instance + remove workspace)
   app.delete('/api/conversations/:id', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureConversation(res, id)) return;
-
     try {
-      try {
-        await instanceManager.destroyInstance(id);
-      } catch {
-        // ignore if no instance or already cleaned up
-      }
-      try {
-        workspaceFactory.destroy(id);
-      } catch (wsErr) {
-        logger.warn(`Failed to remove workspace for ${id}:`, wsErr);
-      }
-      conversationState.transition(id, 'destroyed');
-      conversationState.remove(id);
+      await conversationService.delete(id);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to delete conversation ${id}:`, err);
@@ -328,48 +186,30 @@ export function createHttpServer(
 
   // List conversations
   app.get('/api/conversations', (_req: Request, res: Response) => {
-    const conversations = conversationState.list().map((s) => ({
-      id: s.id,
-      agentType: s.agentType,
-      status: s.status,
-      ready: s.ready,
-      needsRestart: s.needsRestart,
-      port: s.port,
-      sessionId: s.sessionId,
-      wsUrl: s.wsUrl,
-      createdAt: s.createdAt,
-      updatedAt: s.updatedAt,
-    }));
-    res.json(conversations);
+    res.json(conversationService.list());
   });
 
   // Get single conversation
   app.get('/api/conversations/:id', (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureConversation(res, id)) return;
-    const s = conversationState.get(id)!;
-    res.json({
-      id: s.id,
-      agentType: s.agentType,
-      status: s.status,
-      ready: s.ready,
-      needsRestart: s.needsRestart,
-      port: s.port,
-      sessionId: s.sessionId,
-      wsUrl: s.wsUrl,
-      createdAt: s.createdAt,
-      updatedAt: s.updatedAt,
-    });
+    try {
+      const data = conversationService.get(id);
+      res.json(data);
+    } catch (err) {
+      handleControllerError(res, err);
+    }
   });
 
   // Get conversation events
   app.get('/api/conversations/:id/events', (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureConversation(res, id)) return;
-
-    const limit = Math.min(Number(req.query.limit) || 50, 100);
-    const events = conversationState.getRecentEvents(id, limit);
-    res.json(events);
+    try {
+      const limit = Math.min(Number(req.query.limit) || 50, 100);
+      const events = conversationService.getEvents(id, limit);
+      res.json(events);
+    } catch (err) {
+      handleControllerError(res, err);
+    }
   });
 
   // ─── Config ──────────────────────────────────────────────
@@ -543,21 +383,11 @@ export function createHttpServer(
     }
 
     try {
-      workspaceFactory.writeFile(id, path, content);
-      markNeedsRestartIfRunning(id, `file ${path} updated`);
+      fileService.write(id, path, content);
       res.status(204).send();
     } catch (err) {
-      const msg = (err as Error).message;
-      if (isAppError(err)) {
-        sendError(res, err.statusCode, err.code, err.message);
-      } else if (msg.includes('path traversal')) {
-        sendError(res, 400, ErrorCodes.PATH_TRAVERSAL, msg);
-      } else if (msg.includes('Invalid path')) {
-        sendError(res, 400, ErrorCodes.INVALID_PATH, msg);
-      } else {
-        logger.error(`Failed to write file ${path} for ${id}:`, err);
-        handleControllerError(res, err);
-      }
+      logger.error(`Failed to write file ${path} for ${id}:`, err);
+      handleControllerError(res, err);
     }
   });
 
@@ -572,7 +402,7 @@ export function createHttpServer(
     }
 
     try {
-      const content = workspaceFactory.readFile(id, path);
+      const content = fileService.read(id, path);
       res.json({ path, content });
     } catch (err) {
       handleControllerError(res, err, 404);
@@ -590,7 +420,7 @@ export function createHttpServer(
     }
 
     try {
-      workspaceFactory.deleteFile(id, path);
+      fileService.delete(id, path);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to delete file ${path} for ${id}:`, err);
@@ -611,8 +441,7 @@ export function createHttpServer(
     }
 
     try {
-      workspaceFactory.copyFromLocal(id, source, dest);
-      markNeedsRestartIfRunning(id, `file copied to ${dest}`);
+      fileService.copy(id, source, dest);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to copy file for ${id}:`, err);
@@ -627,7 +456,7 @@ export function createHttpServer(
     const path = typeof req.body.path === 'string' ? req.body.path : undefined;
 
     try {
-      const files = workspaceFactory.listFiles(id, path);
+      const files = fileService.list(id, path);
       res.json({ path: path || '.', files });
     } catch (err) {
       handleControllerError(res, err);
@@ -636,40 +465,10 @@ export function createHttpServer(
 
   // ─── Sessions (proxy to OpenCode, only when running) ─────
 
-  function ensureRunning(res: Response, id: string): boolean {
-    if (!ensureConversation(res, id)) return false;
-    const state = conversationState.get(id)!;
-    if (state.status !== 'running') {
-      sendError(res, 409, ErrorCodes.CONVERSATION_NOT_RUNNING, `Conversation is not running (status: ${state.status})`);
-      return false;
-    }
-    return true;
-  }
-
-  function ensureReady(res: Response, id: string): boolean {
-    if (!ensureRunning(res, id)) return false;
-    const state = conversationState.get(id)!;
-    if (!state.ready) {
-      sendError(res, 409, ErrorCodes.INSTANCE_NOT_READY, 'Instance is not ready yet. OpenCode is still initializing.');
-      return false;
-    }
-    return true;
-  }
-
   app.post('/api/conversations/:id/sessions', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
-      const session = await instance.client.createSession({
-        title: req.body.title,
-        parentID: req.body.parentID,
-      });
+      const session = await sessionService.create(id, req.body);
       res.status(201).json(session);
     } catch (err) {
       handleControllerError(res, err);
@@ -678,15 +477,8 @@ export function createHttpServer(
 
   app.get('/api/conversations/:id/sessions', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
-      const sessions = await instance.client.listSessions();
+      const sessions = await sessionService.list(id);
       res.json(sessions);
     } catch (err) {
       handleControllerError(res, err);
@@ -695,15 +487,8 @@ export function createHttpServer(
 
   app.get('/api/conversations/:id/sessions/:sid', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
-      const session = await instance.client.getSession(req.params.sid);
+      const session = await sessionService.get(id, req.params.sid);
       res.json(session);
     } catch (err) {
       handleControllerError(res, err);
@@ -712,15 +497,8 @@ export function createHttpServer(
 
   app.get('/api/conversations/:id/sessions/:sid/children', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
-      const children = await instance.client.getSessionChildren(req.params.sid);
+      const children = await sessionService.getChildren(id, req.params.sid);
       res.json(children);
     } catch (err) {
       handleControllerError(res, err);
@@ -729,15 +507,8 @@ export function createHttpServer(
 
   app.post('/api/conversations/:id/sessions/:sid/fork', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
-      const session = await instance.client.forkSession(req.params.sid, req.body.messageID);
+      const session = await sessionService.fork(id, req.params.sid, req.body.messageID);
       res.status(201).json(session);
     } catch (err) {
       handleControllerError(res, err);
@@ -746,15 +517,8 @@ export function createHttpServer(
 
   app.delete('/api/conversations/:id/sessions/:sid', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
-      await instance.client.deleteSession(req.params.sid);
+      await sessionService.delete(id, req.params.sid);
       res.status(204).send();
     } catch (err) {
       handleControllerError(res, err);
@@ -763,17 +527,20 @@ export function createHttpServer(
 
   app.get('/api/conversations/:id/sessions/:sid/messages', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
-      const messages = await instance.client.listMessages(req.params.sid, limit);
+      const messages = await messageService.getHistory(id, req.params.sid, limit);
       res.json(messages);
+    } catch (err) {
+      handleControllerError(res, err);
+    }
+  });
+
+  app.post('/api/conversations/:id/sessions/abort', async (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    try {
+      const result = await sessionService.abort(id);
+      res.json(result);
     } catch (err) {
       handleControllerError(res, err);
     }
@@ -783,15 +550,8 @@ export function createHttpServer(
 
   app.get('/api/conversations/:id/providers', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
-      const providers = await instance.client.listProviders();
+      const providers = await sessionService.listProviders(id);
       res.json(providers);
     } catch (err) {
       handleControllerError(res, err);
@@ -802,8 +562,6 @@ export function createHttpServer(
 
   app.post('/api/conversations/:id/message', async (req: Request, res: Response) => {
     const id = getConversationId(req);
-    if (!ensureReady(res, id)) return;
-
     const { text, model: rawModel, agent: rawAgent } = req.body as { text?: string; model?: string; agent?: string };
     if (!text || typeof text !== 'string') {
       sendError(res, 400, ErrorCodes.INVALID_TEXT, 'Missing or invalid text field');
@@ -811,45 +569,8 @@ export function createHttpServer(
     }
 
     try {
-      const instance = instanceManager.getInstance(id);
-      if (!instance) {
-        sendError(res, 500, ErrorCodes.INSTANCE_REFERENCE_LOST, 'Instance reference lost');
-        return;
-      }
-
-      let model: { providerID: string; modelID: string } | undefined;
-      if (rawModel && typeof rawModel === 'string') {
-        const parts = rawModel.split('/');
-        if (parts.length >= 2) {
-          model = { providerID: parts[0], modelID: parts.slice(1).join('/') };
-        }
-      }
-
-      const agent = typeof rawAgent === 'string' ? rawAgent : undefined;
-
-      if (!instance.sessionId) {
-        sendError(res, 503, ErrorCodes.SESSION_NOT_READY, 'Session not ready yet');
-        return;
-      }
-
-      const response = await instance.client.sendPrompt(instance.sessionId, {
-        model,
-        agent,
-        parts: [{ type: 'text', text: text }],
-      });
-
-      const texts = response.parts
-        .filter((p) => p.type === 'text')
-        .map((p) => (p as unknown as { text: string }).text)
-        .join('');
-
-      conversationState.emitEvent(id, 'conversation.message', {
-        messageId: response.info.id,
-        text: texts,
-        parts: response.parts,
-        role: 'assistant',
-      });
-      res.json({ messageId: response.info.id, text: texts, parts: response.parts });
+      const result = await messageService.send(id, text, rawModel, rawAgent);
+      res.json(result);
     } catch (err) {
       handleControllerError(res, err);
     }
@@ -1024,7 +745,7 @@ export function createHttpServer(
   const httpServer = createServer(app);
 
   const wss = new WebSocketServer({ noServer: true });
-  const wsRouter = new WSRouter(wss, instanceManager, workspaceFactory, conversationState, wsConfig, serverConfig, orchestratorConfig, configService, agentService, skillService, runtimeRegistry);
+  const wsRouter = new WSRouter(wss, conversationState, wsConfig, configService, agentService, skillService, conversationService, fileService, sessionService, messageService);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ?? '';
@@ -1062,8 +783,4 @@ export function createHttpServer(
   };
 
   return { server: httpServer, closeWebSockets, waitForRequests };
-}
-
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
