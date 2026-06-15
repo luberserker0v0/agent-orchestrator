@@ -30,11 +30,20 @@ export class FileService {
     this.markNeedsRestartIfRunning(id, `file ${path} updated`);
   }
 
+  private toAppError(err: unknown): AppError {
+    if (err instanceof AppError) return err;
+    const message = (err as Error).message;
+    if (message.startsWith('File not found') || message.startsWith('Directory not found')) {
+      return new AppError(404, ErrorCodes.FILE_NOT_FOUND, message);
+    }
+    return new AppError(500, ErrorCodes.INTERNAL_ERROR, message);
+  }
+
   read(id: string, path: string): string {
     try {
       return this.workspaceFactory.readFile(id, path);
     } catch (err) {
-      throw err instanceof AppError ? err : new AppError(500, ErrorCodes.INTERNAL_ERROR, (err as Error).message);
+      throw this.toAppError(err);
     }
   }
 
@@ -42,7 +51,7 @@ export class FileService {
     try {
       this.workspaceFactory.deleteFile(id, path);
     } catch (err) {
-      throw err instanceof AppError ? err : new AppError(500, ErrorCodes.INTERNAL_ERROR, (err as Error).message);
+      throw this.toAppError(err);
     }
     this.markNeedsRestartIfRunning(id, `file ${path} deleted`);
   }
@@ -60,7 +69,7 @@ export class FileService {
     try {
       return this.workspaceFactory.listFiles(id, path);
     } catch (err) {
-      throw err instanceof AppError ? err : new AppError(500, ErrorCodes.INTERNAL_ERROR, (err as Error).message);
+      throw this.toAppError(err);
     }
   }
 

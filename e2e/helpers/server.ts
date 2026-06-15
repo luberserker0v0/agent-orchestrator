@@ -10,6 +10,10 @@ import { ConversationState } from '../../src/orchestrator/conversation-state.js'
 import { ConfigService } from '../../src/services/config-service.js';
 import { AgentService } from '../../src/services/agent-service.js';
 import { SkillService } from '../../src/services/skill-service.js';
+import { ConversationService } from '../../src/services/conversation-service.js';
+import { FileService } from '../../src/services/file-service.js';
+import { SessionService } from '../../src/services/session-service.js';
+import { MessageService } from '../../src/services/message-service.js';
 import { RuntimeRegistry } from '../../src/agent-runtime/registry.js';
 import { OpenCodeRuntime } from '../../src/agent-runtime/runtimes/opencode.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE } from '../../src/test-fixtures/ao-configs.js';
@@ -63,6 +67,10 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
+  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeRegistry, serverConfig, runtime);
+  const fileService = new FileService(workspaceFactory, conversationState);
+  const sessionService = new SessionService(instanceManager, conversationState);
+  const messageService = new MessageService(instanceManager, conversationState);
 
   const httpServer: HttpServer = createHttpServer(
     serverConfig,
@@ -75,6 +83,10 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     agentService,
     skillService,
     runtimeRegistry,
+    conversationService,
+    fileService,
+    sessionService,
+    messageService,
   );
 
   await instanceManager.cleanupOrphanContainers();
