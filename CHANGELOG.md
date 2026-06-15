@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- docs(architecture): separate Runtime Abstraction Layer from Domain Layer in diagrams and core module hierarchy
 - refactor(http-api): delegate all route handlers to service layer (~300 lines thinner)
 - refactor(websocket): delegate all 12 RPC method groups to service layer
 - test(services): add 68 unit tests for ConversationService, FileService, SessionService, MessageService (service layer now at 50%+ coverage)
