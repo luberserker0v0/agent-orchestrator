@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - refactor(http-api): delegate all route handlers to service layer (~300 lines thinner)
 - refactor(websocket): delegate all 12 RPC method groups to service layer
+- docs(architecture): update diagrams, data flows, and core modules for service layer
 - feat(http-api): change REST error format from `{ error: "msg" }` to `{ error: { code, message } }` (#59)
 - feat(websocket): enrich JSON-RPC errors with `data.code` when error is AppError (#59)
 - docs: update error format documentation in API.md (#59)
