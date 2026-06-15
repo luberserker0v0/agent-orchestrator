@@ -1,5 +1,4 @@
 import { type ChildProcess } from 'node:child_process';
-import { rm } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { AgentClient } from '../agent-runtime/types.js';
@@ -8,26 +7,6 @@ import type { OrchestratorConfig } from '../config-loader.js';
 import { PortPool } from './port-pool.js';
 import { WorkspaceFactory, type WorkspaceInfo } from './workspace-factory.js';
 import { instancesActive, instancesTotalCreated } from '../metrics/registry.js';
-
-async function retryRm(dirPath: string, maxRetries = 10): Promise<void> {
-  let lastErr: Error | undefined;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      await rm(dirPath, { recursive: true, force: true });
-      return;
-    } catch (err) {
-      lastErr = err as Error;
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'ENOTEMPTY') {
-        throw err;
-      }
-      if (i < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, Math.min(200 * Math.pow(2, i), 2000)));
-      }
-    }
-  }
-  throw lastErr;
-}
 
 function generatePassword(): string {
   return randomBytes(16).toString('hex');
@@ -109,11 +88,11 @@ export class InstanceManager {
     if (proc) {
       proc.on('exit', (code: number | null) => {
         logger.warn(`[${id}] process exited with code ${code}`);
-        this.cleanupInstance(id, false);
+        this.cleanupInstance(id);
       });
       proc.on('error', (err: Error) => {
         logger.error(`[${id}] process error: ${err.message}`);
-        this.cleanupInstance(id, false);
+        this.cleanupInstance(id);
       });
     }
 
@@ -169,11 +148,11 @@ export class InstanceManager {
 
     if (oldest) {
       logger.warn(`LRU eviction: destroying instance ${oldest.id} (idle since ${new Date(oldest.lastUsedAt).toISOString()})`);
-      await this.cleanupInstance(oldest.id, true);
+      await this.cleanupInstance(oldest.id);
     }
   }
 
-  private async cleanupInstance(id: string, removeWorkspace: boolean): Promise<void> {
+  private async cleanupInstance(id: string): Promise<void> {
     const inst = this.instances.get(id);
     if (!inst) return;
 
@@ -193,16 +172,6 @@ export class InstanceManager {
     }
 
     this.portPool.release(inst.port);
-
-    if (removeWorkspace) {
-      try {
-        await retryRm(inst.workspacePath);
-        logger.info(`Workspace removed: ${inst.workspacePath}`);
-      } catch (err) {
-        logger.error(`Failed to remove workspace: ${inst.workspacePath}`, err);
-      }
-    }
-
     instancesActive.dec();
     logger.info(`Instance ${id} destroyed`);
   }
@@ -236,11 +205,11 @@ export class InstanceManager {
   }
 
   async destroyInstance(id: string): Promise<void> {
-    await this.cleanupInstance(id, true);
+    await this.cleanupInstance(id);
   }
 
   async stopInstance(id: string): Promise<void> {
-    await this.cleanupInstance(id, false);
+    await this.cleanupInstance(id);
   }
 
   async restartInstance(id: string): Promise<void> {
@@ -271,7 +240,7 @@ export class InstanceManager {
       for (const inst of this.instances.values()) {
         if (now - inst.lastUsedAt > this.config.idleTimeoutMs) {
           logger.warn(`Idle timeout: destroying instance ${inst.id} (idle for ${now - inst.lastUsedAt}ms)`);
-          this.cleanupInstance(inst.id, true).catch(() => {});
+          this.cleanupInstance(inst.id).catch(() => {});
         }
       }
     }, this.config.idleSweepIntervalMs);

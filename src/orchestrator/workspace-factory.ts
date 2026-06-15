@@ -28,7 +28,7 @@ function sanitizeId(raw: string): string {
   return raw.replace(/[\\/]/g, '_').replace(/\.{2,}/g, '_');
 }
 
-async function retryRm(dirPath: string, maxRetries = 10): Promise<void> {
+async function retryRm(dirPath: string, maxRetries = 3): Promise<void> {
   let lastErr: Error | undefined;
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -108,6 +108,7 @@ export class WorkspaceFactory {
   private canonicalConfig: Record<string, unknown>;
   private enforceCanonicalConfig: boolean;
   private allowedCopySources: string[];
+  private cleanupAttempts = new Map<string, number>();
 
   constructor(config: WorkspaceConfig, canonicalConfig?: Record<string, unknown>) {
     this.basePath = resolve(process.cwd(), config.basePath);
@@ -148,10 +149,38 @@ export class WorkspaceFactory {
         logger.info(`Workspace destroyed: ${wsPath}`);
       } catch (err) {
         logger.warn(`Failed to destroy workspace: ${wsPath}`, err);
+        this.scheduleCleanup(wsPath);
       }
     } else {
       logger.warn(`Workspace not found for destruction: ${wsPath}`);
     }
+  }
+
+  private scheduleCleanup(wsPath: string): void {
+    const key = wsPath.toLowerCase();
+    if (this.cleanupAttempts.has(key)) return;
+    this.cleanupAttempts.set(key, 0);
+
+    const retry = (): void => {
+      setTimeout(async () => {
+        try {
+          await rm(wsPath, { recursive: true, force: true });
+          logger.info(`Background workspace cleanup succeeded: ${wsPath}`);
+          this.cleanupAttempts.delete(key);
+        } catch {
+          const attempt = (this.cleanupAttempts.get(key) ?? 0) + 1;
+          if (attempt < 10) {
+            this.cleanupAttempts.set(key, attempt);
+            retry();
+          } else {
+            logger.error(`Background cleanup failed after 10 attempts: ${wsPath}`);
+            this.cleanupAttempts.delete(key);
+          }
+        }
+      }, 10000);
+    };
+
+    retry();
   }
 
   cleanupOrphans(): void {
