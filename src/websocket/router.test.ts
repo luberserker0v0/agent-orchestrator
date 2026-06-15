@@ -62,14 +62,16 @@ function createMockWSS() {
 describe('WSRouter', () => {
   let mockWss: ReturnType<typeof createMockWSS>;
   let mockInstanceManager: any;
-  let mockWorkspaceFactory: any;
   let mockConversationState: any;
   let router: WSRouter;
 
   let mockConfigService: any;
   let mockAgentService: any;
   let mockSkillService: any;
-  let mockRuntimeRegistry: any;
+  let mockConversationService: any;
+  let mockFileService: any;
+  let mockSessionService: any;
+  let mockMessageService: any;
 
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -83,14 +85,6 @@ describe('WSRouter', () => {
       stopInstance: vi.fn(),
       restartInstance: vi.fn(),
       setSessionId: vi.fn(),
-    };
-
-    mockWorkspaceFactory = {
-      writeFile: vi.fn(),
-      readFile: vi.fn(),
-      listFiles: vi.fn(),
-      deleteFile: vi.fn(),
-      copyFromLocal: vi.fn(),
     };
 
     mockConversationState = {
@@ -134,25 +128,52 @@ describe('WSRouter', () => {
       deleteSkill: vi.fn(),
     };
 
-    mockRuntimeRegistry = {
-      get: vi.fn().mockReturnValue({ spawn: vi.fn(), kill: vi.fn() }),
-      getOrThrow: vi.fn().mockReturnValue({ spawn: vi.fn(), kill: vi.fn() }),
-      list: vi.fn().mockReturnValue(['opencode']),
-      has: vi.fn().mockReturnValue(true),
+    mockConversationService = {
+      get: vi.fn().mockReturnValue({ id: 'conv-001', status: 'running', ready: true, port: 30000 }),
+      start: vi.fn(),
+      stop: vi.fn(),
+      restart: vi.fn(),
+      delete: vi.fn(),
+      create: vi.fn(),
+      list: vi.fn(),
+      getEvents: vi.fn(),
+    };
+
+    mockFileService = {
+      write: vi.fn(),
+      read: vi.fn().mockReturnValue('file content'),
+      delete: vi.fn(),
+      copy: vi.fn(),
+      list: vi.fn().mockReturnValue(['file1.txt', 'file2.txt']),
+    };
+
+    mockSessionService = {
+      create: vi.fn().mockResolvedValue({ id: 'ses_new' }),
+      list: vi.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue({ id: 'ses_1' }),
+      delete: vi.fn().mockResolvedValue(undefined),
+      fork: vi.fn().mockResolvedValue({ id: 'forked' }),
+      getChildren: vi.fn().mockResolvedValue([]),
+      abort: vi.fn().mockResolvedValue({ aborted: true }),
+      listProviders: vi.fn().mockResolvedValue({ providers: [], default: {} }),
+    };
+
+    mockMessageService = {
+      send: vi.fn().mockResolvedValue({ messageId: 'msg_1', parts: [{ type: 'text', text: 'Hello' }] }),
+      getHistory: vi.fn().mockResolvedValue([{ id: 'msg_1', text: 'Hello' }]),
     };
 
     router = new WSRouter(
       mockWss as any,
-      mockInstanceManager,
-      mockWorkspaceFactory,
       mockConversationState,
       { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
-      { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
-      { runtime: 'direct', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, runtimeConfig: { binary: 'opencode', docker: { image: 'opencode:latest', containerPort: 30000 } }, agentType: 'opencode' },
       mockConfigService,
       mockAgentService,
       mockSkillService,
-      mockRuntimeRegistry
+      mockConversationService,
+      mockFileService,
+      mockSessionService,
+      mockMessageService
     );
   });
 
@@ -249,8 +270,8 @@ describe('WSRouter', () => {
 
   it('handles message.send', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockMessageService.send.mockResolvedValue({ text: 'Hello' });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -269,18 +290,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.sendPrompt).toHaveBeenCalledWith('ses_1', {
-      model: { providerID: 'google', modelID: 'gemini' },
-      agent: 'dev',
-      parts: [{ type: 'text', text: 'Hello' }],
-    });
-
-    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.message', {
-      messageId: 'msg_1',
-      text: 'Hello',
-      parts: [{ type: 'text', text: 'Hello' }],
-      role: 'assistant',
-    });
+    expect(mockMessageService.send).toHaveBeenCalledWith('conv-001', 'Hello', 'google/gemini', 'dev');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -298,8 +308,7 @@ describe('WSRouter', () => {
 
   it('handles message.send without model/agent params', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -318,23 +327,12 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.sendPrompt).toHaveBeenCalledWith('ses_1', {
-      model: undefined,
-      agent: undefined,
-      parts: [{ type: 'text', text: 'Hello' }],
-    });
-    expect(mockConversationState.emitEvent).toHaveBeenCalledWith('conv-001', 'conversation.message', {
-      messageId: 'msg_1',
-      text: 'Hello',
-      parts: [{ type: 'text', text: 'Hello' }],
-      role: 'assistant',
-    });
+    expect(mockMessageService.send).toHaveBeenCalledWith('conv-001', 'Hello', undefined, undefined);
   });
 
   it('handles message.history', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -353,7 +351,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.listMessages).toHaveBeenCalledWith('ses_1', 10);
+    expect(mockMessageService.getHistory).toHaveBeenCalledWith('conv-001', undefined, 10);
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -369,8 +367,7 @@ describe('WSRouter', () => {
 
   it('handles message.history with custom sessionId', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -389,7 +386,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.listMessages).toHaveBeenCalledWith('child_ses_1', 20);
+    expect(mockMessageService.getHistory).toHaveBeenCalledWith('conv-001', 'child_ses_1', 20);
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -405,8 +402,7 @@ describe('WSRouter', () => {
 
   it('handles session.abort', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -424,7 +420,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.abortSession).toHaveBeenCalledWith('ses_1');
+    expect(mockSessionService.abort).toHaveBeenCalledWith('conv-001');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -440,8 +436,7 @@ describe('WSRouter', () => {
 
   it('handles session.create', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -460,7 +455,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.createSession).toHaveBeenCalledWith({ title: 'custom', parentID: 'ses_1' });
+    expect(mockSessionService.create).toHaveBeenCalledWith('conv-001', { title: 'custom', parentID: 'ses_1' });
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -476,9 +471,8 @@ describe('WSRouter', () => {
 
   it('rejects session.create when conversation is not running', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    mockConversationState.get.mockReturnValue({ status: 'prepared' });
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockSessionService.create.mockRejectedValue(new Error('not running'));
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -496,8 +490,6 @@ describe('WSRouter', () => {
     );
 
     await vi.advanceTimersByTimeAsync(10);
-
-    expect(instance.client.createSession).not.toHaveBeenCalled();
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
@@ -583,8 +575,7 @@ describe('WSRouter', () => {
 
   it('throws when instance is gone during handleMessage', async () => {
     const mockWs = createMockWebSocket();
-    // Return undefined when handling the message (instance not available)
-    mockInstanceManager.getInstance.mockReturnValue(undefined);
+    mockMessageService.send.mockRejectedValue(new Error('Instance not available'));
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -861,7 +852,6 @@ describe('WSRouter', () => {
   it('handles skills.get with invalid name', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockSkillService.readSkill.mockImplementation(() => { throw new Error('Invalid skill name'); });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -880,8 +870,6 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockSkillService.readSkill).toHaveBeenCalledWith('conv-001', 'foo/bar');
-
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
       try {
@@ -897,7 +885,6 @@ describe('WSRouter', () => {
   it('handles skills.info with invalid name', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockSkillService.getSkillInfo.mockImplementation(() => { throw new Error('Invalid skill name'); });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -916,8 +903,6 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockSkillService.getSkillInfo).toHaveBeenCalledWith('conv-001', 'foo/bar');
-
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
       try {
@@ -933,7 +918,6 @@ describe('WSRouter', () => {
   it('handles skills.delete with invalid name', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockSkillService.deleteSkill.mockImplementation(() => { throw new Error('Invalid skill name'); });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -951,8 +935,6 @@ describe('WSRouter', () => {
     );
 
     await vi.advanceTimersByTimeAsync(10);
-
-    expect(mockSkillService.deleteSkill).toHaveBeenCalledWith('conv-001', 'foo/bar');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
@@ -1236,7 +1218,7 @@ describe('WSRouter', () => {
   it('handles agent.list', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockAgentService.listAgents.mockReturnValue(['designer', 'coder']);
+    mockAgentService.listAgentsWithRuntime.mockResolvedValue(['designer', 'coder']);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1358,7 +1340,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.writeFile).toHaveBeenCalledWith('conv-001', 'test.txt', 'hello');
+    expect(mockFileService.write).toHaveBeenCalledWith('conv-001', 'test.txt', 'hello');
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 60 && p.result?.written === 'test.txt'; } catch { return false; }
@@ -1390,7 +1372,6 @@ describe('WSRouter', () => {
   it('handles file.read', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.readFile.mockReturnValue('file content');
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1444,7 +1425,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.deleteFile).toHaveBeenCalledWith('conv-001', 'test.txt');
+    expect(mockFileService.delete).toHaveBeenCalledWith('conv-001', 'test.txt');
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 64 && p.result?.deleted === 'test.txt'; } catch { return false; }
@@ -1476,7 +1457,6 @@ describe('WSRouter', () => {
   it('handles file.list', async () => {
     const mockWs = createMockWebSocket();
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockWorkspaceFactory.listFiles.mockReturnValue(['a.txt', 'b.txt']);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1509,7 +1489,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockWorkspaceFactory.copyFromLocal).toHaveBeenCalledWith('conv-001', 'src.txt', 'dst.txt');
+    expect(mockFileService.copy).toHaveBeenCalledWith('conv-001', 'src.txt', 'dst.txt');
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 67 && p.result?.copied === 'dst.txt'; } catch { return false; }
@@ -1542,9 +1522,8 @@ describe('WSRouter', () => {
 
   it('handles session.list', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    instance.client.listSessions = vi.fn().mockResolvedValue([{ id: 'ses_1' }]);
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockSessionService.list.mockResolvedValue([{ id: 'ses_1' }]);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1555,7 +1534,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.listSessions).toHaveBeenCalled();
+    expect(mockSessionService.list).toHaveBeenCalledWith('conv-001');
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 70; } catch { return false; }
@@ -1565,9 +1544,7 @@ describe('WSRouter', () => {
 
   it('handles session.get', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    instance.client.getSession = vi.fn().mockResolvedValue({ id: 'ses_1' });
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1579,7 +1556,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.getSession).toHaveBeenCalledWith('ses_1');
+    expect(mockSessionService.get).toHaveBeenCalledWith('conv-001', 'ses_1');
   });
 
   it('handles session.get with missing sessionId', async () => {
@@ -1606,9 +1583,7 @@ describe('WSRouter', () => {
 
   it('handles session.children', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    instance.client.getSessionChildren = vi.fn().mockResolvedValue([{ id: 'child_1' }]);
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1620,14 +1595,12 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.getSessionChildren).toHaveBeenCalledWith('ses_1');
+    expect(mockSessionService.getChildren).toHaveBeenCalledWith('conv-001', 'ses_1');
   });
 
   it('handles session.fork', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    instance.client.forkSession = vi.fn().mockResolvedValue({ id: 'forked' });
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1639,14 +1612,12 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.forkSession).toHaveBeenCalledWith('ses_1', 'msg_1');
+    expect(mockSessionService.fork).toHaveBeenCalledWith('conv-001', 'ses_1', 'msg_1');
   });
 
   it('handles session.delete', async () => {
     const mockWs = createMockWebSocket();
-    const instance = createMockInstance();
-    instance.client.deleteSession = vi.fn().mockResolvedValue(undefined);
-    mockInstanceManager.getInstance.mockReturnValue(instance);
+    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1658,7 +1629,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(instance.client.deleteSession).toHaveBeenCalledWith('ses_1');
+    expect(mockSessionService.delete).toHaveBeenCalledWith('conv-001', 'ses_1');
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 75 && p.result?.deleted === 'ses_1'; } catch { return false; }
@@ -1670,7 +1641,7 @@ describe('WSRouter', () => {
 
   it('rejects message.send when ready=false', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'running', ready: false });
+    mockMessageService.send.mockRejectedValue(new Error('not ready'));
     mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
@@ -1694,9 +1665,10 @@ describe('WSRouter', () => {
 
   it('handles conversation.status', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({
-      id: 'conv-001', status: 'running', ready: true, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://host/ws/conv-001', lastError: undefined,
+    mockConversationService.get.mockReturnValue({
+      id: 'conv-001', status: 'running', ready: true, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://host/ws/conv-001',
     });
+    mockConversationState.get.mockReturnValue({ lastError: undefined });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1719,8 +1691,7 @@ describe('WSRouter', () => {
 
   it('handles conversation.start', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'prepared', ready: false, wsUrl: 'ws://host/ws/conv-001', agentType: 'opencode' });
-    mockInstanceManager.createInstance.mockResolvedValue(createMockInstance());
+    mockConversationService.start.mockResolvedValue({ id: 'conv-001', status: 'running', port: 30000 });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1731,10 +1702,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001', 'opencode');
-    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'starting');
-    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'running');
-    expect(mockConversationState.startReadyCheck).toHaveBeenCalledWith('conv-001');
+    expect(mockConversationService.start).toHaveBeenCalledWith('conv-001');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
@@ -1747,7 +1715,7 @@ describe('WSRouter', () => {
 
   it('rejects conversation.start when already running', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'running', ready: true });
+    mockConversationService.start.mockRejectedValue(new Error('already starting or running'));
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1758,8 +1726,6 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockInstanceManager.createInstance).not.toHaveBeenCalled();
-
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 102 && p.error?.message?.includes('already starting or running'); } catch { return false; }
@@ -1769,8 +1735,7 @@ describe('WSRouter', () => {
 
   it('handles conversation.stop', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'running', ready: true });
-    mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
+    mockConversationService.stop.mockResolvedValue(undefined);
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1781,9 +1746,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith('conv-001');
-    expect(mockConversationState.removeRunningInstance).toHaveBeenCalledWith('conv-001');
-    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'stopped');
+    expect(mockConversationService.stop).toHaveBeenCalledWith('conv-001');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
@@ -1796,7 +1759,7 @@ describe('WSRouter', () => {
 
   it('rejects conversation.stop when not in running/starting/error status', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'prepared', ready: false });
+    mockConversationService.stop.mockRejectedValue(new Error('Cannot stop'));
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1807,8 +1770,6 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockInstanceManager.destroyInstance).not.toHaveBeenCalled();
-
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 104 && p.error?.message?.includes('Cannot stop'); } catch { return false; }
@@ -1818,10 +1779,7 @@ describe('WSRouter', () => {
 
   it('handles conversation.restart in direct runtime', async () => {
     const mockWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'running', ready: true, wsUrl: 'ws://host/ws/conv-001', agentType: 'opencode' });
-    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
-    mockInstanceManager.stopInstance.mockResolvedValue(undefined);
-    mockInstanceManager.createInstance.mockResolvedValue(createMockInstance());
+    mockConversationService.restart.mockResolvedValue({ id: 'conv-001', status: 'running', port: 30000 });
 
     mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
     await vi.advanceTimersByTimeAsync(10);
@@ -1832,10 +1790,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockInstanceManager.stopInstance).toHaveBeenCalledWith('conv-001');
-    expect(mockInstanceManager.createInstance).toHaveBeenCalledWith('conv-001', 'opencode');
-    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'restarting');
-    expect(mockConversationState.transition).toHaveBeenCalledWith('conv-001', 'running');
+    expect(mockConversationService.restart).toHaveBeenCalledWith('conv-001');
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
@@ -1850,21 +1805,19 @@ describe('WSRouter', () => {
     const dockerMockWss = createMockWSS();
     const dockerWs = createMockWebSocket();
     mockConversationState.get.mockReturnValue({ status: 'running', ready: true, wsUrl: 'ws://host/ws/conv-001' });
-    mockInstanceManager.restartInstance.mockResolvedValue(undefined);
-    mockInstanceManager.getInstance.mockReturnValue(createMockInstance());
+    mockConversationService.restart.mockResolvedValue({ id: 'conv-001', status: 'running', port: 30000 });
 
     const dockerRouter = new WSRouter(
       dockerMockWss as any,
-      mockInstanceManager,
-      mockWorkspaceFactory,
       mockConversationState,
       { heartbeatIntervalMs: 5000, idleTimeoutMs: 10000 },
-      { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
-      { runtime: 'docker', maxInstances: 10, idleTimeoutMs: 600000, idleSweepIntervalMs: 60000, portRange: { start: 30000, end: 30100 }, healthCheck: { retries: 10, intervalMs: 500 }, runtimeConfig: { binary: 'opencode', docker: { image: 'opencode:latest', containerPort: 3000 } }, agentType: 'opencode' },
       mockConfigService,
       mockAgentService,
       mockSkillService,
-      mockRuntimeRegistry
+      mockConversationService,
+      mockFileService,
+      mockSessionService,
+      mockMessageService
     );
 
     dockerMockWss.emit('connection', dockerWs, createMockReq('/ws/conv-001'));
@@ -1876,9 +1829,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith('conv-001');
-    expect(mockInstanceManager.stopInstance).not.toHaveBeenCalled();
-    expect(mockInstanceManager.createInstance).not.toHaveBeenCalled();
+    expect(mockConversationService.restart).toHaveBeenCalledWith('conv-001');
 
     const sendCalls = dockerWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {

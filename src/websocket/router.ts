@@ -1,58 +1,56 @@
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import { logger } from '../utils/logger.js';
-import type { AgentClient } from '../agent-runtime/types.js';
-import type { RuntimeRegistry } from '../agent-runtime/registry.js';
-import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
-import { WorkspaceFactory } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { ConfigService } from '../services/config-service.js';
 import { AgentService } from '../services/agent-service.js';
 import { SkillService } from '../services/skill-service.js';
+import { ConversationService } from '../services/conversation-service.js';
+import { FileService } from '../services/file-service.js';
+import { SessionService } from '../services/session-service.js';
+import { MessageService } from '../services/message-service.js';
 import { WSConnection } from './connection.js';
 import type { WebSocketConfig } from '../config-loader.js';
-import type { ServerConfig, OrchestratorConfig } from '../config-loader.js';
 import { wsConnectionsActive } from '../metrics/registry.js';
+import { validateSkillName } from '../orchestrator/workspace-factory.js';
+import { AppError, ErrorCodes } from '../utils/errors.js';
 
 export class WSRouter {
   private wss: WebSocketServer;
-  private instanceManager: InstanceManager;
-  private workspaceFactory: WorkspaceFactory;
   private conversationState: ConversationState;
   private wsConfig: WebSocketConfig;
-  private serverConfig: ServerConfig;
-  private orchestratorConfig: OrchestratorConfig;
   private configService: ConfigService;
   private agentService: AgentService;
   private skillService: SkillService;
-  private runtimeRegistry: RuntimeRegistry;
+  private conversationService: ConversationService;
+  private fileService: FileService;
+  private sessionService: SessionService;
+  private messageService: MessageService;
   private connections: Map<string, WSConnection> = new Map();
   private eventUnsubscribers: Map<string, () => void> = new Map();
 
   constructor(
     wss: WebSocketServer,
-    instanceManager: InstanceManager,
-    workspaceFactory: WorkspaceFactory,
     conversationState: ConversationState,
     wsConfig: WebSocketConfig,
-    serverConfig: ServerConfig,
-    orchestratorConfig: OrchestratorConfig,
     configService: ConfigService,
     agentService: AgentService,
     skillService: SkillService,
-    runtimeRegistry: RuntimeRegistry
+    conversationService: ConversationService,
+    fileService: FileService,
+    sessionService: SessionService,
+    messageService: MessageService
   ) {
     this.wss = wss;
-    this.instanceManager = instanceManager;
-    this.workspaceFactory = workspaceFactory;
     this.conversationState = conversationState;
     this.wsConfig = wsConfig;
-    this.serverConfig = serverConfig;
-    this.orchestratorConfig = orchestratorConfig;
     this.configService = configService;
     this.agentService = agentService;
     this.skillService = skillService;
-    this.runtimeRegistry = runtimeRegistry;
+    this.conversationService = conversationService;
+    this.fileService = fileService;
+    this.sessionService = sessionService;
+    this.messageService = messageService;
 
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
   }
@@ -69,18 +67,6 @@ export class WSRouter {
     this.wss.close();
   }
 
-  private createSessionInBackground(id: string, client: AgentClient): void {
-    client.createSession({ title: `AgentOrchestrator-${id}` })
-      .then((session) => {
-        this.conversationState.setInstanceInfo(id, { sessionId: session.id });
-        this.instanceManager.setSessionId(id, session.id);
-        logger.info(`[OpenCode ${id}] session created: ${session.id}`);
-      })
-      .catch((err) => {
-        logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
-      });
-  }
-
   private async onConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
     const url = req.url ?? '';
     const match = url.match(/^\/ws\/([^/]+)$/);
@@ -93,14 +79,12 @@ export class WSRouter {
     const conversationId = match[1];
     logger.info(`WS connection requested: ${conversationId}`);
 
-    // Check conversation exists
     if (!this.conversationState.has(conversationId)) {
       logger.warn(`Conversation not found for ${conversationId}`);
       ws.close(1011, 'Conversation not found');
       return;
     }
 
-    // Close existing connection for same conversation
     const existing = this.connections.get(conversationId);
     if (existing) {
       logger.warn(`Closing existing WS connection for ${conversationId}`);
@@ -123,7 +107,6 @@ export class WSRouter {
     wsConnectionsActive.inc();
     logger.info(`WS connection established: ${conversationId}`);
 
-    // Subscribe to conversation events and push to client
     const unsub = this.conversationState.subscribe(conversationId, (event) => {
       connection.sendEvent(event.type, event.payload);
     });
@@ -139,75 +122,19 @@ export class WSRouter {
   }
 
   private async handleMessage(conversationId: string, method: string, params: unknown): Promise<unknown> {
-    const state = this.conversationState.get(conversationId);
-    if (!state) {
-      throw new Error('Conversation not found');
-    }
-
-    // Session-scoped methods require running instance
-    const needsRunning = ['message.send', 'message.history', 'session.create', 'session.abort'].includes(method);
-    if (needsRunning) {
-      if (state.status !== 'running') {
-        throw new Error(`Conversation is not running (status: ${state.status})`);
-      }
-      if (method === 'message.send' && !state.ready) {
-        throw new Error('Instance not ready yet');
-      }
-    }
-
-    const instance = this.instanceManager.getInstance(conversationId);
-
     switch (method) {
+
+      // ─── Message ───────────────────────────────────────────
+
       case 'message.send': {
-        if (!instance) throw new Error('Instance not available');
-        if (!instance.sessionId) throw new Error('Session not ready yet');
         const { text, model: rawModel, agent: rawAgent } = params as { text: string; model?: string; agent?: string };
-        if (!text) throw new Error('Missing text parameter');
-
-        let model: { providerID: string; modelID: string } | undefined;
-        const modelStr = rawModel;
-        if (modelStr) {
-          const parts = modelStr.split('/');
-          if (parts.length >= 2) {
-            model = { providerID: parts[0], modelID: parts.slice(1).join('/') };
-          }
-        }
-
-        const agent = rawAgent;
-
-        const response = await instance.client.sendPrompt(instance.sessionId, {
-          model,
-          agent,
-          parts: [{ type: 'text', text }],
-        });
-        const texts = response.parts
-          .filter((p) => p.type === 'text')
-          .map((p) => (p as unknown as { text: string }).text)
-          .join('');
-
-        this.conversationState.emitEvent(conversationId, 'conversation.message', {
-          messageId: response.info.id,
-          text: texts,
-          parts: response.parts,
-          role: 'assistant',
-        });
-        return { messageId: response.info.id, text: texts, parts: response.parts };
+        if (!text) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing text parameter');
+        return await this.messageService.send(conversationId, text, rawModel, rawAgent);
       }
 
       case 'message.history': {
-        if (!instance) throw new Error('Instance not available');
-        if (!instance.sessionId) throw new Error('Session not ready yet');
         const { sessionId, limit } = params as { sessionId?: string; limit?: number };
-        const sid = sessionId || instance.sessionId;
-        const messages = await instance.client.listMessages(sid, limit);
-        return messages;
-      }
-
-      case 'session.abort': {
-        if (!instance) throw new Error('Instance not available');
-        if (!instance.sessionId) throw new Error('Session not ready yet');
-        const result = await instance.client.abortSession(instance.sessionId);
-        return { aborted: result };
+        return await this.messageService.getHistory(conversationId, sessionId, limit);
       }
 
       // ─── Config ──────────────────────────────────────────
@@ -215,7 +142,7 @@ export class WSRouter {
       case 'config.update': {
         const { config } = params as { config: Record<string, unknown> };
         if (typeof config !== 'object' || config === null) {
-          throw new Error('Missing or invalid config');
+          throw new AppError(400, ErrorCodes.INVALID_REQUEST_BODY, 'Missing or invalid config');
         }
         this.configService.writeConfig(conversationId, config);
         return { updated: true };
@@ -225,28 +152,37 @@ export class WSRouter {
         return this.configService.readConfig(conversationId);
       }
 
+      case 'config.patch': {
+        const { config: patch } = params as { config: Record<string, unknown> };
+        if (typeof patch !== 'object' || patch === null) {
+          throw new AppError(400, ErrorCodes.INVALID_REQUEST_BODY, 'Missing or invalid config patch');
+        }
+        this.configService.patchConfig(conversationId, patch);
+        return { updated: true };
+      }
+
       // ─── Agents ──────────────────────────────────────────
 
       case 'agent.register': {
         const { name, content } = params as { name: string; content: string };
-        if (!name || content === undefined) throw new Error('Missing name or content');
+        if (!name || content === undefined) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name or content');
         this.agentService.writeAgent(conversationId, name, content);
         return { registered: name };
       }
 
       case 'agent.list': {
-        return this.agentService.listAgents(conversationId);
+        return await this.agentService.listAgentsWithRuntime(conversationId);
       }
 
       case 'agent.get': {
         const { name } = params as { name: string };
-        if (!name) throw new Error('Missing name');
+        if (!name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name');
         return this.agentService.readAgent(conversationId, name);
       }
 
       case 'agent.delete': {
         const { name } = params as { name: string };
-        if (!name) throw new Error('Missing name');
+        if (!name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name');
         this.agentService.deleteAgent(conversationId, name);
         return { deleted: name };
       }
@@ -255,7 +191,7 @@ export class WSRouter {
 
       case 'agent.config.write': {
         const { content } = params as { content: string };
-        if (content === undefined) throw new Error('Missing content');
+        if (content === undefined) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing content');
         this.agentService.writeAgentsMd(conversationId, content);
         return { written: true };
       }
@@ -273,89 +209,87 @@ export class WSRouter {
 
       case 'file.write': {
         const { path, content } = params as { path: string; content: string };
-        if (path === undefined || content === undefined) throw new Error('Missing path or content');
-        this.workspaceFactory.writeFile(conversationId, path, content);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, `file ${path} updated`);
-        }
+        if (path === undefined || content === undefined) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing path or content');
+        this.fileService.write(conversationId, path, content);
         return { written: path };
       }
 
       case 'file.read': {
         const { path } = params as { path: string };
-        if (path === undefined) throw new Error('Missing path');
-        return this.workspaceFactory.readFile(conversationId, path);
+        if (path === undefined) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing path');
+        return this.fileService.read(conversationId, path);
       }
 
       case 'file.delete': {
         const { path } = params as { path: string };
-        if (path === undefined) throw new Error('Missing path');
-        this.workspaceFactory.deleteFile(conversationId, path);
+        if (path === undefined) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing path');
+        this.fileService.delete(conversationId, path);
         return { deleted: path };
       }
 
       case 'file.list': {
         const { path } = params as { path?: string };
-        return this.workspaceFactory.listFiles(conversationId, path);
+        return this.fileService.list(conversationId, path);
       }
 
       case 'file.copy': {
         const { source, dest } = params as { source: string; dest: string };
-        if (!source || !dest) throw new Error('Missing source or dest');
-        this.workspaceFactory.copyFromLocal(conversationId, source, dest);
-        if (state.status === 'running') {
-          this.conversationState.markNeedsRestart(conversationId, `file copied to ${dest}`);
-        }
+        if (!source || !dest) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing source or dest');
+        this.fileService.copy(conversationId, source, dest);
         return { copied: dest };
       }
 
       // ─── Sessions ────────────────────────────────────────
 
       case 'session.create': {
-        if (!instance) throw new Error('Instance not available');
-        const { title, parentID } = params as { title?: string; parentID?: string };
-        return await instance.client.createSession({ title, parentID });
+        const opts = params as { title?: string; parentID?: string } | undefined;
+        return await this.sessionService.create(conversationId, opts);
       }
 
       case 'session.list': {
-        if (!instance) throw new Error('Instance not available');
-        return await instance.client.listSessions();
+        return await this.sessionService.list(conversationId);
       }
 
       case 'session.get': {
-        if (!instance) throw new Error('Instance not available');
         const { sessionId } = params as { sessionId: string };
-        if (!sessionId) throw new Error('Missing sessionId');
-        return await instance.client.getSession(sessionId);
+        if (!sessionId) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing sessionId');
+        return await this.sessionService.get(conversationId, sessionId);
       }
 
       case 'session.children': {
-        if (!instance) throw new Error('Instance not available');
         const { sessionId } = params as { sessionId: string };
-        if (!sessionId) throw new Error('Missing sessionId');
-        return await instance.client.getSessionChildren(sessionId);
+        if (!sessionId) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing sessionId');
+        return await this.sessionService.getChildren(conversationId, sessionId);
       }
 
       case 'session.fork': {
-        if (!instance) throw new Error('Instance not available');
         const { sessionId, messageID } = params as { sessionId: string; messageID?: string };
-        if (!sessionId) throw new Error('Missing sessionId');
-        return await instance.client.forkSession(sessionId, messageID);
+        if (!sessionId) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing sessionId');
+        return await this.sessionService.fork(conversationId, sessionId, messageID);
       }
 
       case 'session.delete': {
-        if (!instance) throw new Error('Instance not available');
         const { sessionId } = params as { sessionId: string };
-        if (!sessionId) throw new Error('Missing sessionId');
-        await instance.client.deleteSession(sessionId);
+        if (!sessionId) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing sessionId');
+        await this.sessionService.delete(conversationId, sessionId);
         return { deleted: sessionId };
+      }
+
+      case 'session.abort': {
+        return await this.sessionService.abort(conversationId);
+      }
+
+      // ─── Providers ─────────────────────────────────────────
+
+      case 'providers.list': {
+        return await this.sessionService.listProviders(conversationId);
       }
 
       // ─── Skills ────────────────────────────────────────────
 
       case 'skills.import': {
         const { source, name } = params as { source: string; name: string };
-        if (!source || !name) throw new Error('Missing source or name');
+        if (!source || !name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing source or name');
         this.skillService.importSkill(conversationId, source, name);
         return { imported: name };
       }
@@ -366,19 +300,22 @@ export class WSRouter {
 
       case 'skills.get': {
         const { name } = params as { name: string };
-        if (!name) throw new Error('Missing name');
+        if (!name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name');
+        try { validateSkillName(name); } catch { throw new AppError(400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name'); }
         return this.skillService.readSkill(conversationId, name);
       }
 
       case 'skills.info': {
         const { name } = params as { name: string };
-        if (!name) throw new Error('Missing name');
+        if (!name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name');
+        try { validateSkillName(name); } catch { throw new AppError(400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name'); }
         return this.skillService.getSkillInfo(conversationId, name);
       }
 
       case 'skills.delete': {
         const { name } = params as { name: string };
-        if (!name) throw new Error('Missing name');
+        if (!name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name');
+        try { validateSkillName(name); } catch { throw new AppError(400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name'); }
         this.skillService.deleteSkill(conversationId, name);
         return { deleted: name };
       }
@@ -386,128 +323,34 @@ export class WSRouter {
       // ─── Conversation Lifecycle ──────────────────────────
 
       case 'conversation.status': {
+        const data = this.conversationService.get(conversationId);
+        const state = this.conversationState.get(conversationId);
         return {
-          id: state.id,
-          status: state.status,
-          ready: state.ready,
-          port: state.port,
-          sessionId: state.sessionId,
-          wsUrl: state.wsUrl,
-          lastError: state.lastError,
+          ...data,
+          lastError: state?.lastError,
         };
       }
 
       case 'conversation.start': {
-        if (state.status === 'running' || state.status === 'starting') {
-          throw new Error('Conversation is already starting or running');
-        }
-
-        this.conversationState.cancelReadyCheck(conversationId);
-        this.conversationState.transition(conversationId, 'starting');
-
-        try {
-          const newInstance = await this.instanceManager.createInstance(conversationId, state.agentType);
-          this.conversationState.setInstanceInfo(conversationId, { port: newInstance.port });
-          this.conversationState.setRunningInstance(conversationId, {
-            process: newInstance.process!,
-            client: newInstance.client,
-          });
-          this.conversationState.transition(conversationId, 'running');
-          this.conversationState.startReadyCheck(conversationId);
-
-          // Create session in background
-          this.createSessionInBackground(conversationId, newInstance.client);
-
-          return {
-            status: 'running',
-            port: newInstance.port,
-            wsUrl: state.wsUrl,
-            sessionId: state.sessionId,
-          };
-        } catch (err) {
-          this.conversationState.transition(conversationId, 'error', { error: (err as Error).message });
-          throw err;
-        }
+        return await this.conversationService.start(conversationId);
       }
 
       case 'conversation.stop': {
-        if (state.status !== 'running' && state.status !== 'starting' && state.status !== 'error') {
-          throw new Error(`Cannot stop conversation in status: ${state.status}`);
-        }
-
-        try {
-          await this.instanceManager.destroyInstance(conversationId);
-          this.conversationState.removeRunningInstance(conversationId);
-          this.conversationState.transition(conversationId, 'stopped');
-          return { status: 'stopped' };
-        } catch (err) {
-          logger.error(`Failed to stop conversation ${conversationId}:`, err);
-          throw err;
-        }
+        await this.conversationService.stop(conversationId);
+        return { status: 'stopped' };
       }
 
       case 'conversation.restart': {
-        const previousStatus = state.status;
-        if (previousStatus !== 'running' && previousStatus !== 'stopped' && previousStatus !== 'error') {
-          throw new Error(`Cannot restart conversation in status: ${previousStatus}`);
-        }
+        return await this.conversationService.restart(conversationId);
+      }
 
-        this.conversationState.transition(conversationId, 'restarting');
-
-        try {
-          const hadInstance = previousStatus === 'running' || previousStatus === 'error';
-          let dockerRestarted = false;
-
-          if (hadInstance) {
-            this.conversationState.cancelReadyCheck(conversationId);
-            if (this.orchestratorConfig.runtime === 'docker') {
-              try {
-                await this.instanceManager.restartInstance(conversationId);
-                dockerRestarted = true;
-              } catch {
-                await this.instanceManager.stopInstance(conversationId).catch(() => {});
-                this.conversationState.removeRunningInstance(conversationId);
-              }
-            } else {
-              await this.instanceManager.stopInstance(conversationId);
-              this.conversationState.removeRunningInstance(conversationId);
-            }
-          }
-
-          this.conversationState.clearNeedsRestart(conversationId);
-
-          let newInstance: InstanceInfo;
-          if (dockerRestarted) {
-            newInstance = this.instanceManager.getInstance(conversationId)!;
-          } else {
-            newInstance = await this.instanceManager.createInstance(conversationId, state.agentType);
-            this.conversationState.setInstanceInfo(conversationId, { port: newInstance.port });
-            this.conversationState.setRunningInstance(conversationId, {
-              process: newInstance.process!,
-              client: newInstance.client,
-            });
-          }
-
-          this.conversationState.transition(conversationId, 'running');
-          this.conversationState.startReadyCheck(conversationId);
-
-          // Create session in background
-          this.createSessionInBackground(conversationId, newInstance.client);
-
-          return {
-            status: 'running',
-            port: newInstance.port,
-            wsUrl: state.wsUrl,
-            sessionId: state.sessionId,
-          };
-        } catch (err) {
-          this.conversationState.transition(conversationId, 'error', { error: (err as Error).message });
-          throw err;
-        }
+      case 'conversation.delete': {
+        await this.conversationService.delete(conversationId);
+        return { deleted: true };
       }
 
       default:
-        throw new Error(`Unknown method: ${method}`);
+        throw new AppError(400, ErrorCodes.INTERNAL_ERROR, `Unknown method: ${method}`);
     }
   }
 }
