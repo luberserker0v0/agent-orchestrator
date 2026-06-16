@@ -18,6 +18,24 @@ export interface HealthCheckConfig {
   intervalMs: number;
 }
 
+export interface DirectRuntimeConfig {
+  /** Path or name of the `opencode` binary (default: `opencode`) */
+  binary: string;
+}
+
+export interface DockerRuntimeConfig {
+  /** Docker image to pull and run (e.g. `ghcr.io/anomalyco/opencode`) */
+  image: string;
+  /** Port inside the container that opencode serves on (default: 3000) */
+  containerPort: number;
+}
+
+/** Shape of `runtimeConfig` in the JSON config file */
+export type RuntimeConfigShape = DirectRuntimeConfig & {
+  /** Docker-specific settings (only needed when `runtime: "docker"`) */
+  docker?: DockerRuntimeConfig;
+};
+
 export interface OrchestratorConfig {
   maxInstances: number;
   idleTimeoutMs: number;
@@ -29,7 +47,7 @@ export interface OrchestratorConfig {
     allowDynamicFallback?: boolean;
   };
   runtime: string;
-  runtimeConfig: Record<string, unknown>;
+  runtimeConfig: RuntimeConfigShape;
   agentType: string;
   healthCheck: HealthCheckConfig;
 }
@@ -138,6 +156,25 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     }
   }
 
+  // Runtime config validation
+  if (orchestrator.runtime !== 'direct' && orchestrator.runtime !== 'docker') {
+    throw new Error(`Config validation failed: orchestrator.runtime must be "direct" or "docker", got "${orchestrator.runtime}"`);
+  }
+  if (typeof orchestrator.runtimeConfig.binary !== 'string') {
+    throw new Error(`Config validation failed: orchestrator.runtimeConfig.binary must be a string, got ${orchestrator.runtimeConfig.binary}`);
+  }
+  if (orchestrator.runtimeConfig.docker !== undefined) {
+    if (typeof orchestrator.runtimeConfig.docker.image !== 'string' || !orchestrator.runtimeConfig.docker.image) {
+      throw new Error(`Config validation failed: runtimeConfig.docker.image must be a non-empty string, got ${orchestrator.runtimeConfig.docker?.image}`);
+    }
+    if (typeof orchestrator.runtimeConfig.docker.containerPort !== 'number' || !Number.isInteger(orchestrator.runtimeConfig.docker.containerPort) || orchestrator.runtimeConfig.docker.containerPort <= 0) {
+      throw new Error(`Config validation failed: runtimeConfig.docker.containerPort must be a positive integer, got ${orchestrator.runtimeConfig.docker?.containerPort}`);
+    }
+  }
+  if (orchestrator.runtime === 'docker' && !orchestrator.runtimeConfig.docker) {
+    throw new Error('Config validation failed: orchestrator.runtimeConfig.docker is required when runtime is "docker"');
+  }
+
   // Health check validation
   if (typeof orchestrator.healthCheck.retries !== 'number' || !Number.isInteger(orchestrator.healthCheck.retries) || orchestrator.healthCheck.retries <= 0) {
     throw new Error(`Config validation failed: healthCheck.retries must be a positive integer, got ${orchestrator.healthCheck.retries}`);
@@ -174,6 +211,37 @@ export function loadCanonicalConfig(enforce: boolean): Record<string, unknown> {
     return {};
   }
   return readJSON(path) as Record<string, unknown>;
+}
+
+/** Extract typed config for the DirectRuntime (throws if `runtime` is not `direct`). */
+export function getDirectRuntimeConfig(config: OrchestratorConfig): DirectRuntimeConfig {
+  if (config.runtime !== 'direct') {
+    throw new Error(
+      `Cannot extract DirectRuntimeConfig: runtime is "${config.runtime}", expected "direct". ` +
+      `Set config.orchestrator.runtime to "direct".`
+    );
+  }
+  return { binary: config.runtimeConfig.binary ?? 'opencode' };
+}
+
+/** Extract typed config for the DockerRuntime (throws if `runtime` is not `docker`). */
+export function getDockerRuntimeConfig(config: OrchestratorConfig): DockerRuntimeConfig {
+  if (config.runtime !== 'docker') {
+    throw new Error(
+      `Cannot extract DockerRuntimeConfig: runtime is "${config.runtime}", expected "docker". ` +
+      `Set config.orchestrator.runtime to "docker".`
+    );
+  }
+  if (!config.runtimeConfig.docker) {
+    throw new Error(
+      'Docker runtime selected but runtimeConfig.docker is missing. ' +
+      'Add a "docker" section to config.orchestrator.runtimeConfig.'
+    );
+  }
+  return {
+    image: config.runtimeConfig.docker.image,
+    containerPort: config.runtimeConfig.docker.containerPort,
+  };
 }
 
 export function defaultConfig(): AgentOrchestratorConfig {

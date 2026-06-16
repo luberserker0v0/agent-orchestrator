@@ -87,12 +87,12 @@ describe('DirectRuntime', () => {
   describe('constructor', () => {
     it('defaults binary to "opencode"', () => {
       const rt = new DirectRuntime(createPortPool());
-      expect((rt as any).binary).toBe('opencode');
+      expect((rt as any).config.binary).toBe('opencode');
     });
 
     it('accepts custom binary', () => {
-      const rt = new DirectRuntime(createPortPool(), 'my-opencode');
-      expect((rt as any).binary).toBe('my-opencode');
+      const rt = new DirectRuntime(createPortPool(), { binary: 'my-opencode' });
+      expect((rt as any).config.binary).toBe('my-opencode');
     });
 
     it('exposes type and capabilities', () => {
@@ -107,7 +107,7 @@ describe('DirectRuntime', () => {
 
   describe('spawn', () => {
     it('calls spawn with correct binary and args', async () => {
-      const rt = new DirectRuntime(createPortPool(), 'my-opencode');
+      const rt = new DirectRuntime(createPortPool(), { binary: 'my-opencode' });
       const mockProc = createMockProc();
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());

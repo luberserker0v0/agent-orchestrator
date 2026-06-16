@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { loadConfig, loadCanonicalConfig } from './config-loader.js';
+import { loadConfig, loadCanonicalConfig, getDirectRuntimeConfig, getDockerRuntimeConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';
 import { ConversationState } from './orchestrator/conversation-state.js';
@@ -53,15 +53,12 @@ export async function main(cliArgs?: string[]) {
   const runtimeRegistry = new RuntimeRegistry();
   const portPool = new PortPool(config.orchestrator.portRange.start, config.orchestrator.portRange.end, config.orchestrator.portRange.allowDynamicFallback);
   if (config.orchestrator.runtime === 'docker') {
-    const dockerCfg = config.orchestrator.runtimeConfig.docker as { image: string; containerPort: number } | undefined;
-    if (!dockerCfg) {
-      throw new Error('Docker runtime selected but runtimeConfig.docker is missing');
-    }
-    const dockerRuntime = new DockerRuntime(portPool, dockerCfg.image, dockerCfg.containerPort);
+    const dockerCfg = getDockerRuntimeConfig(config.orchestrator);
+    const dockerRuntime = new DockerRuntime(portPool, dockerCfg);
     runtimeRegistry.register(dockerRuntime);
   } else {
-    const binary = (config.orchestrator.runtimeConfig.binary as string) ?? 'opencode';
-    const directRuntime = new DirectRuntime(portPool, binary);
+    const directCfg = getDirectRuntimeConfig(config.orchestrator);
+    const directRuntime = new DirectRuntime(portPool, directCfg);
     runtimeRegistry.register(directRuntime);
   }
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);

@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - refactor(runtime): split OpenCodeRuntime into DirectRuntime and DockerRuntime standalone classes with InstanceHandle abstraction (port owned by runtime, ChildProcess behind handle interface)
+- refactor(config): add typed `DirectRuntimeConfig` / `DockerRuntimeConfig` interfaces; runtime constructors accept config objects instead of positional params
+- feat(config): add `getDirectRuntimeConfig()` / `getDockerRuntimeConfig()` typed helpers with validation
+- feat(config): add env var overrides for runtime config (`AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_BINARY`, `RUNTIMECONFIG_DOCKER_IMAGE`, `RUNTIMECONFIG_DOCKER_CONTAINERPORT`)
+- chore(config): validate runtime field (`"direct"` or `"docker"`) and required docker sub-config
 
 ### Fixed
 

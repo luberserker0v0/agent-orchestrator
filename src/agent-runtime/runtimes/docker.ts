@@ -4,6 +4,7 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import type { AgentRuntime, AgentCapabilities, SpawnResult, InstanceHandle, AgentClient } from '../types.js';
+import type { DockerRuntimeConfig } from '../../config-loader.js';
 
 class DockerHandle implements InstanceHandle {
   constructor(
@@ -53,14 +54,12 @@ export class DockerRuntime implements AgentRuntime {
   };
 
   private portPool: PortPool;
-  private image: string;
-  private containerPort: number;
+  private config: DockerRuntimeConfig;
   private containerNames = new Map<string, string>();
 
-  constructor(portPool: PortPool, image: string, containerPort: number) {
+  constructor(portPool: PortPool, config: DockerRuntimeConfig) {
     this.portPool = portPool;
-    this.image = image;
-    this.containerPort = containerPort;
+    this.config = config;
   }
 
   async spawn(
@@ -80,17 +79,17 @@ export class DockerRuntime implements AgentRuntime {
     const containerName = `agentorchestrator-${id}`;
     this.containerNames.set(id, containerName);
 
-    logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${this.image})`);
+    logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${this.config.image})`);
     const proc = spawn('docker', [
       'run', '-d',
       '--name', containerName,
-      '-p', `127.0.0.1:${port}:${this.containerPort}`,
+      '-p', `127.0.0.1:${port}:${this.config.containerPort}`,
       '-v', `${workspacePath}:/workspace`,
       '-w', '/workspace',
       '-e', `OPENCODE_SERVER_USERNAME=${auth.username}`,
       '-e', `OPENCODE_SERVER_PASSWORD=${auth.password}`,
-      this.image,
-      'serve', '--port', String(this.containerPort), '--hostname', '0.0.0.0',
+      this.config.image,
+      'serve', '--port', String(this.config.containerPort), '--hostname', '0.0.0.0',
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,

@@ -172,8 +172,8 @@ src/
     types.ts                 # AgentRuntime interface, SpawnResult type
     registry.ts              # RuntimeRegistry — runtime lookup by agentType
     runtimes/
-      direct.ts              # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill
-      docker.ts              # DockerRuntime — spawns Docker container, DockerHandle wraps docker rm -f
+      direct.ts              # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill. Accepts DirectRuntimeConfig ({ binary })
+      docker.ts              # DockerRuntime — spawns Docker container, DockerHandle wraps docker rm -f. Accepts DockerRuntimeConfig ({ image, containerPort })
   http-api/
     server.ts                # Express HTTP server with conversation lifecycle, config, agents, files, sessions, events endpoints
   orchestrator/
@@ -221,6 +221,11 @@ AGENTORCHESTRATOR_SERVER_SHUTDOWN_TIMEOUT_MS=15000
 AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS=600000
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
+
+# Runtime-specific config
+AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_BINARY=opencode
+AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_DOCKER_IMAGE=ghcr.io/anomalyco/opencode
+AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_DOCKER_CONTAINERPORT=3000
 ```
 
 ## Server Configuration

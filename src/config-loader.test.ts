@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse as parseJSONC } from 'jsonc-parser';
 import { describe, it, expect, afterEach } from 'vitest';
-import { loadConfig, validateConfig, readJSON } from './config-loader.js';
+import { loadConfig, validateConfig, readJSON, getDirectRuntimeConfig, getDockerRuntimeConfig } from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
 
 function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentOrchestratorConfig {
@@ -167,6 +167,57 @@ describe('validateConfig', () => {
     });
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
   });
+
+  it('rejects invalid runtime value', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, runtime: 'invalid' },
+    });
+    expect(() => validateConfig(config)).toThrow('runtime must be "direct" or "docker"');
+  });
+
+  it('rejects missing docker config when runtime is docker', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        runtimeConfig: { binary: 'opencode' },
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('runtimeConfig.docker is required when runtime is "docker"');
+  });
+
+  it('rejects empty docker image', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        runtimeConfig: { binary: 'opencode', docker: { image: '', containerPort: 3000 } },
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('runtimeConfig.docker.image must be a non-empty string');
+  });
+
+  it('rejects non-positive containerPort', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        runtimeConfig: { binary: 'opencode', docker: { image: 'img', containerPort: 0 } },
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('runtimeConfig.docker.containerPort must be a positive integer');
+  });
+
+  it('rejects missing runtimeConfig.binary', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        // @ts-expect-error testing runtime validation
+        runtimeConfig: { docker: { image: 'img', containerPort: 3000 } },
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('runtimeConfig.binary must be a string');
+  });
 });
 
 describe('example config file', () => {
@@ -272,5 +323,61 @@ describe('loadConfig fallback paths', () => {
     expect(config.server.host).toBe('127.0.0.1');
     expect(config.orchestrator.maxInstances).toBe(10);
     expect(config.workspace.basePath).toBe('./workspace');
+  });
+});
+
+describe('getDirectRuntimeConfig', () => {
+  it('returns binary from config', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'direct',
+        runtimeConfig: { binary: 'my-opencode' },
+      },
+    });
+    const result = getDirectRuntimeConfig(config.orchestrator);
+    expect(result.binary).toBe('my-opencode');
+  });
+
+  it('throws when runtime is not direct', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        runtimeConfig: { binary: 'opencode', docker: { image: 'img', containerPort: 3000 } },
+      },
+    });
+    expect(() => getDirectRuntimeConfig(config.orchestrator)).toThrow('Cannot extract DirectRuntimeConfig');
+  });
+});
+
+describe('getDockerRuntimeConfig', () => {
+  it('returns image and containerPort', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        runtimeConfig: { binary: 'opencode', docker: { image: 'my-image', containerPort: 4000 } },
+      },
+    });
+    const result = getDockerRuntimeConfig(config.orchestrator);
+    expect(result.image).toBe('my-image');
+    expect(result.containerPort).toBe(4000);
+  });
+
+  it('throws when runtime is not docker', () => {
+    const config = createValidConfig();
+    expect(() => getDockerRuntimeConfig(config.orchestrator)).toThrow('Cannot extract DockerRuntimeConfig');
+  });
+
+  it('throws when docker config is missing', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        runtimeConfig: { binary: 'opencode' },
+      },
+    });
+    expect(() => getDockerRuntimeConfig(config.orchestrator)).toThrow('runtimeConfig.docker is missing');
   });
 });

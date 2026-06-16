@@ -83,13 +83,13 @@ describe('DockerRuntime', () => {
 
   describe('constructor', () => {
     it('stores image and containerPort', () => {
-      const rt = new DockerRuntime(createPortPool(), 'test-image', 3100);
-      expect((rt as any).image).toBe('test-image');
-      expect((rt as any).containerPort).toBe(3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'test-image', containerPort: 3100 });
+      expect((rt as any).config.image).toBe('test-image');
+      expect((rt as any).config.containerPort).toBe(3100);
     });
 
     it('exposes type and capabilities', () => {
-      const rt = new DockerRuntime(createPortPool(), 'img', 3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
       expect(rt.type).toBe('opencode');
       expect(rt.capabilities).toEqual({
         sessions: true, streaming: true, files: true,
@@ -100,7 +100,7 @@ describe('DockerRuntime', () => {
 
   describe('spawn', () => {
     it('calls docker run with correct args', async () => {
-      const rt = new DockerRuntime(createPortPool(), 'test-image', 3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'test-image', containerPort: 3100 });
       const mockProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
@@ -128,7 +128,7 @@ describe('DockerRuntime', () => {
 
     it('releases port when health check fails', async () => {
       const pool = createPortPool(30000, 30000);
-      const rt = new DockerRuntime(pool, 'img', 3100);
+      const rt = new DockerRuntime(pool, { image: 'img', containerPort: 3100 });
       const mockProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockRejectedValue(new Error('timeout'));
@@ -146,7 +146,7 @@ describe('DockerRuntime', () => {
 
   describe('kill', () => {
     it('calls docker rm -f via handle', async () => {
-      const rt = new DockerRuntime(createPortPool(), 'img', 3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
       const runProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(runProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
@@ -171,14 +171,14 @@ describe('DockerRuntime', () => {
     });
 
     it('noop when handle is undefined', async () => {
-      const rt = new DockerRuntime(createPortPool(), 'img', 3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
       await expect(rt.kill(undefined)).resolves.toBeUndefined();
     });
   });
 
   describe('cleanupOrphans', () => {
     it('lists and removes orphan containers', async () => {
-      const rt = new DockerRuntime(createPortPool(), 'img', 3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
 
       const psProc = createMockProc({ exitCode: null });
       const rmProc1 = createMockProc({ exitCode: null });
@@ -211,7 +211,7 @@ describe('DockerRuntime', () => {
 
   describe('restart', () => {
     it('restarts container and waits for health check', async () => {
-      const rt = new DockerRuntime(createPortPool(), 'img', 3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
       const restartProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(restartProc);
 
@@ -228,7 +228,7 @@ describe('DockerRuntime', () => {
     });
 
     it('throws when docker restart command fails', async () => {
-      const rt = new DockerRuntime(createPortPool(), 'img', 3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
       const restartProc = createMockProc({ exitCode: 1 });
       (spawn as any).mockReturnValue(restartProc);
 
@@ -239,7 +239,7 @@ describe('DockerRuntime', () => {
     });
 
     it('throws when health check fails after restart', async () => {
-      const rt = new DockerRuntime(createPortPool(), 'img', 3100);
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
       const restartProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(restartProc);
 

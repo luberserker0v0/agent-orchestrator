@@ -5,6 +5,7 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import type { AgentRuntime, AgentCapabilities, SpawnResult, InstanceHandle } from '../types.js';
+import type { DirectRuntimeConfig } from '../../config-loader.js';
 
 class ChildProcessHandle implements InstanceHandle {
   constructor(private proc: ChildProcess) {}
@@ -62,11 +63,11 @@ export class DirectRuntime implements AgentRuntime {
   };
 
   private portPool: PortPool;
-  private binary: string;
+  private config: DirectRuntimeConfig;
 
-  constructor(portPool: PortPool, binary?: string) {
+  constructor(portPool: PortPool, config?: DirectRuntimeConfig) {
     this.portPool = portPool;
-    this.binary = binary ?? 'opencode';
+    this.config = { binary: config?.binary ?? 'opencode' };
   }
 
   async spawn(
@@ -83,8 +84,8 @@ export class DirectRuntime implements AgentRuntime {
     const baseUrl = `http://127.0.0.1:${port}`;
     const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
 
-    logger.info(`Spawning OpenCode instance on port ${port} at ${workspacePath} (binary: ${this.binary})`);
-    const proc = spawn(this.binary, ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
+    logger.info(`Spawning OpenCode instance on port ${port} at ${workspacePath} (binary: ${this.config.binary})`);
+    const proc = spawn(this.config.binary, ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
       cwd: workspacePath,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,

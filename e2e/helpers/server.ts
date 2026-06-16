@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OrchestratorConfig } from '../../src/config-loader.js';
+import type { OrchestratorConfig, DirectRuntimeConfig, DockerRuntimeConfig } from '../../src/config-loader.js';
+import { getDirectRuntimeConfig, getDockerRuntimeConfig } from '../../src/config-loader.js';
 import { createHttpServer, type HttpServer } from '../../src/http-api/server.js';
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
@@ -64,12 +65,12 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const runtimeRegistry = new RuntimeRegistry();
   const portPool = new PortPool(orchestratorConfig.portRange.start, orchestratorConfig.portRange.end, orchestratorConfig.portRange.allowDynamicFallback);
   if (orchestratorConfig.runtime === 'docker') {
-    const dockerCfg = orchestratorConfig.runtimeConfig.docker as { image: string; containerPort: number } | undefined;
-    const dockerRuntime = new DockerRuntime(portPool, dockerCfg?.image ?? TEST_DOCKER_IMAGE, dockerCfg?.containerPort ?? 3100);
+    const dockerCfg: DockerRuntimeConfig = getDockerRuntimeConfig(orchestratorConfig);
+    const dockerRuntime = new DockerRuntime(portPool, dockerCfg);
     runtimeRegistry.register(dockerRuntime);
   } else {
-    const binary = (orchestratorConfig.runtimeConfig.binary as string) ?? 'opencode';
-    const directRuntime = new DirectRuntime(portPool, binary);
+    const directCfg: DirectRuntimeConfig = getDirectRuntimeConfig(orchestratorConfig);
+    const directRuntime = new DirectRuntime(portPool, directCfg);
     runtimeRegistry.register(directRuntime);
   }
 
