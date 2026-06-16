@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- refactor(runtime): split OpenCodeRuntime into DirectRuntime and DockerRuntime standalone classes with InstanceHandle abstraction (port owned by runtime, ChildProcess behind handle interface)
+
 ### Fixed
 
 - fix(config-loader): deep-merge parsed config with defaults to prevent missing fields (`agentType` was undefined → kill logic skipped → workspace folder never released)
 
 ### Added
 
+- feat(agent-runtime): add InstanceHandle interface (pid, exitCode, kill, waitForExit, onExit)
+- feat(agent-runtime): add ChildProcessHandle wrapping ChildProcess + treeKill in DirectRuntime
+- feat(agent-runtime): add DockerHandle wrapping docker rm -f in DockerRuntime
 - feat(e2e): verify workspace folder is removed after DELETE conversation in lifecycle, agent-crud, file-crud tests
 - feat(instance-manager): log OS-level PID verification (tasklist) after kill cycle to detect surviving processes
 - feat(services): add ConversationService, FileService, SessionService, MessageService between transport and domain layers
@@ -21,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(errors): add error code constants (ErrorCodes) for all HTTP and WS error types (#59)
 - feat(agent-runtime): add AgentRuntime interface with spawn/kill/restart/cleanupOrphans (#57)
 - feat(agent-runtime): add RuntimeRegistry for runtime lookup by agentType (#57)
-- feat(agent-runtime): add OpenCodeRuntime with Docker container lifecycle (#57)
+- feat(agent-runtime): add DirectRuntime and DockerRuntime with InstanceHandle abstraction
 
 ### Changed
 

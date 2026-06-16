@@ -172,7 +172,8 @@ src/
     types.ts                 # AgentRuntime interface, SpawnResult type
     registry.ts              # RuntimeRegistry — runtime lookup by agentType
     runtimes/
-      opencode.ts            # OpenCodeRuntime — Docker container lifecycle (spawn, kill, restart, cleanupOrphans)
+      direct.ts              # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill
+      docker.ts              # DockerRuntime — spawns Docker container, DockerHandle wraps docker rm -f
   http-api/
     server.ts                # Express HTTP server with conversation lifecycle, config, agents, files, sessions, events endpoints
   orchestrator/
