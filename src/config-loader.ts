@@ -204,6 +204,28 @@ export function defaultConfig(): AgentOrchestratorConfig {
   };
 }
 
+function mergeDefaults<T>(defaults: T, overrides: unknown): T {
+  if (overrides === undefined || overrides === null) return defaults;
+  if (typeof defaults !== 'object' || typeof overrides !== 'object') return overrides as T;
+  if (Array.isArray(defaults) || Array.isArray(overrides)) return overrides as T;
+
+  const result = { ...(defaults as Record<string, unknown>) };
+  for (const key of Object.keys(overrides as Record<string, unknown>)) {
+    const overrideVal = (overrides as Record<string, unknown>)[key];
+    const defaultVal = (defaults as Record<string, unknown>)[key];
+    if (
+      overrideVal !== undefined &&
+      typeof overrideVal === 'object' && !Array.isArray(overrideVal) &&
+      defaultVal !== undefined && typeof defaultVal === 'object' && !Array.isArray(defaultVal)
+    ) {
+      result[key] = mergeDefaults(defaultVal, overrideVal);
+    } else {
+      result[key] = overrideVal;
+    }
+  }
+  return result as T;
+}
+
 export function loadConfig(configPath?: string): AgentOrchestratorConfig {
   let resolvedPath: string | undefined;
 
@@ -223,15 +245,10 @@ export function loadConfig(configPath?: string): AgentOrchestratorConfig {
   if (resolvedPath) {
     const parsed = readJSON(resolvedPath);
     applyEnvOverrides(parsed);
-    config = parsed as unknown as AgentOrchestratorConfig;
+    config = mergeDefaults(defaultConfig(), parsed);
   } else {
     config = defaultConfig();
     applyEnvOverrides(config as unknown as Record<string, unknown>);
-  }
-
-  config.orchestrator.runtime = config.orchestrator.runtime || 'direct';
-  if (config.workspace.enforceCanonicalConfig === undefined) {
-    config.workspace.enforceCanonicalConfig = true;
   }
   validateConfig(config);
   return config;

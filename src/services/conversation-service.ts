@@ -210,13 +210,13 @@ export class ConversationService {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
     }
 
-    try {
-      await this.instanceManager.destroyInstance(id).catch(() => {});
-    } catch {
-      // ignore
-    }
+    const hasInstance = this.instanceManager.getInstance(id) !== undefined;
+    logger.info(`[${id}] delete: instance exists in manager=${hasInstance}`);
+    await this.instanceManager.destroyInstance(id).catch(() => {});
+    logger.info(`[${id}] delete: destroyInstance returned, attempting workspace cleanup`);
     try {
       await this.workspaceFactory.destroy(id);
+      logger.info(`[${id}] delete: workspace cleanup completed`);
     } catch (wsErr) {
       logger.warn(`Failed to remove workspace for ${id}:`, wsErr);
     }
