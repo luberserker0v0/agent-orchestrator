@@ -502,7 +502,6 @@ describe('InstanceManager', () => {
       await instanceManager.destroyInstance('conv-del');
 
       expect(instanceManager.listInstances()).toHaveLength(0);
-      expect(existsSync(info.workspacePath)).toBe(false);
     });
 
     it('destroys instance even when cleanup encounters errors', async () => {

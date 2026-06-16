@@ -21,6 +21,7 @@ import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE 
 export interface E2EServer {
   port: number;
   baseUrl: string;
+  workspaceDir: string;
   cleanup: () => Promise<void>;
   orchestratorConfig: OrchestratorConfig;
 }
@@ -110,7 +111,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
       }
       const port = addr.port;
       serverConfig.port = port;
-      resolve({ port, baseUrl: `http://${host}:${port}`, cleanup, orchestratorConfig });
+      resolve({ port, baseUrl: `http://${host}:${port}`, workspaceDir, cleanup, orchestratorConfig });
     });
     httpServer.server.on('error', (err) => {
       reject(err);

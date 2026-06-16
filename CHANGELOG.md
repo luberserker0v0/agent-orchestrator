@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- fix(config-loader): deep-merge parsed config with defaults to prevent missing fields (`agentType` was undefined → kill logic skipped → workspace folder never released)
+
 ### Added
 
+- feat(e2e): verify workspace folder is removed after DELETE conversation in lifecycle, agent-crud, file-crud tests
+- feat(instance-manager): log OS-level PID verification (tasklist) after kill cycle to detect surviving processes
 - feat(services): add ConversationService, FileService, SessionService, MessageService between transport and domain layers
 - feat(utils): add ModelParser utility for providerID/modelID extraction
 - feat(errors): add AppError class with statusCode, code, and structured error responses (#59)
@@ -19,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- docs(config): add `agentType` to agentorchestrator.json for explicit runtime selection
 - docs(architecture): separate Runtime Abstraction Layer from Domain Layer in diagrams and core module hierarchy
 - refactor(http-api): delegate all route handlers to service layer (~300 lines thinner)
 - refactor(websocket): delegate all 12 RPC method groups to service layer

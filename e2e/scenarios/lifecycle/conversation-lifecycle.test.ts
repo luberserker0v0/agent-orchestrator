@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { startServer, type E2EServer } from '../../helpers/server.js';
 import { OPENCODE_CONFIG } from '../../../src/test-fixtures/user-configs.js';
 import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
@@ -102,11 +104,21 @@ describe('Conversation Lifecycle (E2E)', () => {
     expect(typeof body.port).toBe('number');
   });
 
-  it('deletes conversation', async () => {
+  it('deletes conversation and cleans up workspace folder', async () => {
+    const wsPath = join(server.workspaceDir, 'e2e-lifecycle');
+    expect(existsSync(wsPath)).toBe(true);
+
     const res = await fetch(`${server.baseUrl}/api/conversations/e2e-lifecycle`, {
       method: 'DELETE',
     });
     expect(res.status).toBe(204);
+
+    // Workspace folder should be removed within 30s (background cleanup retries)
+    for (let i = 0; i < 30; i++) {
+      if (!existsSync(wsPath)) break;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    expect(existsSync(wsPath)).toBe(false);
   });
 
   it('returns 404 for deleted conversation', async () => {

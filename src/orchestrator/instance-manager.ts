@@ -1,5 +1,4 @@
-import { type ChildProcess } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { type ChildProcess, exec } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { AgentClient } from '../agent-runtime/types.js';
@@ -89,11 +88,11 @@ export class InstanceManager {
     if (proc) {
       proc.on('exit', (code: number | null) => {
         logger.warn(`[${id}] process exited with code ${code}`);
-        this.cleanupInstance(id, false);
+        this.cleanupInstance(id);
       });
       proc.on('error', (err: Error) => {
         logger.error(`[${id}] process error: ${err.message}`);
-        this.cleanupInstance(id, false);
+        this.cleanupInstance(id);
       });
     }
 
@@ -149,40 +148,55 @@ export class InstanceManager {
 
     if (oldest) {
       logger.warn(`LRU eviction: destroying instance ${oldest.id} (idle since ${new Date(oldest.lastUsedAt).toISOString()})`);
-      await this.cleanupInstance(oldest.id, true);
+      await this.cleanupInstance(oldest.id);
     }
   }
 
-  private async cleanupInstance(id: string, removeWorkspace: boolean): Promise<void> {
+  private async cleanupInstance(id: string): Promise<void> {
     const inst = this.instances.get(id);
-    if (!inst) return;
+    if (!inst) {
+      logger.warn(`[${id}] cleanupInstance: no instance found in map (already cleaned up)`);
+      return;
+    }
 
     this.instances.delete(id);
 
     if (inst.dispose) {
       await inst.dispose();
+      logger.info(`[${id}] dispose completed`);
     } else if (inst.process) {
+      const pid = inst.process.pid;
+      logger.info(`[${id}] killing process PID ${pid}...`);
       const runtime = this.runtimes.get(this.config.agentType);
       if (runtime) {
         await this.safeKill(runtime, inst.process);
-        await this.waitForExit(inst.process, 5000);
-        if (!inst.process.killed && inst.process.exitCode === null) {
-          await this.safeKill(runtime, inst.process, 'SIGKILL');
+        let exited = inst.process.exitCode !== null;
+        if (!exited) {
+          await this.waitForExit(inst.process, 5000);
+          exited = inst.process.exitCode !== null;
         }
+        if (!exited) {
+          logger.warn(`[${id}] PID ${pid} still alive after SIGTERM, sending SIGKILL`);
+          await this.safeKill(runtime, inst.process, 'SIGKILL');
+          await this.waitForExit(inst.process, 5000);
+        }
+        logger.info(`[${id}] PID ${pid} kill complete, exitCode=${inst.process.exitCode}, killed=${inst.process.killed}`);
+        // Verify process is actually dead at OS level (Windows: tasklist check)
+        exec(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, (err, stdout) => {
+          const alive = stdout.includes(String(pid));
+          logger.info(`[${id}] OS-level PID ${pid} alive=${alive}${alive ? ' (SURVIVED!)' : ''}`);
+          if (alive) {
+            logger.warn(`[${id}] PID ${pid} survived kill! Checking children...`);
+            exec(`wmic process where "ParentProcessId=${pid}" get ProcessId /FORMAT:CSV`, (err2, stdout2) => {
+              const children = stdout2.split('\n').filter(l => l.trim() && !l.includes('ProcessId')).map(l => l.trim()).filter(Boolean);
+              logger.info(`[${id}] surviving children of PID ${pid}: ${children.length ? children.join(', ') : 'none'}`);
+            });
+          }
+        });
       }
     }
 
     this.portPool.release(inst.port);
-
-    if (removeWorkspace) {
-      try {
-        rmSync(inst.workspacePath, { recursive: true, force: true });
-        logger.info(`Workspace removed: ${inst.workspacePath}`);
-      } catch (err) {
-        logger.error(`Failed to remove workspace: ${inst.workspacePath}`, err);
-      }
-    }
-
     instancesActive.dec();
     logger.info(`Instance ${id} destroyed`);
   }
@@ -216,11 +230,11 @@ export class InstanceManager {
   }
 
   async destroyInstance(id: string): Promise<void> {
-    await this.cleanupInstance(id, true);
+    await this.cleanupInstance(id);
   }
 
   async stopInstance(id: string): Promise<void> {
-    await this.cleanupInstance(id, false);
+    await this.cleanupInstance(id);
   }
 
   async restartInstance(id: string): Promise<void> {
@@ -251,7 +265,7 @@ export class InstanceManager {
       for (const inst of this.instances.values()) {
         if (now - inst.lastUsedAt > this.config.idleTimeoutMs) {
           logger.warn(`Idle timeout: destroying instance ${inst.id} (idle for ${now - inst.lastUsedAt}ms)`);
-          this.cleanupInstance(inst.id, true).catch(() => {});
+          this.cleanupInstance(inst.id).catch(() => {});
         }
       }
     }, this.config.idleSweepIntervalMs);
