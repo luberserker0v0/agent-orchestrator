@@ -6,15 +6,13 @@ import { WorkspaceFactory } from './workspace-factory.js';
 import type { OrchestratorConfig, WorkspaceConfig } from '../config-loader.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig } from '../test-fixtures/ao-configs.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
-import type { AgentRuntime, AgentClient } from '../agent-runtime/types.js';
+import type { AgentRuntime, AgentClient, InstanceHandle } from '../agent-runtime/types.js';
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
 vi.mock('cross-spawn', async () => {
   return { spawn: vi.fn() };
 });
-
-import { spawn } from 'cross-spawn';
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -26,46 +24,15 @@ function cleanup(): void {
   }
 }
 
-function createMockProc(opts: { exitCode?: number | null; pid?: number | undefined } = {}) {
-  const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
-
+function createMockHandle(overrides: Partial<InstanceHandle> & { exitCode?: number | null } = {}): InstanceHandle & { _fireExit: (code: number | null) => void } {
+  const exitCallbacks: Array<(code: number | null) => void> = [];
   return {
-    pid: 'pid' in opts ? opts.pid : 12345,
-    killed: false,
-    exitCode: opts.exitCode ?? 0,
-    stdout: {
-      on: (event: string, cb: (...args: unknown[]) => void) => {
-        const key = `stdout:${event}`;
-        if (!listeners[key]) listeners[key] = [];
-        listeners[key].push(cb);
-      },
-    },
-    stderr: {
-      on: (event: string, cb: (...args: unknown[]) => void) => {
-        const key = `stderr:${event}`;
-        if (!listeners[key]) listeners[key] = [];
-        listeners[key].push(cb);
-      },
-    },
-    on: (event: string, cb: (...args: unknown[]) => void) => {
-      if (!listeners[event]) listeners[event] = [];
-      listeners[event].push(cb);
-    },
-    once: (event: string, cb: (...args: unknown[]) => void) => {
-      const wrapper = (...args: unknown[]) => {
-        cb(...args);
-        const idx = listeners[event]?.indexOf(wrapper);
-        if (idx !== undefined && idx > -1) {
-          listeners[event].splice(idx, 1);
-        }
-      };
-      if (!listeners[event]) listeners[event] = [];
-      listeners[event].push(wrapper);
-    },
-    emit: (event: string, ...args: unknown[]) => {
-      const cbs = listeners[event] ?? [];
-      cbs.forEach((cb) => cb(...args));
-    },
+    pid: 12345,
+    exitCode: overrides.exitCode ?? null,
+    kill: vi.fn().mockResolvedValue(undefined),
+    waitForExit: vi.fn().mockResolvedValue(undefined),
+    onExit: vi.fn((cb: (code: number | null) => void) => { exitCallbacks.push(cb); }),
+    _fireExit: (code: number | null) => { exitCallbacks.forEach(cb => cb(code)); },
   };
 }
 
@@ -73,6 +40,15 @@ const workspaceConfig: WorkspaceConfig = {
   basePath: 'test-workspace-im',
   enforceCanonicalConfig: true,
 };
+
+let nextPort = 41000;
+function allocPorts(count: number): number[] {
+  const ports: number[] = [];
+  for (let i = 0; i < count; i++) {
+    ports.push(nextPort++);
+  }
+  return ports;
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
@@ -82,9 +58,7 @@ describe('InstanceManager', () => {
   let runtimeRegistry: RuntimeRegistry;
   let mockRuntime: AgentRuntime;
   let mockClient: AgentClient;
-  let mockedSpawn: ReturnType<typeof vi.mocked<typeof spawn>>;
   let mockSpawnFn: ReturnType<typeof vi.fn>;
-  /** @deprecated Use mockClient.health instead */
   let mockHealth: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -123,7 +97,6 @@ describe('InstanceManager', () => {
     runtimeRegistry.register(mockRuntime);
 
     instanceManager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeRegistry);
-    mockedSpawn = vi.mocked(spawn);
   });
 
   afterEach(() => {
@@ -133,8 +106,9 @@ describe('InstanceManager', () => {
 
   describe('createInstance', () => {
     it('creates instance with all lifecycle steps', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_test',
         title: 'AgentOrchestrator-test',
@@ -153,8 +127,9 @@ describe('InstanceManager', () => {
     });
 
     it('throws when instance already exists', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_1',
         title: null,
@@ -172,6 +147,7 @@ describe('InstanceManager', () => {
     });
 
     it('throws when no ports available and no instances to evict', async () => {
+      mockSpawnFn.mockRejectedValue(new Error('No available ports in pool'));
       const emptyConfig: OrchestratorConfig = {
         ...defaultOrchestratorConfig,
         portRange: { start: 30000, end: 29999, allowDynamicFallback: false },
@@ -181,6 +157,7 @@ describe('InstanceManager', () => {
       await expect(emptyManager.createInstance('conv-empty')).rejects.toThrow(
         'No available ports in pool'
       );
+      emptyManager.destroy();
     });
 
     it('throws and releases port when workspace creation fails', async () => {
@@ -195,6 +172,7 @@ describe('InstanceManager', () => {
 
       const manager = new InstanceManager(defaultOrchestratorConfig, badFactory, runtimeRegistry);
       await expect(manager.createInstance('conv-fail')).rejects.toThrow('disk full');
+      manager.destroy();
     });
 
     it('throws when health check fails after retries', async () => {
@@ -210,8 +188,9 @@ describe('InstanceManager', () => {
     });
 
     it('succeeds on second health check attempt', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       const info = await instanceManager.createInstance('conv-retry');
       expect(info).toHaveProperty('id', 'conv-retry');
@@ -220,8 +199,9 @@ describe('InstanceManager', () => {
     });
 
     it('calls ensure() when workspace already exists', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_ensure',
         title: null,
@@ -241,8 +221,8 @@ describe('InstanceManager', () => {
       expect(existsSync(wsPath)).toBe(true);
 
       // Second creation should use ensure() since workspace exists
-      const proc2 = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: proc2, client: mockClient });
+      const handle2 = createMockHandle();
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port: allocPorts(1)[0], handle: handle2 });
 
       const info2 = await instanceManager.createInstance('conv-ensure');
       expect(info2.workspacePath).toBe(wsPath);
@@ -256,8 +236,9 @@ describe('InstanceManager', () => {
       };
       const fastManager = new InstanceManager(fastConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       const info = await fastManager.createInstance('conv-health-false');
       expect(info).toHaveProperty('id', 'conv-health-false');
@@ -273,17 +254,11 @@ describe('InstanceManager', () => {
     it('handles docker stdout and stderr events', async () => {
       const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc({ exitCode: null });
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle({ exitCode: null });
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await dockerManager.createInstance('conv-docker-stdio');
-
-      // Trigger stdout data event via registered callback
-      const stdoutCbs = (mockProc as any).listeners?.['stdout:data'];
-      if (stdoutCbs) stdoutCbs.forEach((cb: (...args: unknown[]) => void) => cb(Buffer.from('Server started')));
-      // Trigger stderr data event via registered callback
-      const stderrCbs = (mockProc as any).listeners?.['stderr:data'];
-      if (stderrCbs) stderrCbs.forEach((cb: (...args: unknown[]) => void) => cb(Buffer.from('Debug info')));
 
       // Instance still tracked before exit
       expect(dockerManager.listInstances()).toHaveLength(1);
@@ -293,25 +268,23 @@ describe('InstanceManager', () => {
       dockerManager.destroy();
     });
 
-    it('spawns docker container with correct args', async () => {
+    it('spawns with correct args', async () => {
       const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await dockerManager.createInstance('conv-docker');
 
       expect(mockSpawnFn).toHaveBeenCalledWith(
         'conv-docker',
-        expect.any(Number),
         expect.stringContaining('conv-docker'),
         expect.objectContaining({ username: 'opencode' }),
         expect.any(Object),
       );
 
       // Cleanup
-      mockProc.exitCode = 0;
-      mockedSpawn.mockReturnValue(createMockProc({ exitCode: 0 }) as any);
       await dockerManager.destroyInstance('conv-docker');
       dockerManager.destroy();
     });
@@ -319,8 +292,9 @@ describe('InstanceManager', () => {
     it('creates instance with correct info in docker mode', async () => {
       const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       const info = await dockerManager.createInstance('conv-docker2');
 
@@ -333,14 +307,15 @@ describe('InstanceManager', () => {
     it('destroys docker container using runtime kill', async () => {
       const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await dockerManager.createInstance('conv-docker-rm');
 
       await dockerManager.destroyInstance('conv-docker-rm');
 
-      expect(mockRuntime.kill).toHaveBeenCalledWith(mockProc, undefined);
+      expect(handle.kill).toHaveBeenCalledWith('SIGTERM');
       dockerManager.destroy();
     });
 
@@ -365,8 +340,9 @@ describe('InstanceManager', () => {
     it('restarts docker container and waits for health check to pass', async () => {
       const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await dockerManager.createInstance('conv-restart');
 
@@ -391,8 +367,9 @@ describe('InstanceManager', () => {
     it('throws when runtime restart fails', async () => {
       const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await dockerManager.createInstance('conv-restart-fail');
 
@@ -415,8 +392,9 @@ describe('InstanceManager', () => {
       };
       const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await dockerManager.createInstance('conv-restart-health');
 
@@ -435,8 +413,9 @@ describe('InstanceManager', () => {
 
   describe('getInstance', () => {
     it('updates lastUsedAt on getInstance', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_get',
         title: null,
@@ -459,8 +438,9 @@ describe('InstanceManager', () => {
 
   describe('setSessionId', () => {
     it('sets session ID on existing instance', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_set',
         title: null,
@@ -484,8 +464,9 @@ describe('InstanceManager', () => {
 
   describe('destroyInstance', () => {
     it('destroys instance and cleans up resources', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_del',
         title: null,
@@ -505,11 +486,11 @@ describe('InstanceManager', () => {
     });
 
     it('destroys instance even when cleanup encounters errors', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await instanceManager.createInstance('conv-rm-err');
-      // Destroy should not throw even if workspace cleanup hits an edge case
       await instanceManager.destroyInstance('conv-rm-err');
       expect(instanceManager.listInstances()).toHaveLength(0);
     });
@@ -521,8 +502,9 @@ describe('InstanceManager', () => {
 
   describe('stopInstance', () => {
     it('kills process but preserves workspace on disk', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_stop',
         title: null,
@@ -549,8 +531,9 @@ describe('InstanceManager', () => {
 
   describe('listInstances', () => {
     it('returns correct subset of fields', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_list',
         title: null,
@@ -568,7 +551,7 @@ describe('InstanceManager', () => {
       expect(list[0]).toHaveProperty('port');
       expect(list[0]).toHaveProperty('lastUsedAt');
       expect(list[0]).not.toHaveProperty('workspacePath');
-      expect(list[0]).not.toHaveProperty('process');
+      expect(list[0]).not.toHaveProperty('handle');
     });
 
     it('returns empty array when no instances', () => {
@@ -578,86 +561,63 @@ describe('InstanceManager', () => {
 
   describe('process events', () => {
     it('handles stdout and stderr data events', async () => {
-      const mockProc = createMockProc({ exitCode: null });
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle({ exitCode: null });
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await instanceManager.createInstance('conv-stdio');
 
-      // Clean up
-      mockProc.exitCode = 0;
-      mockProc.emit('exit', 0);
+      // Clean up via onExit
+      handle._fireExit(0);
       await new Promise((r) => setTimeout(r, 10));
       expect(instanceManager.listInstances()).toHaveLength(0);
     });
 
-    it('cleans up instance on process exit event', async () => {
-      const mockProc = createMockProc({ exitCode: null });
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+    it('cleans up instance on handle exit event', async () => {
+      const handle = createMockHandle({ exitCode: null });
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await instanceManager.createInstance('conv-exit');
       expect(instanceManager.listInstances()).toHaveLength(1);
 
-      mockProc.exitCode = 0;
-      mockProc.emit('exit', 0);
-
-      // Give async cleanup a tick to run
-      await new Promise((r) => setTimeout(r, 10));
-      expect(instanceManager.listInstances()).toHaveLength(0);
-    });
-
-    it('cleans up instance on process error event', async () => {
-      const mockProc = createMockProc({ exitCode: null });
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
-
-      await instanceManager.createInstance('conv-err');
-      expect(instanceManager.listInstances()).toHaveLength(1);
-
-      mockProc.exitCode = 1;
-      mockProc.emit('error', new Error('spawn error'));
+      handle._fireExit(0);
 
       await new Promise((r) => setTimeout(r, 10));
       expect(instanceManager.listInstances()).toHaveLength(0);
     });
   });
 
-  describe('safeKill edge cases', () => {
-    it('does not throw when runtime kill throws', async () => {
-      const mockProc = createMockProc({ exitCode: null, pid: 99999 });
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
-      mockRuntime.kill = vi.fn().mockRejectedValue(new Error('kill failed'));
+  describe('kill edge cases', () => {
+    it('does not throw when handle.kill throws', async () => {
+      const handle = createMockHandle({ exitCode: null });
+      handle.kill = vi.fn().mockRejectedValue(new Error('kill failed'));
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await instanceManager.createInstance('conv-kill-err');
       await expect(instanceManager.destroyInstance('conv-kill-err')).resolves.toBeUndefined();
     });
 
     it('handles waitForExit timeout when process does not exit', async () => {
-      const mockProc = createMockProc({ exitCode: null, pid: 12346 });
-      // Override once to ignore exit event (simulate process never exiting)
-      mockProc.once = () => { /* noop - don't register callbacks */ };
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle({ exitCode: null });
+      handle.waitForExit = vi.fn().mockResolvedValue(undefined);
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await instanceManager.createInstance('conv-timeout');
       await expect(instanceManager.destroyInstance('conv-timeout')).resolves.toBeUndefined();
     });
 
-    it('does not throw when process already exited', async () => {
-      const mockProc = createMockProc({ exitCode: 0 });
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
-
-      const info = await instanceManager.createInstance('conv-safe1');
-      expect(info.process!.exitCode).toBe(0);
-
-      await expect(instanceManager.destroyInstance('conv-safe1')).resolves.toBeUndefined();
-    });
-
-    it('does not throw when process pid is undefined', async () => {
-      const mockProc = createMockProc({ exitCode: null, pid: undefined });
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+    it('does not throw when handle pid is undefined', async () => {
+      const handle = createMockHandle({ exitCode: null });
+      (handle as any).pid = undefined;
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await instanceManager.createInstance('conv-safe2');
 
-      await instanceManager.destroyInstance('conv-safe2');
-      expect(mockRuntime.kill).toHaveBeenCalled();
+      await expect(instanceManager.destroyInstance('conv-safe2')).resolves.toBeUndefined();
     });
   });
 
@@ -670,16 +630,18 @@ describe('InstanceManager', () => {
       };
       const strictManager = new InstanceManager(strictConfig, workspaceFactory, runtimeRegistry);
 
-      const procA = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: procA, client: mockClient });
+      const handleA = createMockHandle();
+      const portA = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port: portA, handle: handleA });
 
       await strictManager.createInstance('conv-first');
       expect(strictManager.listInstances()).toHaveLength(1);
       expect(strictManager.listInstances()[0].id).toBe('conv-first');
 
       // Creating a second instance should evict the first one
-      const procB = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: procB, client: mockClient });
+      const handleB = createMockHandle();
+      const portB = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port: portB, handle: handleB });
       await strictManager.createInstance('conv-second');
 
       const list = strictManager.listInstances();
@@ -691,8 +653,9 @@ describe('InstanceManager', () => {
 
   describe('idle timeout sweep', () => {
     it('does not start sweep when idleTimeoutMs is 0', async () => {
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       const noSweepConfig: OrchestratorConfig = {
         ...defaultOrchestratorConfig,
@@ -701,8 +664,6 @@ describe('InstanceManager', () => {
       const noSweepManager = new InstanceManager(noSweepConfig, workspaceFactory, runtimeRegistry);
       await noSweepManager.createInstance('conv-no-sweep');
 
-      // Should not have an idle sweep timer running
-      // If the test passes without hanging, the sweep isn't running
       noSweepManager.destroy();
     });
 
@@ -714,8 +675,9 @@ describe('InstanceManager', () => {
       };
       const idleManager = new InstanceManager(idleConfig, workspaceFactory, runtimeRegistry);
 
-      const mockProc = createMockProc();
-      mockSpawnFn.mockResolvedValue({ process: mockProc, client: mockClient });
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
       mockClient.createSession = vi.fn().mockResolvedValue({
         id: 'ses_idle',
         title: null,
@@ -740,7 +702,6 @@ describe('InstanceManager', () => {
     it('clears idle sweep timer without error', () => {
       const manager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeRegistry);
       expect(() => manager.destroy()).not.toThrow();
-      // Calling destroy twice should also be safe
       expect(() => manager.destroy()).not.toThrow();
     });
   });

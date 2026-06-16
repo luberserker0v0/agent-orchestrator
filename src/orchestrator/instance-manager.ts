@@ -1,7 +1,7 @@
-import { type ChildProcess, exec } from 'node:child_process';
+import { exec } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { logger } from '../utils/logger.js';
-import type { AgentClient } from '../agent-runtime/types.js';
+import type { AgentClient, InstanceHandle } from '../agent-runtime/types.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { PortPool } from './port-pool.js';
@@ -16,9 +16,8 @@ export interface InstanceInfo {
   id: string;
   port: number;
   workspacePath: string;
-  process?: ChildProcess;
+  handle?: InstanceHandle;
   client: AgentClient;
-  dispose?: () => Promise<void>;
   sessionId?: string;
   lastUsedAt: number;
 }
@@ -51,18 +50,6 @@ export class InstanceManager {
       await this.evictLRU();
     }
 
-    // Try allocate; if exhausted, evict LRU and retry once
-    let port = await this.portPool.allocate();
-    if (port === null) {
-      if (this.instances.size > 0) {
-        await this.evictLRU();
-        port = await this.portPool.allocate();
-      }
-      if (port === null) {
-        throw new Error('No available ports in pool');
-      }
-    }
-
     let workspace: WorkspaceInfo;
     try {
       if (this.workspaceFactory.hasWorkspace(id)) {
@@ -71,27 +58,21 @@ export class InstanceManager {
         workspace = this.workspaceFactory.create(id);
       }
     } catch (err) {
-      this.portPool.release(port);
       throw new Error(`Failed to create workspace: ${(err as Error).message}`, { cause: err });
     }
 
     const password = generatePassword();
 
-    const { process: proc, client, dispose } = await runtime.spawn(
+    const { client, port, handle } = await runtime.spawn(
       id,
-      port,
       workspace.path,
       { username: 'opencode', password },
       { retries: this.config.healthCheck.retries, intervalMs: this.config.healthCheck.intervalMs, clientTimeoutMs: 5000 },
     );
 
-    if (proc) {
-      proc.on('exit', (code: number | null) => {
-        logger.warn(`[${id}] process exited with code ${code}`);
-        this.cleanupInstance(id);
-      });
-      proc.on('error', (err: Error) => {
-        logger.error(`[${id}] process error: ${err.message}`);
+    if (handle) {
+      handle.onExit((_code: number | null) => {
+        logger.warn(`[${id}] process exited`);
         this.cleanupInstance(id);
       });
     }
@@ -100,9 +81,8 @@ export class InstanceManager {
       id,
       port,
       workspacePath: workspace.path,
-      process: proc,
+      handle,
       client,
-      dispose,
       lastUsedAt: Date.now(),
     };
 
@@ -161,33 +141,31 @@ export class InstanceManager {
 
     this.instances.delete(id);
 
-    if (inst.dispose) {
-      await inst.dispose();
-      logger.info(`[${id}] dispose completed`);
-    } else if (inst.process) {
-      const pid = inst.process.pid;
-      logger.info(`[${id}] killing process PID ${pid}...`);
-      const runtime = this.runtimes.get(this.config.agentType);
-      if (runtime) {
-        await this.safeKill(runtime, inst.process);
-        let exited = inst.process.exitCode !== null;
-        if (!exited) {
-          await this.waitForExit(inst.process, 5000);
-          exited = inst.process.exitCode !== null;
-        }
-        if (!exited) {
-          logger.warn(`[${id}] PID ${pid} still alive after SIGTERM, sending SIGKILL`);
-          await this.safeKill(runtime, inst.process, 'SIGKILL');
-          await this.waitForExit(inst.process, 5000);
-        }
-        logger.info(`[${id}] PID ${pid} kill complete, exitCode=${inst.process.exitCode}, killed=${inst.process.killed}`);
+    if (inst.handle) {
+      const pid = inst.handle.pid;
+      if (pid !== undefined) {
+        logger.info(`[${id}] killing process PID ${pid}...`);
+      }
+      await this.safeKill(inst.handle, 'SIGTERM');
+      let exited = inst.handle.exitCode !== null;
+      if (!exited) {
+        await inst.handle.waitForExit(5000);
+        exited = inst.handle.exitCode !== null;
+      }
+      if (!exited) {
+        logger.warn(`[${id}] sending SIGKILL`);
+        await this.safeKill(inst.handle, 'SIGKILL');
+        await inst.handle.waitForExit(5000);
+      }
+      if (pid !== undefined) {
+        logger.info(`[${id}] kill complete, exitCode=${inst.handle.exitCode}`);
         // Verify process is actually dead at OS level (Windows: tasklist check)
-        exec(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, (err, stdout) => {
+        exec(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, (_err, stdout) => {
           const alive = stdout.includes(String(pid));
           logger.info(`[${id}] OS-level PID ${pid} alive=${alive}${alive ? ' (SURVIVED!)' : ''}`);
           if (alive) {
             logger.warn(`[${id}] PID ${pid} survived kill! Checking children...`);
-            exec(`wmic process where "ParentProcessId=${pid}" get ProcessId /FORMAT:CSV`, (err2, stdout2) => {
+            exec(`wmic process where "ParentProcessId=${pid}" get ProcessId /FORMAT:CSV`, (_err2, stdout2) => {
               const children = stdout2.split('\n').filter(l => l.trim() && !l.includes('ProcessId')).map(l => l.trim()).filter(Boolean);
               logger.info(`[${id}] surviving children of PID ${pid}: ${children.length ? children.join(', ') : 'none'}`);
             });
@@ -201,25 +179,12 @@ export class InstanceManager {
     logger.info(`Instance ${id} destroyed`);
   }
 
-  private async safeKill(runtime: { kill(process?: ChildProcess, signal?: string | number): Promise<void> }, process: ChildProcess, signal?: string | number): Promise<void> {
+  private async safeKill(handle: InstanceHandle, signal?: string): Promise<void> {
     try {
-      await runtime.kill(process, signal);
+      await handle.kill(signal);
     } catch (err) {
       logger.warn(`kill error: ${(err as Error).message}`);
     }
-  }
-
-  private waitForExit(proc: ChildProcess, timeoutMs: number): Promise<void> {
-    if (proc.exitCode !== null || proc.killed) {
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(), timeoutMs);
-      proc.once('exit', () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
   }
 
   destroy(): void {

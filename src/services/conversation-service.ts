@@ -96,7 +96,6 @@ export class ConversationService {
       const instance = await this.instanceManager.createInstance(id, state.agentType);
       this.conversationState.setInstanceInfo(id, { port: instance.port });
       this.conversationState.setRunningInstance(id, {
-        process: instance.process!,
         client: instance.client,
       });
       this.conversationState.transition(id, 'running');
@@ -180,7 +179,6 @@ export class ConversationService {
         instance = await this.instanceManager.createInstance(id, state.agentType);
         this.conversationState.setInstanceInfo(id, { port: instance.port });
         this.conversationState.setRunningInstance(id, {
-          process: instance.process!,
           client: instance.client,
         });
       }

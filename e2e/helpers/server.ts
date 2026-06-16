@@ -15,7 +15,9 @@ import { FileService } from '../../src/services/file-service.js';
 import { SessionService } from '../../src/services/session-service.js';
 import { MessageService } from '../../src/services/message-service.js';
 import { RuntimeRegistry } from '../../src/agent-runtime/registry.js';
-import { OpenCodeRuntime } from '../../src/agent-runtime/runtimes/opencode.js';
+import { DirectRuntime } from '../../src/agent-runtime/runtimes/direct.js';
+import { DockerRuntime } from '../../src/agent-runtime/runtimes/docker.js';
+import { PortPool } from '../../src/orchestrator/port-pool.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE } from '../../src/test-fixtures/ao-configs.js';
 
 export interface E2EServer {
@@ -60,8 +62,16 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const workspaceFactory = new WorkspaceFactory(workspaceConfig);
 
   const runtimeRegistry = new RuntimeRegistry();
-  const opencodeRuntime = new OpenCodeRuntime(orchestratorConfig.runtime, orchestratorConfig.runtimeConfig);
-  runtimeRegistry.register(opencodeRuntime);
+  const portPool = new PortPool(orchestratorConfig.portRange.start, orchestratorConfig.portRange.end, orchestratorConfig.portRange.allowDynamicFallback);
+  if (orchestratorConfig.runtime === 'docker') {
+    const dockerCfg = orchestratorConfig.runtimeConfig.docker as { image: string; containerPort: number } | undefined;
+    const dockerRuntime = new DockerRuntime(portPool, dockerCfg?.image ?? TEST_DOCKER_IMAGE, dockerCfg?.containerPort ?? 3100);
+    runtimeRegistry.register(dockerRuntime);
+  } else {
+    const binary = (orchestratorConfig.runtimeConfig.binary as string) ?? 'opencode';
+    const directRuntime = new DirectRuntime(portPool, binary);
+    runtimeRegistry.register(directRuntime);
+  }
 
   const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory, runtimeRegistry);
   const conversationState = new ConversationState();

@@ -5,7 +5,7 @@ describe('RuntimeRegistry', () => {
   const mockRuntime = {
     type: 'test-runtime',
     capabilities: { sessions: false, streaming: false, files: false, tools: false, config: false, agents: false, skills: false },
-    spawn: async () => ({ client: {} as any }),
+    spawn: async () => ({ client: {} as any, port: 30000 }),
     kill: async () => {},
   };
 

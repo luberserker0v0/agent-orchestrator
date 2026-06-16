@@ -11,7 +11,9 @@ import { FileService } from './services/file-service.js';
 import { SessionService } from './services/session-service.js';
 import { MessageService } from './services/message-service.js';
 import { RuntimeRegistry } from './agent-runtime/registry.js';
-import { OpenCodeRuntime } from './agent-runtime/runtimes/opencode.js';
+import { DirectRuntime } from './agent-runtime/runtimes/direct.js';
+import { DockerRuntime } from './agent-runtime/runtimes/docker.js';
+import { PortPool } from './orchestrator/port-pool.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
 import { parseCliArgs, printHelp } from './cli.js';
@@ -49,11 +51,19 @@ export async function main(cliArgs?: string[]) {
 
   // Set up runtime registry
   const runtimeRegistry = new RuntimeRegistry();
-  const opencodeRuntime = new OpenCodeRuntime(
-    config.orchestrator.runtime,
-    config.orchestrator.runtimeConfig,
-  );
-  runtimeRegistry.register(opencodeRuntime);
+  const portPool = new PortPool(config.orchestrator.portRange.start, config.orchestrator.portRange.end, config.orchestrator.portRange.allowDynamicFallback);
+  if (config.orchestrator.runtime === 'docker') {
+    const dockerCfg = config.orchestrator.runtimeConfig.docker as { image: string; containerPort: number } | undefined;
+    if (!dockerCfg) {
+      throw new Error('Docker runtime selected but runtimeConfig.docker is missing');
+    }
+    const dockerRuntime = new DockerRuntime(portPool, dockerCfg.image, dockerCfg.containerPort);
+    runtimeRegistry.register(dockerRuntime);
+  } else {
+    const binary = (config.orchestrator.runtimeConfig.binary as string) ?? 'opencode';
+    const directRuntime = new DirectRuntime(portPool, binary);
+    runtimeRegistry.register(directRuntime);
+  }
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);
 
   const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeRegistry);

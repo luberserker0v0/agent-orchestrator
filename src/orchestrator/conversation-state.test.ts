@@ -56,11 +56,10 @@ describe('ConversationState', () => {
 
   it('should manage running instance references', () => {
     const state = new ConversationState();
-    const mockProcess = { pid: 123 } as any;
     const mockClient = {} as any;
 
-    state.setRunningInstance('conv-006', { process: mockProcess, client: mockClient });
-    expect(state.getRunningInstance('conv-006')?.process).toBe(mockProcess);
+    state.setRunningInstance('conv-006', { client: mockClient });
+    expect(state.getRunningInstance('conv-006')?.client).toBe(mockClient);
 
     state.removeRunningInstance('conv-006');
     expect(state.getRunningInstance('conv-006')).toBeUndefined();
@@ -111,7 +110,7 @@ describe('ConversationState', () => {
     const state = new ConversationState();
     state.create('conv-011');
     const mockClient = { getSession: vi.fn(), health: vi.fn() };
-    state.setRunningInstance('conv-011', { process: {} as any, client: mockClient as any });
+    state.setRunningInstance('conv-011', { client: mockClient as any });
     state.setInstanceInfo('conv-011', { sessionId: 'ses_1' });
     state.startReadyCheck('conv-011');
     expect(state.get('conv-011')?.ready).toBe(true);
@@ -244,9 +243,8 @@ describe('ConversationState', () => {
     it('should clean up instance info and listeners on remove', () => {
       const state = new ConversationState();
       state.create('conv-clean');
-      const mockProcess = { pid: 456 } as any;
       const mockClient = {} as any;
-      state.setRunningInstance('conv-clean', { process: mockProcess, client: mockClient });
+      state.setRunningInstance('conv-clean', { client: mockClient });
       state.remove('conv-clean');
       expect(state.getRunningInstance('conv-clean')).toBeUndefined();
     });
@@ -269,7 +267,7 @@ describe('ConversationState', () => {
     it('should not start ready check when instance has no client', () => {
       const state = new ConversationState();
       state.create('conv-no-client');
-      state.setRunningInstance('conv-no-client', { process: {} as any, client: undefined as any });
+      state.setRunningInstance('conv-no-client', { client: undefined as any });
       state.startReadyCheck('conv-no-client');
     });
   });
@@ -287,7 +285,7 @@ describe('ConversationState', () => {
       const state = new ConversationState();
       state.create('conv-ready-ok');
       const mockClient = { getSession: vi.fn().mockResolvedValue(undefined) };
-      state.setRunningInstance('conv-ready-ok', { process: {} as any, client: mockClient as any });
+      state.setRunningInstance('conv-ready-ok', { client: mockClient as any });
       state.setInstanceInfo('conv-ready-ok', { sessionId: 'ses_ok' });
       state.startReadyCheck('conv-ready-ok');
 
@@ -306,7 +304,7 @@ describe('ConversationState', () => {
           .mockRejectedValueOnce(new Error('Not ready'))
           .mockResolvedValueOnce(undefined),
       };
-      state.setRunningInstance('conv-retry-poll', { process: {} as any, client: mockClient as any });
+      state.setRunningInstance('conv-retry-poll', { client: mockClient as any });
       state.setInstanceInfo('conv-retry-poll', { sessionId: 'ses_retry' });
       state.startReadyCheck('conv-retry-poll');
 
@@ -327,7 +325,7 @@ describe('ConversationState', () => {
       const state = new ConversationState();
       state.create('conv-no-ses');
       const mockClient = { getSession: vi.fn().mockResolvedValue(undefined), health: vi.fn().mockResolvedValue(undefined) };
-      state.setRunningInstance('conv-no-ses', { process: {} as any, client: mockClient as any });
+      state.setRunningInstance('conv-no-ses', { client: mockClient as any });
       state.startReadyCheck('conv-no-ses');
 
       // ready is set immediately; keepalive calls health() when no sessionId
@@ -345,7 +343,7 @@ describe('ConversationState', () => {
       const state = new ConversationState();
       state.create('conv-timeout');
       const mockClient = { getSession: vi.fn().mockRejectedValue(new Error('Not ready')), health: vi.fn() };
-      state.setRunningInstance('conv-timeout', { process: {} as any, client: mockClient as any });
+      state.setRunningInstance('conv-timeout', { client: mockClient as any });
       state.setInstanceInfo('conv-timeout', { sessionId: 'ses_timeout' });
       state.startReadyCheck('conv-timeout');
 
@@ -365,7 +363,7 @@ describe('ConversationState', () => {
       const state = new ConversationState();
       state.create('conv-keep');
       const mockClient = { getSession: vi.fn().mockResolvedValue(undefined) };
-      state.setRunningInstance('conv-keep', { process: {} as any, client: mockClient as any });
+      state.setRunningInstance('conv-keep', { client: mockClient as any });
       state.setInstanceInfo('conv-keep', { sessionId: 'ses_keep' });
       state.startReadyCheck('conv-keep');
 
@@ -388,7 +386,7 @@ describe('ConversationState', () => {
           .mockResolvedValueOnce(undefined)
           .mockRejectedValueOnce(new Error('Crashed')),
       };
-      state.setRunningInstance('conv-lost', { process: {} as any, client: mockClient as any });
+      state.setRunningInstance('conv-lost', { client: mockClient as any });
       state.setInstanceInfo('conv-lost', { sessionId: 'ses_lost' });
       state.startReadyCheck('conv-lost');
 
@@ -405,7 +403,7 @@ describe('ConversationState', () => {
       const state = new ConversationState();
       state.create('conv-cancel-early');
       const mockClient = { getSession: vi.fn().mockRejectedValue(new Error('Not ready')) };
-      state.setRunningInstance('conv-cancel-early', { process: {} as any, client: mockClient as any });
+      state.setRunningInstance('conv-cancel-early', { client: mockClient as any });
       state.setInstanceInfo('conv-cancel-early', { sessionId: 'ses_cancel' });
 
       state.startReadyCheck('conv-cancel-early');

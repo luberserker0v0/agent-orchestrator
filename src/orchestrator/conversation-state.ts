@@ -1,4 +1,3 @@
-import type { ChildProcess } from 'node:child_process';
 import type { AgentClient } from '../agent-runtime/types.js';
 
 export type ConversationStatus =
@@ -33,7 +32,6 @@ export interface ConversationStateData {
 }
 
 export interface RunningInstanceInfo {
-  process: ChildProcess;
   client: AgentClient;
 }
 
