@@ -87,6 +87,20 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('shutdownTimeoutMs must be a positive integer');
   });
 
+  it('rejects apiKey shorter than 8 characters', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, apiKey: 'short' },
+    });
+    expect(() => validateConfig(config)).toThrow('server.apiKey must be a string of at least 8 characters');
+  });
+
+  it('accepts valid apiKey', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, apiKey: 'valid-api-key-123' },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
   it('rejects negative server.port', () => {
     const config = createValidConfig({
       server: { ...createValidConfig().server, port: -1 },

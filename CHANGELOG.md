@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(observability): add agentorchestrator_instance_spawn_duration_seconds histogram for spawn timing
 - feat(observability): add agentorchestrator_http_request_duration_seconds histogram (labels: method, status)
 - feat(observability): add agentorchestrator_conversation_state_changes_total counter (label: status) for lifecycle transitions
+- feat(security): add optional apiKey bearer token authentication for HTTP API (min 8 chars, off by default)
+- feat(security): add security headers middleware (X-Content-Type-Options, X-Frame-Options, X-DNS-Prefetch-Control)
+- feat(security): add apiKey config validation and env override (AGENTORCHESTRATOR_SERVER_APIKEY)
 - feat(agent-runtime): add InstanceHandle interface (pid, exitCode, kill, waitForExit, onExit)
 - feat(agent-runtime): add ChildProcessHandle wrapping ChildProcess + treeKill in DirectRuntime
 - feat(agent-runtime): add DockerHandle wrapping docker rm -f in DockerRuntime

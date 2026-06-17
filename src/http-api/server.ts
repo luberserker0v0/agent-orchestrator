@@ -66,13 +66,35 @@ export function createHttpServer(
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
       res.sendStatus(200);
       return;
     }
     next();
   });
+
+  // Security headers
+  app.use((_req, res, next) => {
+    res.header('X-Content-Type-Options', 'nosniff');
+    res.header('X-Frame-Options', 'DENY');
+    res.header('X-DNS-Prefetch-Control', 'off');
+    next();
+  });
+
+  // API key authentication (optional)
+  const PUBLIC_PATHS = ['/health', '/metrics', '/api-docs', '/api-docs.json'];
+  if (serverConfig.apiKey) {
+    app.use((req, res, next) => {
+      if (PUBLIC_PATHS.includes(req.path)) return next();
+      const header = req.headers.authorization;
+      if (!header || !header.startsWith('Bearer ') || header.slice(7) !== serverConfig.apiKey) {
+        res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or missing API key' } });
+        return;
+      }
+      next();
+    });
+  }
 
   // ─── Helpers ─────────────────────────────────────────────
 

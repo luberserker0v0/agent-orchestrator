@@ -201,6 +201,80 @@ describe('HTTP API Server', () => {
     expect(res.body.paths['/api/conversations']).toBeDefined();
   });
 
+  describe('security headers', () => {
+    it('includes X-Content-Type-Options: nosniff', async () => {
+      const res = await request(server).get('/health');
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+    });
+
+    it('includes X-Frame-Options: DENY', async () => {
+      const res = await request(server).get('/health');
+      expect(res.headers['x-frame-options']).toBe('DENY');
+    });
+
+    it('includes X-DNS-Prefetch-Control: off', async () => {
+      const res = await request(server).get('/health');
+      expect(res.headers['x-dns-prefetch-control']).toBe('off');
+    });
+  });
+
+  describe('API key authentication', () => {
+    let secureServer: HttpServer['server'];
+
+    afterEach(() => {
+      secureServer?.close();
+    });
+
+    function createSecureServer(apiKey: string): HttpServer['server'] {
+      const hs = createHttpServer(
+        { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000, apiKey },
+        { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
+        mockInstanceManager,
+        mockWorkspaceFactory,
+        mockConversationState,
+        defaultOrchestratorConfig,
+        mockConfigService,
+        mockAgentService,
+        mockSkillService,
+        mockRuntimeRegistry,
+        mockConversationService,
+        mockFileService,
+        mockSessionService,
+        mockMessageService
+      );
+      secureServer = hs.server;
+      return secureServer;
+    }
+
+    it('rejects request without API key', async () => {
+      const srv = createSecureServer('test-api-key-123');
+      const res = await request(srv).get('/api/conversations');
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('rejects request with wrong API key', async () => {
+      const srv = createSecureServer('test-api-key-123');
+      const res = await request(srv).get('/api/conversations').set('Authorization', 'Bearer wrong-key');
+      expect(res.status).toBe(401);
+    });
+
+    it('accepts request with correct API key', async () => {
+      const srv = createSecureServer('test-api-key-123');
+      const res = await request(srv).get('/api/conversations').set('Authorization', 'Bearer test-api-key-123');
+      expect(res.status).toBe(200);
+    });
+
+    it('allows public paths without API key', async () => {
+      const srv = createSecureServer('test-api-key-123');
+      const healthRes = await request(srv).get('/health');
+      expect(healthRes.status).toBe(200);
+
+      const metricsRes = await request(srv).get('/metrics');
+      expect(metricsRes.status).toBe(200);
+    });
+  });
+
   it('POST /api/conversations prepares workspace', async () => {
     mockConversationService.create.mockReturnValue({
       id: 'conv-001', agentType: 'opencode', status: 'prepared', ready: false,

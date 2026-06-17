@@ -6,6 +6,7 @@ export interface ServerConfig {
   port: number;
   host: string;
   shutdownTimeoutMs: number;
+  apiKey?: string;
 }
 
 export interface WebSocketConfig {
@@ -116,6 +117,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   }
   if (typeof server.shutdownTimeoutMs !== 'number' || !Number.isInteger(server.shutdownTimeoutMs) || server.shutdownTimeoutMs <= 0) {
     throw new Error(`Config validation failed: server.shutdownTimeoutMs must be a positive integer, got ${server.shutdownTimeoutMs}`);
+  }
+  if (server.apiKey !== undefined && server.apiKey !== '' && (typeof server.apiKey !== 'string' || server.apiKey.length < 8)) {
+    throw new Error(`Config validation failed: server.apiKey must be a string of at least 8 characters, got ${typeof server.apiKey === 'string' ? 'too short' : typeof server.apiKey}`);
   }
 
   // WebSocket validation
