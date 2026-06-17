@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(network): add configurable `instanceHost` for OpenCode instance URLs (default: `127.0.0.1`), replacing hardcoded host
+- feat(network): add `networkMode` to DockerRuntimeConfig (`host`, `bridge`, or custom network name); when `host`, port mapping is skipped
+- feat(network): add `instanceHost` env override (`AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_INSTANCEHOST`)
 - feat(observability): add Logger.child() for context-bound structured logging with requestId/conversationId propagation
 - feat(observability): add agentorchestrator_instances_errors_total counter (label: type) for spawn/health errors
 - feat(observability): add agentorchestrator_instance_spawn_duration_seconds histogram for spawn timing

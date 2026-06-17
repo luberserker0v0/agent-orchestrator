@@ -64,11 +64,11 @@ export class DirectRuntime implements AgentRuntime {
   };
 
   private portPool: PortPool;
-  private config: DirectRuntimeConfig;
+  private config: DirectRuntimeConfig & { instanceHost: string };
 
   constructor(portPool: PortPool, config?: DirectRuntimeConfig) {
     this.portPool = portPool;
-    this.config = { binary: config?.binary ?? 'opencode' };
+    this.config = { binary: config?.binary ?? 'opencode', instanceHost: config?.instanceHost ?? '127.0.0.1' };
   }
 
   async spawn(
@@ -82,11 +82,11 @@ export class DirectRuntime implements AgentRuntime {
       throw new Error('No available ports in pool');
     }
 
-    const baseUrl = `http://127.0.0.1:${port}`;
+    const baseUrl = `http://${this.config.instanceHost}:${port}`;
     const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
 
     logger.info(`Spawning OpenCode instance on port ${port} at ${workspacePath} (binary: ${this.config.binary})`);
-    const proc = spawn(this.config.binary, ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
+    const proc = spawn(this.config.binary, ['serve', '--port', String(port), '--hostname', this.config.instanceHost], {
       cwd: workspacePath,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,

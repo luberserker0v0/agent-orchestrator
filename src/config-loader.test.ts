@@ -229,6 +229,28 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('runtimeConfig.docker.containerPort must be a positive integer');
   });
 
+  it('rejects non-string networkMode', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        runtimeConfig: { binary: 'opencode', docker: { image: 'img', containerPort: 3000, networkMode: 123 as unknown as string } },
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('runtimeConfig.docker.networkMode must be a string');
+  });
+
+  it('accepts string networkMode', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtime: 'docker',
+        runtimeConfig: { binary: 'opencode', docker: { image: 'img', containerPort: 3000, networkMode: 'host' } },
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
   it('rejects missing runtimeConfig.binary', () => {
     const config = createValidConfig({
       orchestrator: {

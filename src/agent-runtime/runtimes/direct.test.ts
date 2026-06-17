@@ -95,6 +95,16 @@ describe('DirectRuntime', () => {
       expect((rt as any).config.binary).toBe('my-opencode');
     });
 
+    it('defaults instanceHost to 127.0.0.1', () => {
+      const rt = new DirectRuntime(createPortPool());
+      expect((rt as any).config.instanceHost).toBe('127.0.0.1');
+    });
+
+    it('accepts custom instanceHost', () => {
+      const rt = new DirectRuntime(createPortPool(), { binary: 'opencode', instanceHost: '10.0.0.1' });
+      expect((rt as any).config.instanceHost).toBe('10.0.0.1');
+    });
+
     it('exposes type and capabilities', () => {
       const rt = new DirectRuntime(createPortPool());
       expect(rt.type).toBe('opencode');

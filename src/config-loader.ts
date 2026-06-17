@@ -24,6 +24,8 @@ export interface HealthCheckConfig {
 export interface DirectRuntimeConfig {
   /** Path or name of the `opencode` binary (default: `opencode`) */
   binary: string;
+  /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
+  instanceHost?: string;
 }
 
 export interface DockerRuntimeConfig {
@@ -31,6 +33,10 @@ export interface DockerRuntimeConfig {
   image: string;
   /** Port inside the container that opencode serves on (default: 3000) */
   containerPort: number;
+  /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
+  instanceHost?: string;
+  /** Docker network mode (e.g. `host`, `bridge`, or a custom network name). When `host`, port mapping is skipped. */
+  networkMode?: string;
 }
 
 /** Shape of `runtimeConfig` in the JSON config file */
@@ -177,6 +183,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     if (typeof orchestrator.runtimeConfig.docker.containerPort !== 'number' || !Number.isInteger(orchestrator.runtimeConfig.docker.containerPort) || orchestrator.runtimeConfig.docker.containerPort <= 0) {
       throw new Error(`Config validation failed: runtimeConfig.docker.containerPort must be a positive integer, got ${orchestrator.runtimeConfig.docker?.containerPort}`);
     }
+    if (orchestrator.runtimeConfig.docker.networkMode !== undefined && typeof orchestrator.runtimeConfig.docker.networkMode !== 'string') {
+      throw new Error(`Config validation failed: runtimeConfig.docker.networkMode must be a string, got ${typeof orchestrator.runtimeConfig.docker.networkMode}`);
+    }
   }
   if (orchestrator.runtime === 'docker' && !orchestrator.runtimeConfig.docker) {
     throw new Error('Config validation failed: orchestrator.runtimeConfig.docker is required when runtime is "docker"');
@@ -236,7 +245,7 @@ export function getDirectRuntimeConfig(config: OrchestratorConfig): DirectRuntim
       `Set config.orchestrator.runtime to "direct".`
     );
   }
-  return { binary: config.runtimeConfig.binary ?? 'opencode' };
+  return { binary: config.runtimeConfig.binary ?? 'opencode', instanceHost: config.runtimeConfig.instanceHost ?? '127.0.0.1' };
 }
 
 /** Extract typed config for the DockerRuntime (throws if `runtime` is not `docker`). */
@@ -256,6 +265,8 @@ export function getDockerRuntimeConfig(config: OrchestratorConfig): DockerRuntim
   return {
     image: config.runtimeConfig.docker.image,
     containerPort: config.runtimeConfig.docker.containerPort,
+    instanceHost: config.runtimeConfig.instanceHost ?? '127.0.0.1',
+    networkMode: config.runtimeConfig.docker.networkMode,
   };
 }
 

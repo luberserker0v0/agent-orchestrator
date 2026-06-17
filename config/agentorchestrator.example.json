@@ -28,9 +28,12 @@
     // "docker" = spawn opencode inside a Docker container
     "runtime": "direct",
 
+    // Hostname used to reach spawned OpenCode instances (default: "127.0.0.1")
+    // "instanceHost": "127.0.0.1",
+
     // Runtime-specific configuration
-    // direct: { "binary": "opencode" }
-    // docker: { "binary": "opencode", "docker": { "image": "ghcr.io/anomalyco/opencode", "containerPort": 3000 } }
+    // direct: { "binary": "opencode", "instanceHost": "127.0.0.1" }
+    // docker: { "binary": "opencode", "instanceHost": "127.0.0.1", "docker": { "image": "ghcr.io/anomalyco/opencode", "containerPort": 3000, "networkMode": "bridge" } }
     "runtimeConfig": {
       "binary": "opencode"
     },

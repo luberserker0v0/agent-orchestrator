@@ -249,7 +249,9 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `portRange.start` | integer | 30000 | First port in the dynamic allocation range |
 | `portRange.end` | integer | 30100 | Last port in the dynamic allocation range |
 | `runtime` | string | 'direct' | Runtime mode: `direct` (spawn binary) or `docker` (Docker container) |
-| `runtimeConfig` | object | `{ binary: 'opencode' }` | Runtime-specific configuration (`{ binary }` for direct; `{ binary, docker: { image, containerPort } }` for docker) |
+| `instanceHost` | string | `'127.0.0.1'` | Hostname used to reach spawned OpenCode instances (change for remote Docker hosts) |
+| `runtimeConfig` | object | `{ binary: 'opencode' }` | Runtime-specific configuration (`{ binary, instanceHost }` for direct; `{ binary, instanceHost, docker: { image, containerPort, networkMode } }` for docker) |
+| `runtimeConfig.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
 | `agentType` | string | 'opencode' | Key used to look up the runtime implementation in RuntimeRegistry |
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |

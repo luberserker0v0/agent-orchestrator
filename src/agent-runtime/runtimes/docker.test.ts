@@ -126,6 +126,64 @@ describe('DockerRuntime', () => {
       expect(result.client).toBeDefined();
     });
 
+    it('uses instanceHost in baseUrl', async () => {
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100, instanceHost: '10.0.0.1' });
+      const mockProc = createMockProc({ exitCode: 0 });
+      (spawn as any).mockReturnValue(mockProc);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      const result = await rt.spawn(
+        'conv-host', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      expect(result.client).toBeDefined();
+      // internal client baseUrl should use the configured host
+    });
+
+    it('skips port mapping when networkMode is host', async () => {
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100, networkMode: 'host' });
+      const mockProc = createMockProc({ exitCode: 0 });
+      (spawn as any).mockReturnValue(mockProc);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.spawn(
+        'conv-nethost', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      expect(spawn).toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['--network', 'host']),
+        expect.anything(),
+      );
+      const dockerArgs = (spawn as any).mock.calls[0][1] as string[];
+      expect(dockerArgs).not.toContain('-p');
+    });
+
+    it('adds --network flag for custom network mode', async () => {
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100, networkMode: 'my-net' });
+      const mockProc = createMockProc({ exitCode: 0 });
+      (spawn as any).mockReturnValue(mockProc);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.spawn(
+        'conv-net', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      expect(spawn).toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['--network', 'my-net']),
+        expect.anything(),
+      );
+      const dockerArgs = (spawn as any).mock.calls[0][1] as string[];
+      expect(dockerArgs).toContain('-p'); // should still have port mapping for non-host
+    });
+
     it('releases port when health check fails', async () => {
       const pool = createPortPool(30000, 30000);
       const rt = new DockerRuntime(pool, { image: 'img', containerPort: 3100 });

@@ -61,7 +61,7 @@ export class DockerRuntime implements AgentRuntime {
 
   constructor(portPool: PortPool, config: DockerRuntimeConfig) {
     this.portPool = portPool;
-    this.config = config;
+    this.config = { instanceHost: '127.0.0.1', ...config };
   }
 
   async spawn(
@@ -75,24 +75,32 @@ export class DockerRuntime implements AgentRuntime {
       throw new Error('No available ports in pool');
     }
 
-    const baseUrl = `http://127.0.0.1:${port}`;
+    const baseUrl = `http://${this.config.instanceHost}:${port}`;
     const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
 
     const containerName = `agentorchestrator-${id}`;
     this.containerNames.set(id, containerName);
 
-    logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${this.config.image})`);
-    const proc = spawn('docker', [
-      'run', '-d',
-      '--name', containerName,
-      '-p', `127.0.0.1:${port}:${this.config.containerPort}`,
+    const dockerArgs: string[] = ['run', '-d', '--name', containerName];
+    if (this.config.networkMode === 'host') {
+      dockerArgs.push('--network', 'host');
+    } else {
+      dockerArgs.push('-p', `${this.config.instanceHost}:${port}:${this.config.containerPort}`);
+      if (this.config.networkMode) {
+        dockerArgs.push('--network', this.config.networkMode);
+      }
+    }
+    dockerArgs.push(
       '-v', `${workspacePath}:/workspace`,
       '-w', '/workspace',
       '-e', `OPENCODE_SERVER_USERNAME=${auth.username}`,
       '-e', `OPENCODE_SERVER_PASSWORD=${auth.password}`,
       this.config.image,
       'serve', '--port', String(this.config.containerPort), '--hostname', '0.0.0.0',
-    ], {
+    );
+
+    logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${this.config.image})`);
+    const proc = spawn('docker', dockerArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
     });
