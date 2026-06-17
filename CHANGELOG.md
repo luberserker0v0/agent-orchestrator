@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- test(health): add 7 unit tests for waitForHealthy retry/failure/timeout logic
+- docs(test): add testing strategy section (three-tier) and k8s integration guide to QUICKTEST.md
 - feat(ci): add Dockerfile for orchestrator containerization (multi-stage, node:20-alpine, healthcheck)
 - feat(ci): add .dockerignore for efficient Docker builds
 - feat(ci): add Dependabot config for weekly npm and GitHub Actions updates

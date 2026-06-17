@@ -4,6 +4,22 @@ How to run and write tests for AgentOrchestrator.
 
 ---
 
+## Testing Strategy
+
+AgentOrchestrator follows a **three-tier testing strategy**:
+
+| Tier | Scope | Speed | Purpose |
+|------|-------|-------|---------|
+| **Unit tests** | `src/**/*.test.ts` | ~2-3s per run | Validate individual modules with mocked dependencies |
+| **Integration tests** | Unit tests + real config loading | ~2-3s | Verify module interactions (covered within unit test suite) |
+| **E2E tests** | `e2e/**/*.test.ts` | 60-120s per run | Full stack with real OpenCode instances |
+
+**Key principles:**
+- Unit tests mock all external I/O (filesystem, network, subprocesses) — currently **570 unit tests** covering all service, domain, and transport layers
+- E2E tests are **runtime-agnostic** — same scenarios run against both `direct` and `docker` runtimes
+- Every runtime config addition (e.g. `instanceHost`, `networkMode`) includes unit tests for config validation + runtime behavior
+- Shared utilities (e.g. `waitForHealthy`) have focused unit tests for retry logic, timeout, and edge cases
+
 ## Test Structure
 
 ```
@@ -209,3 +225,72 @@ npm run preflight
 This runs: **lint → unit test → build**. 0 lint errors, all tests passing, clean TypeScript compilation required.
 
 E2E tests are manual and not part of preflight.
+
+---
+
+## k8s Integration Testing Strategy
+
+For teams deploying AgentOrchestrator on Kubernetes, use this testing approach:
+
+### Container-level validation (pre-deploy)
+
+```bash
+# Build the orchestrator image
+docker build -t agent-orchestrator:test .
+
+# Start with local config volume
+docker run -d --name aor-test \
+  -p 18080:8080 \
+  -v $(pwd)/config:/app/config \
+  agent-orchestrator:test
+
+# Run smoke test
+curl -s http://localhost:18080/health
+
+# Clean up
+docker rm -f aor-test
+```
+
+### k8s manifest validation
+
+```bash
+# Validate generated manifests
+kubectl apply --dry-run=server -f k8s/deployment.yaml
+kubectl apply --dry-run=server -f k8s/service.yaml
+
+# Deploy to test namespace
+kubectl -n aor-test apply -f k8s/
+```
+
+### E2E against k8s deployment
+
+```bash
+# Forward the service port
+kubectl -n aor-test port-forward svc/agent-orchestrator 8080:8080 &
+
+# Point test suite at the k8s endpoint
+AO_BASE_URL=http://localhost:8080 npx vitest run --config e2e/vitest.config.e2e.ts
+```
+
+### Recommended k8s health checks (for deployment manifests)
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 30
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+### Configuration via ConfigMap
+
+Mount `config/agentorchestrator.json` as a k8s ConfigMap, override via environment variables in the Pod template.
+
+> **Note**: Runtime-specific settings (`runtimeConfig.docker.*`, `instanceHost`) are only relevant when the orchestrator is configured to manage OpenCode instances on a Docker host (whether same-node or remote). The orchestrator itself does not require Docker to run.
