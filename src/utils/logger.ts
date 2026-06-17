@@ -37,7 +37,7 @@ export class Logger {
   }
 
   private write(entry: LogEntry): void {
-    const mergedMeta = this.context ? { ...this.context, ...(entry.meta !== undefined ? (typeof entry.meta === 'object' ? entry.meta as Record<string, unknown> : { value: entry.meta }) : {}) } : entry.meta;
+    const mergedMeta = entry.meta !== undefined ? (typeof entry.meta === 'object' ? entry.meta as Record<string, unknown> : { value: entry.meta }) : undefined;
     if (this.format === 'json') {
       const output: Record<string, unknown> = {
         timestamp: entry.timestamp,

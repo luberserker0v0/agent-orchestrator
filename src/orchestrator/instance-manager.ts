@@ -30,10 +30,10 @@ export class InstanceManager {
   private runtimes: RuntimeRegistry;
   private idleSweepTimer?: NodeJS.Timeout;
 
-  constructor(config: OrchestratorConfig, workspaceFactory: WorkspaceFactory, runtimes: RuntimeRegistry) {
+  constructor(config: OrchestratorConfig, workspaceFactory: WorkspaceFactory, runtimes: RuntimeRegistry, portPool?: PortPool) {
     this.config = config;
     this.runtimes = runtimes;
-    this.portPool = new PortPool(config.portRange.start, config.portRange.end, config.portRange.allowDynamicFallback);
+    this.portPool = portPool ?? new PortPool(config.portRange.start, config.portRange.end, config.portRange.allowDynamicFallback);
     this.workspaceFactory = workspaceFactory;
     this.startIdleSweep();
   }

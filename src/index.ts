@@ -63,7 +63,7 @@ export async function main(cliArgs?: string[]) {
   }
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);
 
-  const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeRegistry);
+  const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeRegistry, portPool);
   const conversationState = new ConversationState();
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);

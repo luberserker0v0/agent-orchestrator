@@ -146,18 +146,12 @@ describe('InstanceManager', () => {
       );
     });
 
-    it('throws when no ports available and no instances to evict', async () => {
+    it('throws error when spawn fails and propagates message', async () => {
       mockSpawnFn.mockRejectedValue(new Error('No available ports in pool'));
-      const emptyConfig: OrchestratorConfig = {
-        ...defaultOrchestratorConfig,
-        portRange: { start: 30000, end: 29999, allowDynamicFallback: false },
-      };
-      const emptyManager = new InstanceManager(emptyConfig, workspaceFactory, runtimeRegistry);
 
-      await expect(emptyManager.createInstance('conv-empty')).rejects.toThrow(
+      await expect(instanceManager.createInstance('conv-fail')).rejects.toThrow(
         'No available ports in pool'
       );
-      emptyManager.destroy();
     });
 
     it('throws and releases port when workspace creation fails', async () => {

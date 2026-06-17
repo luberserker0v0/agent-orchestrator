@@ -75,49 +75,54 @@ export class DockerRuntime implements AgentRuntime {
       throw new Error('No available ports in pool');
     }
 
-    const baseUrl = `http://${this.config.instanceHost}:${port}`;
-    const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
+    try {
+      const baseUrl = `http://${this.config.instanceHost}:${port}`;
+      const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
 
-    const containerName = `agentorchestrator-${id}`;
-    this.containerNames.set(id, containerName);
+      const containerName = `agentorchestrator-${id}`;
+      this.containerNames.set(id, containerName);
 
-    const dockerArgs: string[] = ['run', '-d', '--name', containerName];
-    if (this.config.networkMode === 'host') {
-      dockerArgs.push('--network', 'host');
-    } else {
-      dockerArgs.push('-p', `${this.config.instanceHost}:${port}:${this.config.containerPort}`);
-      if (this.config.networkMode) {
-        dockerArgs.push('--network', this.config.networkMode);
+      const dockerArgs: string[] = ['run', '-d', '--name', containerName];
+      if (this.config.networkMode === 'host') {
+        dockerArgs.push('--network', 'host');
+      } else {
+        dockerArgs.push('-p', `${this.config.instanceHost}:${port}:${this.config.containerPort}`);
+        if (this.config.networkMode) {
+          dockerArgs.push('--network', this.config.networkMode);
+        }
       }
+      dockerArgs.push(
+        '-v', `${workspacePath}:/workspace`,
+        '-w', '/workspace',
+        '-e', `OPENCODE_SERVER_USERNAME=${auth.username}`,
+        '-e', `OPENCODE_SERVER_PASSWORD=${auth.password}`,
+        this.config.image,
+        'serve', '--port', String(this.config.containerPort), '--hostname', '0.0.0.0',
+      );
+
+      logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${this.config.image})`);
+      const proc = spawn('docker', dockerArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+      });
+
+      proc.stdout?.on('data', (data: Buffer) => {
+        logger.info(`[Docker ${id}] ${data.toString().trim()}`);
+      });
+      proc.stderr?.on('data', (data: Buffer) => {
+        logger.warn(`[Docker ${id}] ${data.toString().trim()}`);
+      });
+
+      await this.waitForExit(proc, 30000);
+      await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
+
+      this.instanceAuth.set(id, { baseUrl, auth });
+      const handle = new DockerHandle(containerName);
+      return { client, port, handle };
+    } catch (err) {
+      this.portPool.release(port);
+      throw err;
     }
-    dockerArgs.push(
-      '-v', `${workspacePath}:/workspace`,
-      '-w', '/workspace',
-      '-e', `OPENCODE_SERVER_USERNAME=${auth.username}`,
-      '-e', `OPENCODE_SERVER_PASSWORD=${auth.password}`,
-      this.config.image,
-      'serve', '--port', String(this.config.containerPort), '--hostname', '0.0.0.0',
-    );
-
-    logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${this.config.image})`);
-    const proc = spawn('docker', dockerArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: false,
-    });
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      logger.info(`[Docker ${id}] ${data.toString().trim()}`);
-    });
-    proc.stderr?.on('data', (data: Buffer) => {
-      logger.warn(`[Docker ${id}] ${data.toString().trim()}`);
-    });
-
-    await this.waitForExit(proc, 30000);
-    await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
-
-    this.instanceAuth.set(id, { baseUrl, auth });
-    const handle = new DockerHandle(containerName);
-    return { client, port, handle };
   }
 
   async kill(handle?: InstanceHandle): Promise<void> {

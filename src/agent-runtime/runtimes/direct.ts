@@ -85,29 +85,34 @@ export class DirectRuntime implements AgentRuntime {
     const baseUrl = `http://${this.config.instanceHost}:${port}`;
     const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
 
-    logger.info(`Spawning OpenCode instance on port ${port} at ${workspacePath} (binary: ${this.config.binary})`);
-    const proc = spawn(this.config.binary, ['serve', '--port', String(port), '--hostname', this.config.instanceHost], {
-      cwd: workspacePath,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: false,
-      env: {
-        ...process.env,
-        OPENCODE_SERVER_USERNAME: auth.username,
-        OPENCODE_SERVER_PASSWORD: auth.password,
-      },
-    });
+    try {
+      logger.info(`Spawning OpenCode instance on port ${port} at ${workspacePath} (binary: ${this.config.binary})`);
+      const proc = spawn(this.config.binary, ['serve', '--port', String(port), '--hostname', this.config.instanceHost], {
+        cwd: workspacePath,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+        env: {
+          ...process.env,
+          OPENCODE_SERVER_USERNAME: auth.username,
+          OPENCODE_SERVER_PASSWORD: auth.password,
+        },
+      });
 
-    proc.stdout?.on('data', (data: Buffer) => {
-      logger.info(`[OpenCode ${id}] stdout: ${data.toString().trim()}`);
-    });
-    proc.stderr?.on('data', (data: Buffer) => {
-      logger.warn(`[OpenCode ${id}] stderr: ${data.toString().trim()}`);
-    });
+      proc.stdout?.on('data', (data: Buffer) => {
+        logger.info(`[OpenCode ${id}] stdout: ${data.toString().trim()}`);
+      });
+      proc.stderr?.on('data', (data: Buffer) => {
+        logger.warn(`[OpenCode ${id}] stderr: ${data.toString().trim()}`);
+      });
 
-    await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
+      await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
 
-    const handle = new ChildProcessHandle(proc);
-    return { client, port, handle };
+      const handle = new ChildProcessHandle(proc);
+      return { client, port, handle };
+    } catch (err) {
+      this.portPool.release(port);
+      throw err;
+    }
   }
 
   async kill(handle?: InstanceHandle): Promise<void> {
