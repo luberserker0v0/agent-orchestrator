@@ -7,8 +7,12 @@ Get AgentOrchestrator running in under 5 minutes.
 ## Prerequisites
 
 - **Node.js** >= 20.0.0
-- **OpenCode CLI** installed (`opencode --version`)
-- npm >= 10.0.0
+- **npm** >= 10.0.0
+- **OpenCode CLI** (`opencode --version`) — required for `direct` runtime (default)
+
+For **Docker runtime** (`"runtime": "docker"`):
+- **Docker** installed and running
+- OpenCode image pulled: `docker pull ghcr.io/anomalyco/opencode`
 
 ---
 
