@@ -141,7 +141,7 @@ aor [options]
 | `orchestrator.runtime` | `"direct"\|"docker"` | 執行環境（直接執行或 Docker 容器） | `"direct"` |
 | `orchestrator.runtimeConfig` | `object` | Runtime 特定設定。`direct`：`{ binary }`；`docker`：`{ binary, docker: { image, containerPort } }` | `{ binary: "opencode" }` |
 | `orchestrator.runtimeConfig.binary` | `string` | OpenCode CLI 指令或絕對路徑（所有 runtime 共用） | `opencode` |
-| `orchestrator.runtimeConfig.docker.image` | `string` | Docker 映像名稱（僅 `docker` 模式） | `ghcr.io/anomalyco/opencode` |
+| `orchestrator.runtimeConfig.docker.image` | `string` | Docker 映像名稱（僅 `docker` 模式） | `ghcr.io/anomalyco/opencode:1.17.4` |
 | `orchestrator.runtimeConfig.docker.containerPort` | `number` | 容器內 OpenCode 監聽端口（僅 `docker` 模式） | `3000` |
 | `orchestrator.agentType` | `string` | Runtime registry 中對應的 agent 類型識別符 | `"opencode"` |
 | `orchestrator.healthCheck.retries` | `number` | 健康檢查重試次數 | `10` |

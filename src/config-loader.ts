@@ -29,7 +29,7 @@ export interface DirectRuntimeConfig {
 }
 
 export interface DockerRuntimeConfig {
-  /** Docker image to pull and run (e.g. `ghcr.io/anomalyco/opencode`) */
+  /** Docker image to pull and run (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) */
   image: string;
   /** Port inside the container that opencode serves on (default: 3000) */
   containerPort: number;

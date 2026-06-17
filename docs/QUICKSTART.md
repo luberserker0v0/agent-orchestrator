@@ -12,7 +12,7 @@ Get AgentOrchestrator running in under 5 minutes.
 
 For **Docker runtime** (`"runtime": "docker"`):
 - **Docker** installed and running
-- OpenCode image pulled: `docker pull ghcr.io/anomalyco/opencode`
+- OpenCode image pulled: `docker pull ghcr.io/anomalyco/opencode:1.17.4`
 
 ---
 

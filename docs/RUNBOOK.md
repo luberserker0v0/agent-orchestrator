@@ -89,7 +89,7 @@ AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
 
 # 執行環境
 AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIME=docker
-AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_DOCKER_IMAGE=ghcr.io/anomalyco/opencode
+AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_DOCKER_IMAGE=ghcr.io/anomalyco/opencode:1.17.4
 AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_INSTANCEHOST=192.168.1.100
 AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_DOCKER_NETWORKMODE=host
 ```
@@ -160,5 +160,5 @@ npm run clean
 | 清理殘留 workspace | 必要時 | `npm run clean` |
 | 更新相依套件 | 每週 | Dependabot PR 審核合併 |
 | 檢查 Prometheus 指標 | 每日 | Grafana 儀表板或 `/metrics` |
-| 檢查 Docker 映像更新 | 每月 | `docker pull ghcr.io/anomalyco/opencode` |
+| 檢查 Docker 映像更新 | 每月 | `docker pull ghcr.io/anomalyco/opencode:1.17.4` |
 | 審閱 API 金鑰 | 每季 | 更新 `server.apiKey` |

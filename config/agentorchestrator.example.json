@@ -33,7 +33,7 @@
 
     // Runtime-specific configuration
     // direct: { "binary": "opencode", "instanceHost": "127.0.0.1" }
-    // docker: { "binary": "opencode", "instanceHost": "127.0.0.1", "docker": { "image": "ghcr.io/anomalyco/opencode", "containerPort": 3000, "networkMode": "bridge" } }
+    // docker: { "binary": "opencode", "instanceHost": "127.0.0.1", "docker": { "image": "ghcr.io/anomalyco/opencode:1.17.4", "containerPort": 3000, "networkMode": "bridge" } }
     "runtimeConfig": {
       "binary": "opencode"
     },

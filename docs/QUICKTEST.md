@@ -99,7 +99,7 @@ The default config in `src/test-fixtures/opencode.example.json` uses a hardcoded
 
 3. For **Docker runtime** tests:
    - Docker must be installed and running
-   - Pull the OpenCode image: `docker pull ghcr.io/anomalyco/opencode`
+    - Pull the OpenCode image: `docker pull ghcr.io/anomalyco/opencode:1.17.4`
 
 ### Run all e2e tests
 
