@@ -23,6 +23,10 @@ cp config/agentorchestrator.example.json config/agentorchestrator.json
 
 Default configuration works out of the box — OpenCode instances spawn directly on the host using port range `30000-30100`.
 
+For **Docker runtime**, set `"runtime": "docker"` in `config/agentorchestrator.json` and configure `runtimeConfig.docker.image`.
+
+Optional **API key authentication** — set `server.apiKey` (min 8 chars) or env `AGENTORCHESTRATOR_SERVER_APIKEY`. All endpoints except `/health`, `/metrics`, and `/api-docs*` require `Authorization: Bearer <key>`.
+
 ---
 
 ## Start the Server
@@ -39,7 +43,13 @@ AgentOrchestrator listening on http://127.0.0.1:11697
 WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 ```
 
-The port is dynamically assigned (config `server.port: 0`). Set a fixed port in `config/agentorchestrator.json` if needed.
+The port is dynamically assigned when `port: 0` in config. Set a fixed port (e.g. `8080`) if needed.
+
+Check server health at `/health`:
+
+```bash
+curl http://127.0.0.1:11697/health
+```
 
 ---
 

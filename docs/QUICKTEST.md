@@ -15,7 +15,7 @@ AgentOrchestrator follows a **three-tier testing strategy**:
 | **E2E tests** | `e2e/**/*.test.ts` | 60-120s per run | Full stack with real OpenCode instances |
 
 **Key principles:**
-- Unit tests mock all external I/O (filesystem, network, subprocesses) — currently **570 unit tests** covering all service, domain, and transport layers
+- Unit tests mock all external I/O (filesystem, network, subprocesses) — currently **576 unit tests** covering all service, domain, and transport layers
 - E2E tests are **runtime-agnostic** — same scenarios run against both `direct` and `docker` runtimes
 - Every runtime config addition (e.g. `instanceHost`, `networkMode`) includes unit tests for config validation + runtime behavior
 - Shared utilities (e.g. `waitForHealthy`) have focused unit tests for retry logic, timeout, and edge cases
@@ -107,21 +107,17 @@ The default config in `src/test-fixtures/opencode.example.json` uses a hardcoded
 npm run test:e2e
 ```
 
-This runs three groups sequentially:
-1. `test:e2e:workspace` — agent CRUD, file CRUD (always `direct` runtime)
-2. `test:e2e:direct` — lifecycle tests with `direct` runtime
-3. `test:e2e:docker` — lifecycle tests with `docker` runtime
+This runs two groups sequentially:
+1. `test:e2e:direct` — lifecycle + workspace tests with `direct` runtime
+2. `test:e2e:docker` — lifecycle + workspace tests with `docker` runtime
 
 ### Run specific e2e group
 
 ```bash
-# Workspace operations (no OpenCode instance needed)
-npm run test:e2e:workspace
-
-# Lifecycle with direct runtime
+# All e2e with direct runtime (includes workspace + lifecycle)
 npm run test:e2e:direct
 
-# Lifecycle with Docker runtime
+# All e2e with Docker runtime (includes workspace + lifecycle)
 npm run test:e2e:docker
 ```
 
