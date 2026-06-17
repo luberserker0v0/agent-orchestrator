@@ -319,6 +319,26 @@ npm run preflight     # Run lint + test + build in sequence
 node scripts/setup-hooks.js  # Install Git hooks
 ```
 
+### Docker Build (for orchestrator container)
+```bash
+docker build -t agent-orchestrator .
+docker run -p 8080:8080 -v /path/to/config:/app/config agent-orchestrator
+```
+
+## CI/CD Infrastructure
+
+### GitHub Actions (`.github/workflows/ci.yml`)
+- Triggered on `push`/`PR` to `main`/`master`
+- **Matrix**: Node.js 20.x and 22.x
+- **Steps**: `npm ci` → `npm run preflight` (lint + test + build) → `npm run test:coverage` → upload coverage artifact
+- **Docker build**: Runs on push to `main` (after lint-and-test passes). Uses Docker Buildx with `docker/build-push-action`.
+- **Dependabot**: Weekly updates for npm (grouped dev dependencies) and GitHub Actions (`.github/dependabot.yml`)
+
+### Git Hooks (custom, no Husky)
+- **pre-commit**: `npm run lint`
+- **pre-push**: `npm run preflight` (lint + test + build)
+- Install: `node scripts/setup-hooks.js`
+
 ## Important Notes for AI Agents
 
 - **Do not** use `git push origin main` directly

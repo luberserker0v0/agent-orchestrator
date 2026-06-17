@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- feat(ci): add Dockerfile for orchestrator containerization (multi-stage, node:20-alpine, healthcheck)
+- feat(ci): add .dockerignore for efficient Docker builds
+- feat(ci): add Dependabot config for weekly npm and GitHub Actions updates
+- feat(ci): add Docker build job to CI workflow (push to main)
+
 ### Changed
 
 - refactor(runtime): split OpenCodeRuntime into DirectRuntime and DockerRuntime standalone classes with InstanceHandle abstraction (port owned by runtime, ChildProcess behind handle interface)
