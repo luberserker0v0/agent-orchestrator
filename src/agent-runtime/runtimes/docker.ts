@@ -3,7 +3,8 @@ import type { ChildProcess } from 'node:child_process';
 import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
-import type { AgentRuntime, AgentCapabilities, SpawnResult, InstanceHandle, AgentClient } from '../types.js';
+import { waitForHealthy } from '../health.js';
+import type { AgentRuntime, AgentCapabilities, SpawnResult, InstanceHandle, AgentClient, HealthCheckConfig } from '../types.js';
 import type { DockerRuntimeConfig } from '../../config-loader.js';
 
 class DockerHandle implements InstanceHandle {
@@ -56,6 +57,7 @@ export class DockerRuntime implements AgentRuntime {
   private portPool: PortPool;
   private config: DockerRuntimeConfig;
   private containerNames = new Map<string, string>();
+  private instanceAuth = new Map<string, { baseUrl: string; auth: { username: string; password: string } }>();
 
   constructor(portPool: PortPool, config: DockerRuntimeConfig) {
     this.portPool = portPool;
@@ -66,7 +68,7 @@ export class DockerRuntime implements AgentRuntime {
     id: string,
     workspacePath: string,
     auth: { username: string; password: string },
-    healthCheckConfig: { retries: number; intervalMs: number; clientTimeoutMs: number },
+    healthCheckConfig: HealthCheckConfig,
   ): Promise<SpawnResult> {
     const port = await this.portPool.allocate();
     if (port === null) {
@@ -103,8 +105,9 @@ export class DockerRuntime implements AgentRuntime {
     });
 
     await this.waitForExit(proc, 30000);
-    await this.waitForHealthy(id, baseUrl, auth, healthCheckConfig);
+    await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
 
+    this.instanceAuth.set(id, { baseUrl, auth });
     const handle = new DockerHandle(containerName);
     return { client, port, handle };
   }
@@ -115,7 +118,7 @@ export class DockerRuntime implements AgentRuntime {
     }
   }
 
-  async restart(id: string, client: AgentClient): Promise<void> {
+  async restart(id: string, _client: AgentClient, healthCheckConfig: HealthCheckConfig): Promise<void> {
     const containerName = `agentorchestrator-${id}`;
     logger.info(`Restarting container ${containerName}...`);
 
@@ -125,24 +128,11 @@ export class DockerRuntime implements AgentRuntime {
       throw new Error(`docker restart failed for container ${containerName}`);
     }
 
-    // Health check after restart
-    let healthy = false;
-    for (let i = 0; i < 10; i++) {
-      await this.delay(500);
-      try {
-        const result = await client.health();
-        if (result.healthy) {
-          healthy = true;
-          break;
-        }
-      } catch {
-        // retry
-      }
+    const stored = this.instanceAuth.get(id);
+    if (!stored) {
+      throw new Error(`No stored connection info for instance ${id}`);
     }
-
-    if (!healthy) {
-      throw new Error(`Container restart health check failed for ${id}`);
-    }
+    await waitForHealthy(id, stored.baseUrl, stored.auth, healthCheckConfig);
   }
 
   async cleanupOrphans(): Promise<void> {
@@ -177,27 +167,6 @@ export class DockerRuntime implements AgentRuntime {
     });
   }
 
-  private async waitForHealthy(
-    id: string, baseUrl: string,
-    auth: { username: string; password: string },
-    healthCheckConfig: { retries: number; intervalMs: number; clientTimeoutMs: number },
-  ): Promise<void> {
-    const healthClient = new OpenCodeAgentClient(baseUrl, auth.username, auth.password, healthCheckConfig.clientTimeoutMs);
-    for (let i = 0; i < healthCheckConfig.retries; i++) {
-      await this.delay(healthCheckConfig.intervalMs);
-      try {
-        const result = await healthClient.health();
-        if (result.healthy) {
-          logger.info(`[OpenCode ${id}] health check passed (version ${result.version})`);
-          return;
-        }
-      } catch (err) {
-        logger.warn(`[OpenCode ${id}] health check attempt ${i + 1} failed: ${(err as Error).message}`);
-      }
-    }
-    throw new Error(`OpenCode instance failed health check after ${healthCheckConfig.retries} retries`);
-  }
-
   private async waitForExit(proc: ChildProcess, timeoutMs: number): Promise<void> {
     if (proc.exitCode !== null || proc.killed) return;
     return new Promise((resolve) => {
@@ -206,7 +175,4 @@ export class DockerRuntime implements AgentRuntime {
     });
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }

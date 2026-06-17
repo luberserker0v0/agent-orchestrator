@@ -4,7 +4,8 @@ import treeKill from 'tree-kill';
 import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
-import type { AgentRuntime, AgentCapabilities, SpawnResult, InstanceHandle } from '../types.js';
+import { waitForHealthy } from '../health.js';
+import type { AgentRuntime, AgentCapabilities, SpawnResult, InstanceHandle, HealthCheckConfig } from '../types.js';
 import type { DirectRuntimeConfig } from '../../config-loader.js';
 
 class ChildProcessHandle implements InstanceHandle {
@@ -74,7 +75,7 @@ export class DirectRuntime implements AgentRuntime {
     id: string,
     workspacePath: string,
     auth: { username: string; password: string },
-    healthCheckConfig: { retries: number; intervalMs: number; clientTimeoutMs: number },
+    healthCheckConfig: HealthCheckConfig,
   ): Promise<SpawnResult> {
     const port = await this.portPool.allocate();
     if (port === null) {
@@ -103,7 +104,7 @@ export class DirectRuntime implements AgentRuntime {
       logger.warn(`[OpenCode ${id}] stderr: ${data.toString().trim()}`);
     });
 
-    await this.waitForHealthy(id, baseUrl, auth, healthCheckConfig);
+    await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
 
     const handle = new ChildProcessHandle(proc);
     return { client, port, handle };
@@ -115,28 +116,5 @@ export class DirectRuntime implements AgentRuntime {
     }
   }
 
-  private async waitForHealthy(
-    id: string, baseUrl: string,
-    auth: { username: string; password: string },
-    healthCheckConfig: { retries: number; intervalMs: number; clientTimeoutMs: number },
-  ): Promise<void> {
-    const healthClient = new OpenCodeAgentClient(baseUrl, auth.username, auth.password, healthCheckConfig.clientTimeoutMs);
-    for (let i = 0; i < healthCheckConfig.retries; i++) {
-      await this.delay(healthCheckConfig.intervalMs);
-      try {
-        const result = await healthClient.health();
-        if (result.healthy) {
-          logger.info(`[OpenCode ${id}] health check passed (version ${result.version})`);
-          return;
-        }
-      } catch (err) {
-        logger.warn(`[OpenCode ${id}] health check attempt ${i + 1} failed: ${(err as Error).message}`);
-      }
-    }
-    throw new Error(`OpenCode instance failed health check after ${healthCheckConfig.retries} retries`);
-  }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }

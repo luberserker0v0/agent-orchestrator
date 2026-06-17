@@ -1,3 +1,7 @@
+import type { HealthCheckConfig } from '../config-loader.js';
+
+export type { HealthCheckConfig };
+
 // ─── Health ────────────────────────────────────────────────────────────
 
 export interface HealthInfo {
@@ -143,9 +147,9 @@ export interface AgentRuntime {
     id: string,
     workspacePath: string,
     auth: { username: string; password: string },
-    healthCheckConfig: { retries: number; intervalMs: number; clientTimeoutMs: number },
+    healthCheckConfig: HealthCheckConfig,
   ): Promise<SpawnResult>;
   kill(handle?: InstanceHandle, signal?: string): Promise<void>;
   cleanupOrphans?(): Promise<void>;
-  restart?(id: string, client: AgentClient): Promise<void>;
+  restart?(id: string, client: AgentClient, healthCheckConfig: HealthCheckConfig): Promise<void>;
 }

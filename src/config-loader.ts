@@ -16,6 +16,8 @@ export interface WebSocketConfig {
 export interface HealthCheckConfig {
   retries: number;
   intervalMs: number;
+  /** Timeout per health-check HTTP request in ms (default: 5000) */
+  clientTimeoutMs: number;
 }
 
 export interface DirectRuntimeConfig {
@@ -55,6 +57,7 @@ export interface OrchestratorConfig {
 export interface WorkspaceConfig {
   basePath: string;
   enforceCanonicalConfig: boolean;
+  maxSizeBytes?: number;
 }
 
 export interface AgentOrchestratorConfig {
@@ -182,6 +185,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   if (typeof orchestrator.healthCheck.intervalMs !== 'number' || orchestrator.healthCheck.intervalMs <= 0) {
     throw new Error(`Config validation failed: healthCheck.intervalMs must be positive, got ${orchestrator.healthCheck.intervalMs}`);
   }
+  if (typeof orchestrator.healthCheck.clientTimeoutMs !== 'number' || !Number.isInteger(orchestrator.healthCheck.clientTimeoutMs) || orchestrator.healthCheck.clientTimeoutMs <= 0) {
+    throw new Error(`Config validation failed: healthCheck.clientTimeoutMs must be a positive integer, got ${orchestrator.healthCheck.clientTimeoutMs}`);
+  }
 
   // Workspace validation
   if (!config.workspace.basePath || typeof config.workspace.basePath !== 'string') {
@@ -189,6 +195,11 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   }
   if (typeof config.workspace.enforceCanonicalConfig !== 'boolean') {
     throw new Error(`Config validation failed: workspace.enforceCanonicalConfig must be a boolean, got ${config.workspace.enforceCanonicalConfig}`);
+  }
+  if (config.workspace.maxSizeBytes !== undefined) {
+    if (typeof config.workspace.maxSizeBytes !== 'number' || !Number.isInteger(config.workspace.maxSizeBytes) || config.workspace.maxSizeBytes <= 0) {
+      throw new Error(`Config validation failed: workspace.maxSizeBytes must be a positive integer, got ${config.workspace.maxSizeBytes}`);
+    }
   }
 }
 
@@ -263,11 +274,12 @@ export function defaultConfig(): AgentOrchestratorConfig {
       runtime: 'direct',
       runtimeConfig: { binary: 'opencode' },
       agentType: 'opencode',
-      healthCheck: { retries: 10, intervalMs: 500 },
+      healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
     workspace: {
       basePath: './workspace',
       enforceCanonicalConfig: true,
+      maxSizeBytes: 50 * 1024 * 1024,
     },
   };
 }

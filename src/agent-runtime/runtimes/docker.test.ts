@@ -210,21 +210,28 @@ describe('DockerRuntime', () => {
   });
 
   describe('restart', () => {
+    const hcConfig = { retries: 3, intervalMs: 1, clientTimeoutMs: 5000 };
+    let mockFetch: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      mockFetch = vi.fn();
+      vi.stubGlobal('fetch', mockFetch);
+    });
+
     it('restarts container and waits for health check', async () => {
       const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
+      (rt as any).instanceAuth.set('conv-restart', { baseUrl: 'http://127.0.0.1:3100', auth: { username: 'test', password: 'test' } });
       const restartProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(restartProc);
+      mockFetch.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ healthy: true, version: '1.0.0' }) });
 
-      const client = { health: vi.fn().mockResolvedValue({ healthy: true, version: '1.0.0' }) };
-
-      await rt.restart('conv-restart', client as any);
+      await rt.restart('conv-restart', {} as any, hcConfig);
 
       expect(spawn).toHaveBeenCalledWith(
         'docker',
         ['restart', 'agentorchestrator-conv-restart'],
         expect.anything(),
       );
-      expect(client.health).toHaveBeenCalled();
     });
 
     it('throws when docker restart command fails', async () => {
@@ -232,21 +239,20 @@ describe('DockerRuntime', () => {
       const restartProc = createMockProc({ exitCode: 1 });
       (spawn as any).mockReturnValue(restartProc);
 
-      const client = { health: vi.fn() };
-      await expect(rt.restart('conv-fail', client as any)).rejects.toThrow(
+      await expect(rt.restart('conv-fail', {} as any, hcConfig)).rejects.toThrow(
         'docker restart failed for container agentorchestrator-conv-fail',
       );
     });
 
     it('throws when health check fails after restart', async () => {
       const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
+      (rt as any).instanceAuth.set('conv-health-fail', { baseUrl: 'http://127.0.0.1:3100', auth: { username: 'test', password: 'test' } });
       const restartProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(restartProc);
+      mockFetch.mockRejectedValue(new Error('connection refused'));
 
-      const client = { health: vi.fn().mockRejectedValue(new Error('not healthy')) };
-
-      await expect(rt.restart('conv-health-fail', client as any)).rejects.toThrow(
-        'Container restart health check failed for conv-health-fail',
+      await expect(rt.restart('conv-health-fail', {} as any, hcConfig)).rejects.toThrow(
+        'OpenCode instance failed health check after 3 retries',
       );
     }, 15000);
   });

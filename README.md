@@ -104,7 +104,8 @@ aor [options]
     "agentType": "opencode",
     "healthCheck": {
       "retries": 10,
-      "intervalMs": 500
+      "intervalMs": 500,
+      "clientTimeoutMs": 5000
     }
   },
   "workspace": {
@@ -137,6 +138,7 @@ aor [options]
 | `orchestrator.agentType` | `string` | Runtime registry 中對應的 agent 類型識別符 | `"opencode"` |
 | `orchestrator.healthCheck.retries` | `number` | 健康檢查重試次數 | `10` |
 | `orchestrator.healthCheck.intervalMs` | `number` | 健康檢查重試間隔 | `500` |
+| `orchestrator.healthCheck.clientTimeoutMs` | `number` | 健康檢查 HTTP 請求超時 | `5000` |
 | `workspace.basePath` | `string` | Workspace 資料夾根目錄 | `./workspace` |
 | `workspace.enforceCanonicalConfig` | `boolean` | 寫入 `opencode.json` 時強制合併 canonical 系統預設（保護 `$schema` 與 `permission`） | `true` |
 

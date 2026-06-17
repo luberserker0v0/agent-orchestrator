@@ -252,6 +252,7 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `agentType` | string | 'opencode' | Key used to look up the runtime implementation in RuntimeRegistry |
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
+| `healthCheck.clientTimeoutMs` | integer | 5000 | HTTP client timeout per health check request |
 
 **Validation rule:** `maxInstances` must not exceed the number of available ports (`portRange.end - portRange.start + 1`). The application will refuse to start if this constraint is violated.
 

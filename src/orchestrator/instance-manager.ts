@@ -67,7 +67,7 @@ export class InstanceManager {
       id,
       workspace.path,
       { username: 'opencode', password },
-      { retries: this.config.healthCheck.retries, intervalMs: this.config.healthCheck.intervalMs, clientTimeoutMs: 5000 },
+      { retries: this.config.healthCheck.retries, intervalMs: this.config.healthCheck.intervalMs, clientTimeoutMs: this.config.healthCheck.clientTimeoutMs },
     );
 
     if (handle) {
@@ -211,7 +211,7 @@ export class InstanceManager {
       throw new Error(`Runtime ${this.config.agentType} does not support restart`);
     }
 
-    await runtime.restart(id, inst.client);
+    await runtime.restart(id, inst.client, this.config.healthCheck);
     inst.lastUsedAt = Date.now();
   }
 

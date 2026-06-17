@@ -39,8 +39,9 @@
 
     // Health check — how long to wait for an OpenCode instance to become ready
     "healthCheck": {
-      "retries": 10,   // Number of health check attempts before giving up
-      "intervalMs": 500 // Delay between retries (ms)
+      "retries": 10,         // Number of health check attempts before giving up
+      "intervalMs": 500,     // Delay between retries (ms)
+      "clientTimeoutMs": 5000 // HTTP client timeout per health check request (ms)
     }
   },
 
@@ -50,6 +51,8 @@
     // When true: user-submitted opencode.json is merged with canonical-opencode.json,
     // and canonical keys always win (security enforcement).
     // When false: user-submitted opencode.json is written verbatim.
-    "enforceCanonicalConfig": true
+    "enforceCanonicalConfig": true,
+    // Maximum size of a workspace directory in bytes (default: 50 MB)
+    "maxSizeBytes": 52428800
   }
 }

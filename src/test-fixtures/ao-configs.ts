@@ -12,7 +12,7 @@ export const defaultOrchestratorConfig: OrchestratorConfig = {
   portRange: { start: 41000, end: 41050 },
   runtimeConfig: { binary: 'opencode' },
   agentType: 'opencode',
-  healthCheck: { retries: 10, intervalMs: 500 },
+  healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
   runtime: 'direct',
 };
 

@@ -22,7 +22,7 @@ export interface WorkspaceInfo {
   opencodeDir: string;
 }
 
-const MAX_WORKSPACE_SIZE = 50 * 1024 * 1024; // 50 MB
+const DEFAULT_MAX_WORKSPACE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 function sanitizeId(raw: string): string {
   return raw.replace(/[\\/]/g, '_').replace(/\.{2,}/g, '_');
@@ -107,12 +107,14 @@ export class WorkspaceFactory {
   private basePath: string;
   private canonicalConfig: Record<string, unknown>;
   private enforceCanonicalConfig: boolean;
+  private maxSizeBytes: number;
   private allowedCopySources: string[];
   private cleanupAttempts = new Map<string, number>();
 
   constructor(config: WorkspaceConfig, canonicalConfig?: Record<string, unknown>) {
     this.basePath = resolve(process.cwd(), config.basePath);
     this.enforceCanonicalConfig = config.enforceCanonicalConfig;
+    this.maxSizeBytes = config.maxSizeBytes ?? DEFAULT_MAX_WORKSPACE_SIZE;
     this.canonicalConfig = canonicalConfig ?? {};
     this.allowedCopySources = [
       join(process.cwd(), 'assets'),
@@ -361,9 +363,9 @@ export class WorkspaceFactory {
         // ignore
       }
     }
-    if (currentSize - excluding + additionalBytes > MAX_WORKSPACE_SIZE) {
+    if (currentSize - excluding + additionalBytes > this.maxSizeBytes) {
       throw new Error(
-        `Workspace quota exceeded. Current: ${currentSize} bytes, Adding: ${additionalBytes} bytes, Limit: ${MAX_WORKSPACE_SIZE} bytes`
+        `Workspace quota exceeded. Current: ${currentSize} bytes, Adding: ${additionalBytes} bytes, Limit: ${this.maxSizeBytes} bytes`
       );
     }
   }

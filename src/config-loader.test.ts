@@ -17,9 +17,9 @@ function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentO
       portRange: { start: 30000, end: 30100 },
       runtime: 'direct',
       runtimeConfig: { binary: 'opencode' },
-      healthCheck: { retries: 10, intervalMs: 500 },
+      healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
-    workspace: { basePath: './workspace', enforceCanonicalConfig: true },
+    workspace: { basePath: './workspace', enforceCanonicalConfig: true, maxSizeBytes: 52428800 },
     ...overrides,
   } as AgentOrchestratorConfig;
 }
@@ -138,14 +138,14 @@ describe('validateConfig', () => {
 
   it('rejects non-positive healthCheck.retries', () => {
     const config = createValidConfig({
-      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 0, intervalMs: 500 } },
+      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 0, intervalMs: 500, clientTimeoutMs: 5000 } },
     });
     expect(() => validateConfig(config)).toThrow('healthCheck.retries must be a positive integer');
   });
 
   it('rejects non-positive healthCheck.intervalMs', () => {
     const config = createValidConfig({
-      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 10, intervalMs: 0 } },
+      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 10, intervalMs: 0, clientTimeoutMs: 5000 } },
     });
     expect(() => validateConfig(config)).toThrow('healthCheck.intervalMs must be positive');
   });
@@ -166,6 +166,13 @@ describe('validateConfig', () => {
       workspace: { basePath: '', enforceCanonicalConfig: true },
     });
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
+  });
+
+  it('rejects non-positive workspace.maxSizeBytes', () => {
+    const config = createValidConfig({
+      workspace: { basePath: './ws', enforceCanonicalConfig: true, maxSizeBytes: 0 },
+    });
+    expect(() => validateConfig(config)).toThrow('workspace.maxSizeBytes must be a positive integer');
   });
 
   it('rejects invalid runtime value', () => {

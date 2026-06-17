@@ -178,7 +178,7 @@ describe('InstanceManager', () => {
     it('throws when health check fails after retries', async () => {
       mockSpawnFn.mockRejectedValue(new Error('OpenCode instance failed health check after 2 retries'));
 
-      const fastFailConfig = { ...defaultOrchestratorConfig, healthCheck: { retries: 2, intervalMs: 1 } };
+      const fastFailConfig = { ...defaultOrchestratorConfig, healthCheck: { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 } };
       const fastFailManager = new InstanceManager(fastFailConfig, workspaceFactory, runtimeRegistry);
 
       await expect(fastFailManager.createInstance('conv-health-fail')).rejects.toThrow(
@@ -232,7 +232,7 @@ describe('InstanceManager', () => {
     it('retries after healthy=false health check response', async () => {
       const fastConfig: OrchestratorConfig = {
         ...defaultOrchestratorConfig,
-        healthCheck: { retries: 3, intervalMs: 1 },
+        healthCheck: { retries: 3, intervalMs: 1, clientTimeoutMs: 5000 },
       };
       const fastManager = new InstanceManager(fastConfig, workspaceFactory, runtimeRegistry);
 
@@ -322,7 +322,7 @@ describe('InstanceManager', () => {
     it('cleans up docker container when health check fails', async () => {
       const fastDockerConfig: OrchestratorConfig = {
         ...dockerOrchestratorConfig,
-        healthCheck: { retries: 2, intervalMs: 1 },
+        healthCheck: { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
       };
       const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory, runtimeRegistry);
 
@@ -350,7 +350,7 @@ describe('InstanceManager', () => {
 
       await dockerManager.restartInstance('conv-restart');
 
-      expect(mockRuntime.restart).toHaveBeenCalledWith('conv-restart', mockClient);
+      expect(mockRuntime.restart).toHaveBeenCalledWith('conv-restart', mockClient, dockerOrchestratorConfig.healthCheck);
 
       await dockerManager.destroyInstance('conv-restart');
       dockerManager.destroy();
@@ -388,7 +388,7 @@ describe('InstanceManager', () => {
     it('throws when health check fails after restart', async () => {
       const fastDockerConfig: OrchestratorConfig = {
         ...dockerOrchestratorConfig,
-        healthCheck: { retries: 2, intervalMs: 1 },
+        healthCheck: { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
       };
       const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory, runtimeRegistry);
 
