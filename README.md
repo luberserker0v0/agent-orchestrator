@@ -12,6 +12,11 @@
 - **LRU 資源淘汰**：達到上限時自動回收最久未使用的實例
 - **WebSocket 即時通訊**：JSON-RPC 2.0 協議，支援 heartbeat 與 idle timeout
 - **Basic Auth 自動注入**：每個 OpenCode 實例動態生成密碼，避免與使用者全域設定衝突
+- **API 金鑰認證**：可選 Bearer token 認證，保護所有非公開端點
+- **安全 HTTP 標頭**：自動注入 `X-Content-Type-Options`、`X-Frame-Options` 等防護標頭
+- **Prometheus 指標**：內建 9 項自訂指標（實例數、請求量、延遲、錯誤、狀態轉換等）與 Node.js 程序指標
+- **結構化日誌**：支援文字與 JSON 格式，可透過 `Logger.child()` 綁定 requestId 等上下文
+- **多執行環境**：支援直接執行（direct）與 Docker 容器兩種 OpenCode 執行模式
 - **跨平台**：支援 Windows、macOS、Linux（透過 `cross-spawn` 與 `tree-kill`）
 
 ---
@@ -82,7 +87,8 @@ aor [options]
   "server": {
     "port": 0,
     "host": "127.0.0.1",
-    "shutdownTimeoutMs": 15000
+    "shutdownTimeoutMs": 15000,
+    "apiKey": ""
   },
   "websocket": {
     "heartbeatIntervalMs": 30000,
@@ -97,6 +103,7 @@ aor [options]
       "end": 30100,
       "allowDynamicFallback": true
     },
+    "instanceHost": "127.0.0.1",
     "runtime": "direct",
     "runtimeConfig": {
       "binary": "opencode"
@@ -110,7 +117,8 @@ aor [options]
   },
   "workspace": {
     "basePath": "./workspace",
-    "enforceCanonicalConfig": true
+    "enforceCanonicalConfig": true,
+    "maxSizeBytes": 52428800
   }
 }
 ```

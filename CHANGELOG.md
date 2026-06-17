@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(ci): add .dockerignore for efficient Docker builds
 - feat(ci): add Dependabot config for weekly npm and GitHub Actions updates
 - feat(ci): add Docker build job to CI workflow (push to main)
+- docs: add RUNBOOK.md with operations guide, troubleshooting, and maintenance tasks
+- docs: update README.md with new config fields (apiKey, instanceHost, maxSizeBytes), security features, observability, and multi-runtime support
+- docs: update ARCHITECTURE.md for DirectRuntime/DockerRuntime split, InstanceHandle, health.ts, Logger.child, metrics registry, security layer
+- docs: update API.md metrics table with 4 new metrics, add auth header note
 
 ### Changed
 
