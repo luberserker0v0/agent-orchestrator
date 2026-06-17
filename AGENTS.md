@@ -281,9 +281,13 @@ curl http://localhost:8080/metrics
 |--------|------|-------------|
 | `agentorchestrator_instances_active` | Gauge | Currently active OpenCode instances |
 | `agentorchestrator_instances_total_created` | Counter | Total instances created since startup |
+| `agentorchestrator_instances_errors_total` | Counter | Total instance errors (labels: type) |
+| `agentorchestrator_instance_spawn_duration_seconds` | Histogram | Time to spawn an OpenCode instance |
 | `agentorchestrator_port_pool_available` | Gauge | Available ports in the dynamic pool |
 | `agentorchestrator_websocket_connections_active` | Gauge | Active WebSocket connections |
 | `agentorchestrator_http_requests_total` | Counter | Total HTTP requests (labels: method, status) |
+| `agentorchestrator_http_request_duration_seconds` | Histogram | HTTP request duration in seconds (labels: method, status) |
+| `agentorchestrator_conversation_state_changes_total` | Counter | Total conversation state transitions (labels: status) |
 | `nodejs_*` | Various | Node.js process metrics (memory, CPU, GC, event loop) |
 
 ### Configuration for Prometheus

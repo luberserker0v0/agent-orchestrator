@@ -19,11 +19,17 @@ export class Logger {
   private level: LogLevel;
   private format: LogFormat;
   private levelValue: number;
+  private context?: Record<string, unknown>;
 
-  constructor(level: LogLevel = 'info', format: LogFormat = 'text') {
+  constructor(level: LogLevel = 'info', format: LogFormat = 'text', context?: Record<string, unknown>) {
     this.level = level;
     this.format = format;
     this.levelValue = LEVELS[level] ?? LEVELS.info;
+    this.context = context;
+  }
+
+  child(context: Record<string, unknown>): Logger {
+    return new Logger(this.level, this.format, { ...this.context, ...context });
   }
 
   private shouldLog(target: LogLevel): boolean {
@@ -31,14 +37,16 @@ export class Logger {
   }
 
   private write(entry: LogEntry): void {
+    const mergedMeta = this.context ? { ...this.context, ...(entry.meta !== undefined ? (typeof entry.meta === 'object' ? entry.meta as Record<string, unknown> : { value: entry.meta }) : {}) } : entry.meta;
     if (this.format === 'json') {
       const output: Record<string, unknown> = {
         timestamp: entry.timestamp,
         level: entry.level,
         message: entry.message,
+        ...this.context,
       };
-      if (entry.meta !== undefined) {
-        output.meta = entry.meta;
+      if (mergedMeta !== undefined) {
+        output.meta = mergedMeta;
       }
       const line = JSON.stringify(output);
       if (entry.level === 'error') {
@@ -49,10 +57,14 @@ export class Logger {
         console.log(line);
       }
     } else {
-      const { timestamp, level, message, meta } = entry;
+      const { timestamp, level, message } = entry;
       let line = `[${timestamp}] ${level.toUpperCase()}: ${message}`;
-      if (meta !== undefined) {
-        const metaStr = typeof meta === 'object' ? JSON.stringify(meta) : String(meta);
+      if (this.context) {
+        const ctxStr = Object.entries(this.context).map(([k, v]) => `${k}=${v}`).join(' ');
+        line += ` (${ctxStr})`;
+      }
+      if (mergedMeta !== undefined) {
+        const metaStr = typeof mergedMeta === 'object' ? JSON.stringify(mergedMeta) : String(mergedMeta);
         line += ` ${metaStr}`;
       }
       if (entry.level === 'error') {

@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(observability): add Logger.child() for context-bound structured logging with requestId/conversationId propagation
+- feat(observability): add agentorchestrator_instances_errors_total counter (label: type) for spawn/health errors
+- feat(observability): add agentorchestrator_instance_spawn_duration_seconds histogram for spawn timing
+- feat(observability): add agentorchestrator_http_request_duration_seconds histogram (labels: method, status)
+- feat(observability): add agentorchestrator_conversation_state_changes_total counter (label: status) for lifecycle transitions
 - feat(agent-runtime): add InstanceHandle interface (pid, exitCode, kill, waitForExit, onExit)
 - feat(agent-runtime): add ChildProcessHandle wrapping ChildProcess + treeKill in DirectRuntime
 - feat(agent-runtime): add DockerHandle wrapping docker rm -f in DockerRuntime

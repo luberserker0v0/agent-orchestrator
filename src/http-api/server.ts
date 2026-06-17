@@ -17,7 +17,7 @@ import { SessionService } from '../services/session-service.js';
 import { MessageService } from '../services/message-service.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
-import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
+import { metricsRegistry, httpRequestsTotal, httpRequestDurationSeconds } from '../metrics/registry.js';
 import { openapiSpec } from './openapi.js';
 import { ErrorCodes, isAppError, toHttpErrorResponse } from '../utils/errors.js';
 
@@ -49,12 +49,15 @@ export function createHttpServer(
 
   let activeRequests = 0;
 
-  // Track active requests and count finished requests
+  // Track active requests, duration, and count finished requests
   app.use((req, res, next) => {
     activeRequests++;
+    const endTimer = httpRequestDurationSeconds.startTimer({ method: req.method });
     res.on('finish', () => {
       activeRequests--;
-      httpRequestsTotal.inc({ method: req.method, status: String(res.statusCode) });
+      const status = String(res.statusCode);
+      endTimer({ status });
+      httpRequestsTotal.inc({ method: req.method, status });
     });
     next();
   });

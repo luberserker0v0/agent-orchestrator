@@ -1,3 +1,4 @@
+import { conversationStateChangesTotal } from '../metrics/registry.js';
 import type { AgentClient } from '../agent-runtime/types.js';
 
 export type ConversationStatus =
@@ -108,6 +109,7 @@ export class ConversationState {
 
     state.status = status;
     state.updatedAt = Date.now();
+    conversationStateChangesTotal.inc({ status });
 
     if (status === 'error' && payload?.error) {
       state.lastError = String(payload.error);

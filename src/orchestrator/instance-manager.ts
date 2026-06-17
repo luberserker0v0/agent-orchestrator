@@ -6,7 +6,7 @@ import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { PortPool } from './port-pool.js';
 import { WorkspaceFactory, type WorkspaceInfo } from './workspace-factory.js';
-import { instancesActive, instancesTotalCreated } from '../metrics/registry.js';
+import { instancesActive, instancesTotalCreated, instancesErrorsTotal, instanceSpawnDurationSeconds } from '../metrics/registry.js';
 
 function generatePassword(): string {
   return randomBytes(16).toString('hex');
@@ -63,12 +63,23 @@ export class InstanceManager {
 
     const password = generatePassword();
 
-    const { client, port, handle } = await runtime.spawn(
-      id,
-      workspace.path,
-      { username: 'opencode', password },
-      { retries: this.config.healthCheck.retries, intervalMs: this.config.healthCheck.intervalMs, clientTimeoutMs: this.config.healthCheck.clientTimeoutMs },
-    );
+    const endSpawnTimer = instanceSpawnDurationSeconds.startTimer();
+    let client: AgentClient;
+    let port: number;
+    let handle: InstanceHandle | undefined;
+    try {
+      ({ client, port, handle } = await runtime.spawn(
+        id,
+        workspace.path,
+        { username: 'opencode', password },
+        { retries: this.config.healthCheck.retries, intervalMs: this.config.healthCheck.intervalMs, clientTimeoutMs: this.config.healthCheck.clientTimeoutMs },
+      ));
+    } catch (err) {
+      instancesErrorsTotal.inc({ type: 'spawn' });
+      throw err;
+    } finally {
+      endSpawnTimer();
+    }
 
     if (handle) {
       handle.onExit((_code: number | null) => {

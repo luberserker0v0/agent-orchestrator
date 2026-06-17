@@ -88,4 +88,54 @@ describe('Logger', () => {
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain('42');
   });
+
+  describe('child()', () => {
+    it('creates a logger with bound context', () => {
+      const parent = new Logger('info', 'json');
+      const child = parent.child({ requestId: 'req-123', conversationId: 'conv-456' });
+      child.info('hello');
+
+      const parsed = JSON.parse(logs[0]);
+      expect(parsed.requestId).toBe('req-123');
+      expect(parsed.conversationId).toBe('conv-456');
+      expect(parsed.message).toBe('hello');
+    });
+
+    it('includes context in text format output', () => {
+      const parent = new Logger('info', 'text');
+      const child = parent.child({ requestId: 'req-789' });
+      child.info('test');
+
+      expect(logs[0]).toContain('req-789');
+    });
+
+    it('merges parent context with child context', () => {
+      const parent = new Logger('info', 'json').child({ app: 'ao' });
+      const child = parent.child({ requestId: 'req-xyz' });
+      child.info('merged');
+
+      const parsed = JSON.parse(logs[0]);
+      expect(parsed.app).toBe('ao');
+      expect(parsed.requestId).toBe('req-xyz');
+    });
+
+    it('child context overrides parent context on key conflict', () => {
+      const parent = new Logger('info', 'json').child({ id: 'parent' });
+      const child = parent.child({ id: 'child' });
+      child.info('override');
+
+      const parsed = JSON.parse(logs[0]);
+      expect(parsed.id).toBe('child');
+    });
+
+    it('inherits level and format from parent', () => {
+      const parent = new Logger('warn', 'text');
+      const child = parent.child({ ctx: 'val' });
+      child.info('should not appear');
+      child.warn('should appear');
+
+      expect(logs).toHaveLength(0);
+      expect(warns[0]).toContain('should appear');
+    });
+  });
 });
