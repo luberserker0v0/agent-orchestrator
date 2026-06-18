@@ -97,7 +97,7 @@ export function createHttpServer(
   // ─── Helpers ─────────────────────────────────────────────
 
   function getConversationId(req: Request): string {
-    return req.params.id;
+    return req.params.id as string;
   }
 
   function sendError(res: Response, status: number, code: string, message: string): void {
@@ -326,8 +326,8 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      const content = agentService.readAgent(id, req.params.name);
-      res.json({ name: req.params.name, content });
+      const content = agentService.readAgent(id, req.params.name as string);
+      res.json({ name: req.params.name as string, content });
     } catch (err) {
       handleControllerError(res, err, 404);
     }
@@ -338,7 +338,7 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      agentService.deleteAgent(id, req.params.name);
+      agentService.deleteAgent(id, req.params.name as string);
       res.status(204).send();
     } catch (err) {
       handleControllerError(res, err);
@@ -511,7 +511,7 @@ export function createHttpServer(
   app.get('/api/conversations/:id/sessions/:sid', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     try {
-      const session = await sessionService.get(id, req.params.sid);
+      const session = await sessionService.get(id, req.params.sid as string);
       res.json(session);
     } catch (err) {
       handleControllerError(res, err);
@@ -521,7 +521,7 @@ export function createHttpServer(
   app.get('/api/conversations/:id/sessions/:sid/children', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     try {
-      const children = await sessionService.getChildren(id, req.params.sid);
+      const children = await sessionService.getChildren(id, req.params.sid as string);
       res.json(children);
     } catch (err) {
       handleControllerError(res, err);
@@ -531,7 +531,7 @@ export function createHttpServer(
   app.post('/api/conversations/:id/sessions/:sid/fork', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     try {
-      const session = await sessionService.fork(id, req.params.sid, req.body.messageID);
+      const session = await sessionService.fork(id, req.params.sid as string, req.body.messageID);
       res.status(201).json(session);
     } catch (err) {
       handleControllerError(res, err);
@@ -541,7 +541,7 @@ export function createHttpServer(
   app.delete('/api/conversations/:id/sessions/:sid', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     try {
-      await sessionService.delete(id, req.params.sid);
+      await sessionService.delete(id, req.params.sid as string);
       res.status(204).send();
     } catch (err) {
       handleControllerError(res, err);
@@ -552,7 +552,7 @@ export function createHttpServer(
     const id = getConversationId(req);
     try {
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
-      const messages = await messageService.getHistory(id, req.params.sid, limit);
+      const messages = await messageService.getHistory(id, req.params.sid as string, limit);
       res.json(messages);
     } catch (err) {
       handleControllerError(res, err);
@@ -697,15 +697,15 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      validateSkillName(req.params.name);
+      validateSkillName(req.params.name as string);
     } catch {
       sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
       return;
     }
 
     try {
-      const content = skillService.readSkill(id, req.params.name);
-      res.json({ name: req.params.name, content });
+      const content = skillService.readSkill(id, req.params.name as string);
+      res.json({ name: req.params.name as string, content });
     } catch (err) {
       handleControllerError(res, err, 404);
     }
@@ -716,14 +716,14 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      validateSkillName(req.params.name);
+      validateSkillName(req.params.name as string);
     } catch {
       sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
       return;
     }
 
     try {
-      const info = skillService.getSkillInfo(id, req.params.name);
+      const info = skillService.getSkillInfo(id, req.params.name as string);
       res.json(info);
     } catch (err) {
       handleControllerError(res, err, 404);
@@ -735,14 +735,14 @@ export function createHttpServer(
     if (!ensureConversation(res, id)) return;
 
     try {
-      validateSkillName(req.params.name);
+      validateSkillName(req.params.name as string);
     } catch {
       sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
       return;
     }
 
     try {
-      skillService.deleteSkill(id, req.params.name);
+      skillService.deleteSkill(id, req.params.name as string);
       res.status(204).send();
     } catch (err) {
       const message = (err as Error).message;
