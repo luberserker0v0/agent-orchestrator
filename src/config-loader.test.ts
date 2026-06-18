@@ -39,6 +39,30 @@ describe('validateConfig', () => {
     expect(() => validateConfig(createValidConfig())).not.toThrow();
   });
 
+  it('rejects deprecated runtime field', () => {
+    const config = createValidConfig();
+    (config.orchestrator as any).runtime = 'docker';
+    expect(() => validateConfig(config)).toThrow(
+      'orchestrator.runtime is deprecated'
+    );
+  });
+
+  it('rejects deprecated runtimeConfig field', () => {
+    const config = createValidConfig();
+    (config.orchestrator as any).runtimeConfig = { binary: 'opencode' };
+    expect(() => validateConfig(config)).toThrow(
+      'orchestrator.runtimeConfig is deprecated'
+    );
+  });
+
+  it('rejects deprecated agentType field', () => {
+    const config = createValidConfig();
+    (config.orchestrator as any).agentType = 'opencode';
+    expect(() => validateConfig(config)).toThrow(
+      'orchestrator.agentType is deprecated'
+    );
+  });
+
   it('rejects maxInstances larger than port range', () => {
     const config = createValidConfig({
       orchestrator: {
