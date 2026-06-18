@@ -195,23 +195,11 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     runtimeIds.add(entry.id);
     if (entry.id === orchestrator.defaultAgentType) defaultFound = true;
 
-    if (entry.type !== 'direct' && entry.type !== 'docker') {
-      throw new Error(`Config validation failed: runtime entry "${(entry as RuntimeEntry).id}" has invalid type "${(entry as RuntimeEntry).type}", must be "direct" or "docker"`);
+    if (typeof entry.type !== 'string' || !entry.type) {
+      throw new Error('Config validation failed: each runtime entry must have a non-empty string "type"');
     }
     if (typeof entry.config !== 'object' || entry.config === null) {
       throw new Error(`Config validation failed: runtime entry "${entry.id}" must have a "config" object`);
-    }
-    if (entry.type === 'docker') {
-      const dc = entry.config as DockerRuntimeConfig;
-      if (typeof dc.image !== 'string' || !dc.image) {
-        throw new Error(`Config validation failed: runtime "${entry.id}" docker config must have a non-empty "image" string`);
-      }
-      if (typeof dc.containerPort !== 'number' || !Number.isInteger(dc.containerPort) || dc.containerPort <= 0) {
-        throw new Error(`Config validation failed: runtime "${entry.id}" docker config "containerPort" must be a positive integer`);
-      }
-      if (dc.networkMode !== undefined && typeof dc.networkMode !== 'string') {
-        throw new Error(`Config validation failed: runtime "${entry.id}" docker config "networkMode" must be a string`);
-      }
     }
   }
   if (!defaultFound) {

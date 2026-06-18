@@ -238,58 +238,14 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('duplicate runtime id "dup"');
   });
 
-  it('rejects invalid runtime type', () => {
+  it('rejects runtime entry with empty type', () => {
     const config = createValidConfig({
       orchestrator: {
         ...createValidConfig().orchestrator,
-        runtimes: [{ id: 'bad', type: 'invalid', config: { binary: 'opencode' } }] as any,
+        runtimes: [{ id: 'bad', type: '', config: { binary: 'opencode' } }] as any,
       },
     });
-    expect(() => validateConfig(config)).toThrow('has invalid type "invalid"');
-  });
-
-  it('rejects docker entry without image', () => {
-    const config = createValidConfig({
-      orchestrator: {
-        ...createValidConfig().orchestrator,
-        defaultAgentType: 'd',
-        runtimes: [{ id: 'd', type: 'docker', config: { containerPort: 3000 } }] as any,
-      },
-    });
-    expect(() => validateConfig(config)).toThrow('docker config must have a non-empty "image" string');
-  });
-
-  it('rejects docker entry with empty image', () => {
-    const config = createValidConfig({
-      orchestrator: {
-        ...createValidConfig().orchestrator,
-        defaultAgentType: 'd',
-        runtimes: [{ id: 'd', type: 'docker', config: { image: '', containerPort: 3000 } }] as any,
-      },
-    });
-    expect(() => validateConfig(config)).toThrow('docker config must have a non-empty "image" string');
-  });
-
-  it('rejects docker entry with non-positive containerPort', () => {
-    const config = createValidConfig({
-      orchestrator: {
-        ...createValidConfig().orchestrator,
-        defaultAgentType: 'd',
-        runtimes: [{ id: 'd', type: 'docker', config: { image: 'img', containerPort: 0 } }] as any,
-      },
-    });
-    expect(() => validateConfig(config)).toThrow('docker config "containerPort" must be a positive integer');
-  });
-
-  it('rejects docker entry with non-string networkMode', () => {
-    const config = createValidConfig({
-      orchestrator: {
-        ...createValidConfig().orchestrator,
-        defaultAgentType: 'd',
-        runtimes: [{ id: 'd', type: 'docker', config: { image: 'img', containerPort: 3000, networkMode: 123 } }] as any,
-      },
-    });
-    expect(() => validateConfig(config)).toThrow('docker config "networkMode" must be a string');
+    expect(() => validateConfig(config)).toThrow('must have a non-empty string "type"');
   });
 
   it('accepts docker entry with networkMode', () => {

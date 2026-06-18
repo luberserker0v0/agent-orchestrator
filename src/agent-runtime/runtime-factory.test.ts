@@ -58,4 +58,37 @@ describe('RuntimeFactory', () => {
     const runtime = factory.create('rt', {} as PortPool, {});
     expect(runtime).toBeInstanceOf(RT2);
   });
+
+  it('hasType returns true for registered types', () => {
+    const factory = new RuntimeFactory();
+    factory.register('fake', FakeRuntime);
+    expect(factory.hasType('fake')).toBe(true);
+    expect(factory.hasType('nope')).toBe(false);
+  });
+
+  it('validateConfig returns empty array when no validator registered', () => {
+    const factory = new RuntimeFactory();
+    factory.register('fake', FakeRuntime);
+    expect(factory.validateConfig('fake', { whatever: 1 })).toEqual([]);
+  });
+
+  it('validateConfig returns errors from registered validator', () => {
+    const factory = new RuntimeFactory();
+    factory.register('docker', FakeRuntime, (config) => {
+      const errs: string[] = [];
+      const cfg = config as Record<string, unknown>;
+      if (!cfg?.image || typeof cfg.image !== 'string') errs.push('"image" is required');
+      if (!Number.isInteger(cfg?.containerPort)) errs.push('"containerPort" must be a positive integer');
+      return errs;
+    });
+
+    expect(factory.validateConfig('docker', {})).toEqual(['"image" is required', '"containerPort" must be a positive integer']);
+    expect(factory.validateConfig('docker', { image: 'img' })).toEqual(['"containerPort" must be a positive integer']);
+    expect(factory.validateConfig('docker', { image: 'img', containerPort: 3000 })).toEqual([]);
+  });
+
+  it('validateConfig returns empty for unregistered type', () => {
+    const factory = new RuntimeFactory();
+    expect(factory.validateConfig('unknown', {})).toEqual([]);
+  });
 });

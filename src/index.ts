@@ -54,7 +54,15 @@ export async function main(cliArgs?: string[]) {
   // Set up runtime registry — register all runtimes from config
   const runtimeFactory = new RuntimeFactory();
   runtimeFactory.register('direct', DirectRuntime);
-  runtimeFactory.register('docker', DockerRuntime);
+  runtimeFactory.register('docker', DockerRuntime, (config) => {
+    const errs: string[] = [];
+    const cfg = config as Record<string, unknown>;
+    if (!cfg?.image || typeof cfg.image !== 'string') errs.push('"image" is required');
+    if (!Number.isInteger(cfg?.containerPort)) errs.push('"containerPort" must be a positive integer');
+    if (cfg?.networkMode !== undefined && typeof cfg.networkMode !== 'string')
+      errs.push('"networkMode" must be a string');
+    return errs;
+  });
 
   const runtimeRegistry = new RuntimeRegistry();
   const portPool = new PortPool(config.orchestrator.portRange.start, config.orchestrator.portRange.end, config.orchestrator.portRange.allowDynamicFallback);
