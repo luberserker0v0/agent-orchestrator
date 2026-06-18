@@ -42,7 +42,7 @@
   "dependencies": {
     "adm-zip": "^0.5.17",
     "cross-spawn": "^7.0.3",
-    "dotenv": "^16.4.0",
+    "dotenv": "^17.4.2",
     "express": "^4.19.2",
     "jsonc-parser": "^3.3.1",
     "prom-client": "^15.1.3",
