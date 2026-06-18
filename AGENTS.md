@@ -332,7 +332,7 @@ docker run -p 8080:8080 -v /path/to/config:/app/config agent-orchestrator
 - Triggered on `push`/`PR` to `main`/`master`
 - **Matrix**: Node.js 20.x and 22.x
 - **Steps**: `npm ci` → `npm run preflight` (lint + test + build) → `npm run test:coverage` → upload coverage artifact
-- **Docker build**: Runs on push to `main` (after lint-and-test passes). Uses Docker Buildx with `docker/build-push-action`.
+
 - **Dependabot**: Weekly updates for npm (grouped dev dependencies) and GitHub Actions (`.github/dependabot.yml`)
 
 ### Git Hooks (custom, no Husky)
