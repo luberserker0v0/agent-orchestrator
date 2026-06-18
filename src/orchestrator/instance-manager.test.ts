@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { InstanceManager } from './instance-manager.js';
+import { RuntimeManager } from '../agent-runtime/runtime-manager.js';
 import { WorkspaceFactory } from './workspace-factory.js';
 import type { OrchestratorConfig, WorkspaceConfig } from '../config-loader.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig } from '../test-fixtures/ao-configs.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import type { AgentRuntime, AgentClient, InstanceHandle } from '../agent-runtime/types.js';
+import { PortPool } from './port-pool.js';
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
@@ -55,11 +57,13 @@ function allocPorts(count: number): number[] {
 describe('InstanceManager', () => {
   let workspaceFactory: WorkspaceFactory;
   let instanceManager: InstanceManager;
+  let runtimeManager: RuntimeManager;
   let runtimeRegistry: RuntimeRegistry;
   let mockRuntime: AgentRuntime;
   let mockClient: AgentClient;
   let mockSpawnFn: ReturnType<typeof vi.fn>;
   let mockHealth: ReturnType<typeof vi.fn>;
+  let portPool: PortPool;
 
   beforeEach(() => {
     cleanup();
@@ -94,9 +98,11 @@ describe('InstanceManager', () => {
     };
 
     runtimeRegistry = new RuntimeRegistry();
-    runtimeRegistry.register(mockRuntime);
+    runtimeRegistry.register('opencode', mockRuntime);
 
-    instanceManager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeRegistry);
+    portPool = new PortPool(defaultOrchestratorConfig.portRange.start, defaultOrchestratorConfig.portRange.end);
+    runtimeManager = new RuntimeManager(portPool, runtimeRegistry, 'opencode');
+    instanceManager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeManager);
   });
 
   afterEach(() => {
@@ -164,7 +170,7 @@ describe('InstanceManager', () => {
         ensure: vi.fn(),
       } as any;
 
-      const manager = new InstanceManager(defaultOrchestratorConfig, badFactory, runtimeRegistry);
+      const manager = new InstanceManager(defaultOrchestratorConfig, badFactory, runtimeManager);
       await expect(manager.createInstance('conv-fail')).rejects.toThrow('disk full');
       manager.destroy();
     });
@@ -173,7 +179,7 @@ describe('InstanceManager', () => {
       mockSpawnFn.mockRejectedValue(new Error('OpenCode instance failed health check after 2 retries'));
 
       const fastFailConfig = { ...defaultOrchestratorConfig, healthCheck: { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 } };
-      const fastFailManager = new InstanceManager(fastFailConfig, workspaceFactory, runtimeRegistry);
+      const fastFailManager = new InstanceManager(fastFailConfig, workspaceFactory, runtimeManager);
 
       await expect(fastFailManager.createInstance('conv-health-fail')).rejects.toThrow(
         'OpenCode instance failed health check after 2 retries'
@@ -228,7 +234,7 @@ describe('InstanceManager', () => {
         ...defaultOrchestratorConfig,
         healthCheck: { retries: 3, intervalMs: 1, clientTimeoutMs: 5000 },
       };
-      const fastManager = new InstanceManager(fastConfig, workspaceFactory, runtimeRegistry);
+      const fastManager = new InstanceManager(fastConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle();
       const port = allocPorts(1)[0];
@@ -246,7 +252,7 @@ describe('InstanceManager', () => {
 
   describe('Docker runtime', () => {
     it('handles docker stdout and stderr events', async () => {
-      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle({ exitCode: null });
       const port = allocPorts(1)[0];
@@ -263,7 +269,7 @@ describe('InstanceManager', () => {
     });
 
     it('spawns with correct args', async () => {
-      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle();
       const port = allocPorts(1)[0];
@@ -284,7 +290,7 @@ describe('InstanceManager', () => {
     });
 
     it('creates instance with correct info in docker mode', async () => {
-      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle();
       const port = allocPorts(1)[0];
@@ -299,7 +305,7 @@ describe('InstanceManager', () => {
     });
 
     it('destroys docker container using runtime kill', async () => {
-      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle();
       const port = allocPorts(1)[0];
@@ -318,7 +324,7 @@ describe('InstanceManager', () => {
         ...dockerOrchestratorConfig,
         healthCheck: { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
       };
-      const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory, runtimeManager);
 
       mockSpawnFn.mockRejectedValue(new Error('OpenCode instance failed health check after 2 retries'));
 
@@ -332,7 +338,7 @@ describe('InstanceManager', () => {
 
   describe('restartInstance', () => {
     it('restarts docker container and waits for health check to pass', async () => {
-      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle();
       const port = allocPorts(1)[0];
@@ -351,7 +357,7 @@ describe('InstanceManager', () => {
     });
 
     it('throws when instance not found', async () => {
-      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeManager);
       await expect(dockerManager.restartInstance('no-such-instance')).rejects.toThrow(
         'Instance not found: no-such-instance'
       );
@@ -359,7 +365,7 @@ describe('InstanceManager', () => {
     });
 
     it('throws when runtime restart fails', async () => {
-      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle();
       const port = allocPorts(1)[0];
@@ -384,7 +390,7 @@ describe('InstanceManager', () => {
         ...dockerOrchestratorConfig,
         healthCheck: { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
       };
-      const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory, runtimeRegistry);
+      const dockerManager = new InstanceManager(fastDockerConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle();
       const port = allocPorts(1)[0];
@@ -622,7 +628,8 @@ describe('InstanceManager', () => {
         maxInstances: 1,
         portRange: { start: 30000, end: 30001 },
       };
-      const strictManager = new InstanceManager(strictConfig, workspaceFactory, runtimeRegistry);
+      const strictRM = new RuntimeManager(portPool, runtimeRegistry, 'opencode');
+      const strictManager = new InstanceManager(strictConfig, workspaceFactory, strictRM);
 
       const handleA = createMockHandle();
       const portA = allocPorts(1)[0];
@@ -655,7 +662,7 @@ describe('InstanceManager', () => {
         ...defaultOrchestratorConfig,
         idleTimeoutMs: 0,
       };
-      const noSweepManager = new InstanceManager(noSweepConfig, workspaceFactory, runtimeRegistry);
+      const noSweepManager = new InstanceManager(noSweepConfig, workspaceFactory, runtimeManager);
       await noSweepManager.createInstance('conv-no-sweep');
 
       noSweepManager.destroy();
@@ -667,7 +674,7 @@ describe('InstanceManager', () => {
         idleTimeoutMs: 100,
         idleSweepIntervalMs: 50,
       };
-      const idleManager = new InstanceManager(idleConfig, workspaceFactory, runtimeRegistry);
+      const idleManager = new InstanceManager(idleConfig, workspaceFactory, runtimeManager);
 
       const handle = createMockHandle();
       const port = allocPorts(1)[0];
@@ -694,7 +701,7 @@ describe('InstanceManager', () => {
 
   describe('destroy', () => {
     it('clears idle sweep timer without error', () => {
-      const manager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const manager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeManager);
       expect(() => manager.destroy()).not.toThrow();
       expect(() => manager.destroy()).not.toThrow();
     });
@@ -702,7 +709,7 @@ describe('InstanceManager', () => {
 
   describe('cleanupOrphanContainers', () => {
     it('calls cleanupOrphans on all registered runtimes', async () => {
-      const manager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeRegistry);
+      const manager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeManager);
       await manager.cleanupOrphanContainers();
       expect(mockRuntime.cleanupOrphans).toHaveBeenCalled();
       manager.destroy();

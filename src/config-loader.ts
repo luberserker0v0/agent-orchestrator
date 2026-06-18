@@ -39,11 +39,19 @@ export interface DockerRuntimeConfig {
   networkMode?: string;
 }
 
-/** Shape of `runtimeConfig` in the JSON config file */
-export type RuntimeConfigShape = DirectRuntimeConfig & {
-  /** Docker-specific settings (only needed when `runtime: "docker"`) */
-  docker?: DockerRuntimeConfig;
-};
+export interface DirectRuntimeEntry {
+  id: string;
+  type: 'direct';
+  config: DirectRuntimeConfig;
+}
+
+export interface DockerRuntimeEntry {
+  id: string;
+  type: 'docker';
+  config: DockerRuntimeConfig;
+}
+
+export type RuntimeEntry = DirectRuntimeEntry | DockerRuntimeEntry;
 
 export interface OrchestratorConfig {
   maxInstances: number;
@@ -55,9 +63,8 @@ export interface OrchestratorConfig {
     /** When true (default), PortPool falls back to OS-assigned port when the configured range is exhausted */
     allowDynamicFallback?: boolean;
   };
-  runtime: string;
-  runtimeConfig: RuntimeConfigShape;
-  agentType: string;
+  defaultAgentType: string;
+  runtimes: RuntimeEntry[];
   healthCheck: HealthCheckConfig;
 }
 
@@ -169,26 +176,46 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     }
   }
 
-  // Runtime config validation
-  if (orchestrator.runtime !== 'direct' && orchestrator.runtime !== 'docker') {
-    throw new Error(`Config validation failed: orchestrator.runtime must be "direct" or "docker", got "${orchestrator.runtime}"`);
+  // Runtime entries validation
+  if (!Array.isArray(orchestrator.runtimes) || orchestrator.runtimes.length === 0) {
+    throw new Error('Config validation failed: orchestrator.runtimes must be a non-empty array');
   }
-  if (typeof orchestrator.runtimeConfig.binary !== 'string') {
-    throw new Error(`Config validation failed: orchestrator.runtimeConfig.binary must be a string, got ${orchestrator.runtimeConfig.binary}`);
+  if (typeof orchestrator.defaultAgentType !== 'string' || !orchestrator.defaultAgentType) {
+    throw new Error(`Config validation failed: orchestrator.defaultAgentType must be a non-empty string, got ${orchestrator.defaultAgentType}`);
   }
-  if (orchestrator.runtimeConfig.docker !== undefined) {
-    if (typeof orchestrator.runtimeConfig.docker.image !== 'string' || !orchestrator.runtimeConfig.docker.image) {
-      throw new Error(`Config validation failed: runtimeConfig.docker.image must be a non-empty string, got ${orchestrator.runtimeConfig.docker?.image}`);
+  const runtimeIds = new Set<string>();
+  let defaultFound = false;
+  for (const entry of orchestrator.runtimes) {
+    if (typeof entry.id !== 'string' || !entry.id) {
+      throw new Error('Config validation failed: each runtime entry must have a non-empty string "id"');
     }
-    if (typeof orchestrator.runtimeConfig.docker.containerPort !== 'number' || !Number.isInteger(orchestrator.runtimeConfig.docker.containerPort) || orchestrator.runtimeConfig.docker.containerPort <= 0) {
-      throw new Error(`Config validation failed: runtimeConfig.docker.containerPort must be a positive integer, got ${orchestrator.runtimeConfig.docker?.containerPort}`);
+    if (runtimeIds.has(entry.id)) {
+      throw new Error(`Config validation failed: duplicate runtime id "${entry.id}"`);
     }
-    if (orchestrator.runtimeConfig.docker.networkMode !== undefined && typeof orchestrator.runtimeConfig.docker.networkMode !== 'string') {
-      throw new Error(`Config validation failed: runtimeConfig.docker.networkMode must be a string, got ${typeof orchestrator.runtimeConfig.docker.networkMode}`);
+    runtimeIds.add(entry.id);
+    if (entry.id === orchestrator.defaultAgentType) defaultFound = true;
+
+    if (entry.type !== 'direct' && entry.type !== 'docker') {
+      throw new Error(`Config validation failed: runtime entry "${(entry as RuntimeEntry).id}" has invalid type "${(entry as RuntimeEntry).type}", must be "direct" or "docker"`);
+    }
+    if (typeof entry.config !== 'object' || entry.config === null) {
+      throw new Error(`Config validation failed: runtime entry "${entry.id}" must have a "config" object`);
+    }
+    if (entry.type === 'docker') {
+      const dc = entry.config as DockerRuntimeConfig;
+      if (typeof dc.image !== 'string' || !dc.image) {
+        throw new Error(`Config validation failed: runtime "${entry.id}" docker config must have a non-empty "image" string`);
+      }
+      if (typeof dc.containerPort !== 'number' || !Number.isInteger(dc.containerPort) || dc.containerPort <= 0) {
+        throw new Error(`Config validation failed: runtime "${entry.id}" docker config "containerPort" must be a positive integer`);
+      }
+      if (dc.networkMode !== undefined && typeof dc.networkMode !== 'string') {
+        throw new Error(`Config validation failed: runtime "${entry.id}" docker config "networkMode" must be a string`);
+      }
     }
   }
-  if (orchestrator.runtime === 'docker' && !orchestrator.runtimeConfig.docker) {
-    throw new Error('Config validation failed: orchestrator.runtimeConfig.docker is required when runtime is "docker"');
+  if (!defaultFound) {
+    throw new Error(`Config validation failed: defaultAgentType "${orchestrator.defaultAgentType}" not found in runtimes array`);
   }
 
   // Health check validation
@@ -237,39 +264,6 @@ export function loadCanonicalConfig(enforce: boolean): Record<string, unknown> {
   return readJSON(path) as Record<string, unknown>;
 }
 
-/** Extract typed config for the DirectRuntime (throws if `runtime` is not `direct`). */
-export function getDirectRuntimeConfig(config: OrchestratorConfig): DirectRuntimeConfig {
-  if (config.runtime !== 'direct') {
-    throw new Error(
-      `Cannot extract DirectRuntimeConfig: runtime is "${config.runtime}", expected "direct". ` +
-      `Set config.orchestrator.runtime to "direct".`
-    );
-  }
-  return { binary: config.runtimeConfig.binary ?? 'opencode', instanceHost: config.runtimeConfig.instanceHost ?? '127.0.0.1' };
-}
-
-/** Extract typed config for the DockerRuntime (throws if `runtime` is not `docker`). */
-export function getDockerRuntimeConfig(config: OrchestratorConfig): DockerRuntimeConfig {
-  if (config.runtime !== 'docker') {
-    throw new Error(
-      `Cannot extract DockerRuntimeConfig: runtime is "${config.runtime}", expected "docker". ` +
-      `Set config.orchestrator.runtime to "docker".`
-    );
-  }
-  if (!config.runtimeConfig.docker) {
-    throw new Error(
-      'Docker runtime selected but runtimeConfig.docker is missing. ' +
-      'Add a "docker" section to config.orchestrator.runtimeConfig.'
-    );
-  }
-  return {
-    image: config.runtimeConfig.docker.image,
-    containerPort: config.runtimeConfig.docker.containerPort,
-    instanceHost: config.runtimeConfig.instanceHost ?? '127.0.0.1',
-    networkMode: config.runtimeConfig.docker.networkMode,
-  };
-}
-
 export function defaultConfig(): AgentOrchestratorConfig {
   return {
     server: {
@@ -286,9 +280,8 @@ export function defaultConfig(): AgentOrchestratorConfig {
       idleTimeoutMs: 600000,
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100, allowDynamicFallback: true },
-      runtime: 'direct',
-      runtimeConfig: { binary: 'opencode' },
-      agentType: 'opencode',
+      defaultAgentType: 'opencode',
+      runtimes: [{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }],
       healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
     workspace: {

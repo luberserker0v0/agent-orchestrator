@@ -6,8 +6,6 @@ import {
   instancesActive,
   instancesTotalCreated,
 } from './registry.js';
-import { defaultOrchestratorConfig } from '../test-fixtures/ao-configs.js';
-
 describe('Metrics', () => {
   it('exposes /metrics endpoint with correct content type', async () => {
     const { server } = createHttpServer(
@@ -21,7 +19,6 @@ describe('Metrics', () => {
       } as any,
       {} as any,
       {} as any,
-      defaultOrchestratorConfig,
       {} as any,
       {} as any,
       {} as any,

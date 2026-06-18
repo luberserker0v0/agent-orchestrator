@@ -12,7 +12,7 @@ describe('ConversationService', () => {
   let mockInstanceManager: any;
   let mockConversationState: any;
   let mockWorkspaceFactory: any;
-  let mockRuntimeRegistry: any;
+  let mockRuntimeManager: any;
   let mockServerConfig: any;
   const testId = 'conv-1';
 
@@ -48,9 +48,9 @@ describe('ConversationService', () => {
       destroy: vi.fn(),
     };
 
-    mockRuntimeRegistry = {
-      get: vi.fn(),
-      list: vi.fn().mockReturnValue(['opencode']),
+    mockRuntimeManager = {
+      hasAgentType: vi.fn(),
+      listAgentTypes: vi.fn().mockReturnValue(['opencode']),
     };
 
     mockServerConfig = {
@@ -62,16 +62,16 @@ describe('ConversationService', () => {
       mockInstanceManager,
       mockConversationState,
       mockWorkspaceFactory,
-      mockRuntimeRegistry,
+      mockRuntimeManager,
       mockServerConfig,
-      'direct',
+      'opencode',
     );
   });
 
   describe('create', () => {
     it('should create a conversation with generated id', () => {
       mockConversationState.has.mockReturnValue(false);
-      mockRuntimeRegistry.get.mockReturnValue({});
+      mockRuntimeManager.hasAgentType.mockReturnValue(true);
       mockConversationState.create.mockReturnValue({
         id: 'gen-id',
         agentType: 'opencode',
@@ -92,7 +92,7 @@ describe('ConversationService', () => {
 
     it('should create a conversation with specified id and agentType', () => {
       mockConversationState.has.mockReturnValue(false);
-      mockRuntimeRegistry.get.mockReturnValue({});
+      mockRuntimeManager.hasAgentType.mockReturnValue(true);
       mockConversationState.create.mockReturnValue({
         id: testId,
         agentType: 'custom',
@@ -122,7 +122,7 @@ describe('ConversationService', () => {
 
     it('should throw 400 for unknown agent type', () => {
       mockConversationState.has.mockReturnValue(false);
-      mockRuntimeRegistry.get.mockReturnValue(undefined);
+      mockRuntimeManager.hasAgentType.mockReturnValue(false);
 
       expect(() => service.create(testId, 'unknown')).toThrow(AppError);
       try { service.create(testId, 'unknown'); } catch (e: any) {
@@ -302,8 +302,9 @@ describe('ConversationService', () => {
       await expect(service.restart(testId)).rejects.toThrow(AppError);
     });
 
-    it('should stop then create new instance for non-docker runtime', async () => {
+    it('should stop then create new instance when restart is not supported', async () => {
       mockConversationState.get.mockReturnValue({ ...mockState, status: 'running' });
+      mockInstanceManager.restartInstance.mockRejectedValue(new Error('does not support restart'));
       mockInstanceManager.stopInstance.mockResolvedValue(undefined);
       mockInstanceManager.createInstance.mockResolvedValue({
         port: 41003,
@@ -313,19 +314,12 @@ describe('ConversationService', () => {
 
       await service.restart(testId);
 
+      expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId);
       expect(mockInstanceManager.stopInstance).toHaveBeenCalledWith(testId);
       expect(mockInstanceManager.createInstance).toHaveBeenCalledWith(testId, 'opencode');
     });
 
-    it('should use restartInstance for docker runtime', async () => {
-      const dockerService = new ConversationService(
-        mockInstanceManager,
-        mockConversationState,
-        mockWorkspaceFactory,
-        mockRuntimeRegistry,
-        mockServerConfig,
-        'docker',
-      );
+    it('should use restartInstance when supported', async () => {
       mockConversationState.get.mockReturnValue({ ...mockState, status: 'running' });
       mockInstanceManager.restartInstance.mockResolvedValue(undefined);
       mockInstanceManager.getInstance.mockReturnValue({
@@ -334,7 +328,7 @@ describe('ConversationService', () => {
         client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_4' }) },
       });
 
-      await dockerService.restart(testId);
+      await service.restart(testId);
 
       expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId);
     });

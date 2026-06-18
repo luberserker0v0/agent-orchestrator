@@ -3,7 +3,6 @@ import { createServer, type Server } from 'node:http';
 import { WebSocketServer } from 'ws';
 import swaggerUi from 'swagger-ui-express';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
-import type { OrchestratorConfig } from '../config-loader.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
@@ -33,7 +32,6 @@ export function createHttpServer(
   instanceManager: InstanceManager,
   workspaceFactory: WorkspaceFactory,
   conversationState: ConversationState,
-  orchestratorConfig: OrchestratorConfig,
   configService: ConfigService,
   agentService: AgentService,
   skillService: SkillService,

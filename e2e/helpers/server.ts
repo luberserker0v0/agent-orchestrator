@@ -3,10 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestratorConfig, DirectRuntimeConfig, DockerRuntimeConfig } from '../../src/config-loader.js';
-import { getDirectRuntimeConfig, getDockerRuntimeConfig } from '../../src/config-loader.js';
 import { createHttpServer, type HttpServer } from '../../src/http-api/server.js';
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
+import { RuntimeManager } from '../../src/agent-runtime/runtime-manager.js';
 import { ConversationState } from '../../src/orchestrator/conversation-state.js';
 import { ConfigService } from '../../src/services/config-service.js';
 import { AgentService } from '../../src/services/agent-service.js';
@@ -45,7 +45,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const serverConfig = { port: 0, host, shutdownTimeoutMs };
   const wsConfig = { heartbeatIntervalMs, idleTimeoutMs };
 
-  const runtime = orchestratorOverrides?.runtime || process.env.E2E_RUNTIME || 'direct';
+  const runtime = orchestratorOverrides?.runtimes?.[0]?.type || process.env.E2E_RUNTIME || 'direct';
 
   if (runtime === 'docker') {
     const info = spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 5000 });
@@ -64,22 +64,23 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
 
   const runtimeRegistry = new RuntimeRegistry();
   const portPool = new PortPool(orchestratorConfig.portRange.start, orchestratorConfig.portRange.end, orchestratorConfig.portRange.allowDynamicFallback);
-  if (orchestratorConfig.runtime === 'docker') {
-    const dockerCfg: DockerRuntimeConfig = getDockerRuntimeConfig(orchestratorConfig);
-    const dockerRuntime = new DockerRuntime(portPool, dockerCfg);
-    runtimeRegistry.register(dockerRuntime);
-  } else {
-    const directCfg: DirectRuntimeConfig = getDirectRuntimeConfig(orchestratorConfig);
-    const directRuntime = new DirectRuntime(portPool, directCfg);
-    runtimeRegistry.register(directRuntime);
+  for (const entry of orchestratorConfig.runtimes) {
+    if (entry.type === 'direct') {
+      const directRuntime = new DirectRuntime(portPool, entry.config as DirectRuntimeConfig);
+      runtimeRegistry.register(entry.id, directRuntime);
+    } else {
+      const dockerRuntime = new DockerRuntime(portPool, entry.config as DockerRuntimeConfig);
+      runtimeRegistry.register(entry.id, dockerRuntime);
+    }
   }
 
-  const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory, runtimeRegistry);
+  const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, orchestratorConfig.defaultAgentType);
+  const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory, runtimeManager);
   const conversationState = new ConversationState();
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
-  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeRegistry, serverConfig, runtime);
+  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeManager, serverConfig, orchestratorConfig.defaultAgentType);
   const fileService = new FileService(workspaceFactory, conversationState);
   const sessionService = new SessionService(instanceManager, conversationState);
   const messageService = new MessageService(instanceManager, conversationState);
@@ -90,7 +91,6 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     instanceManager,
     workspaceFactory,
     conversationState,
-    orchestratorConfig,
     configService,
     agentService,
     skillService,

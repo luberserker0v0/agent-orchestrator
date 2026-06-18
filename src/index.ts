@@ -1,7 +1,9 @@
 import 'dotenv/config';
-import { loadConfig, loadCanonicalConfig, getDirectRuntimeConfig, getDockerRuntimeConfig } from './config-loader.js';
+import { loadConfig, loadCanonicalConfig } from './config-loader.js';
+import type { DirectRuntimeConfig, DockerRuntimeConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';
+import { RuntimeManager } from './agent-runtime/runtime-manager.js';
 import { ConversationState } from './orchestrator/conversation-state.js';
 import { ConfigService } from './services/config-service.js';
 import { AgentService } from './services/agent-service.js';
@@ -49,26 +51,27 @@ export async function main(cliArgs?: string[]) {
 
   const workspaceFactory = new WorkspaceFactory(config.workspace, canonicalConfig);
 
-  // Set up runtime registry
+  // Set up runtime registry — register all runtimes from config
   const runtimeRegistry = new RuntimeRegistry();
   const portPool = new PortPool(config.orchestrator.portRange.start, config.orchestrator.portRange.end, config.orchestrator.portRange.allowDynamicFallback);
-  if (config.orchestrator.runtime === 'docker') {
-    const dockerCfg = getDockerRuntimeConfig(config.orchestrator);
-    const dockerRuntime = new DockerRuntime(portPool, dockerCfg);
-    runtimeRegistry.register(dockerRuntime);
-  } else {
-    const directCfg = getDirectRuntimeConfig(config.orchestrator);
-    const directRuntime = new DirectRuntime(portPool, directCfg);
-    runtimeRegistry.register(directRuntime);
+  for (const entry of config.orchestrator.runtimes) {
+    if (entry.type === 'direct') {
+      const directRuntime = new DirectRuntime(portPool, entry.config as DirectRuntimeConfig);
+      runtimeRegistry.register(entry.id, directRuntime);
+    } else {
+      const dockerRuntime = new DockerRuntime(portPool, entry.config as DockerRuntimeConfig);
+      runtimeRegistry.register(entry.id, dockerRuntime);
+    }
   }
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);
 
-  const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeRegistry, portPool);
+  const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, config.orchestrator.defaultAgentType);
+  const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeManager);
   const conversationState = new ConversationState();
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
-  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeRegistry, config.server, config.orchestrator.runtime);
+  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeManager, config.server, config.orchestrator.defaultAgentType);
   const fileService = new FileService(workspaceFactory, conversationState);
   const sessionService = new SessionService(instanceManager, conversationState);
   const messageService = new MessageService(instanceManager, conversationState);
@@ -77,7 +80,7 @@ export async function main(cliArgs?: string[]) {
   await instanceManager.cleanupOrphanContainers();
   workspaceFactory.cleanupOrphans();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();

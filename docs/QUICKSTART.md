@@ -10,7 +10,7 @@ Get AgentOrchestrator running in under 5 minutes.
 - **npm** >= 10.0.0
 - **OpenCode CLI** (`opencode --version`) — required for `direct` runtime (default)
 
-For **Docker runtime** (`"runtime": "docker"`):
+For **Docker runtime** (add a docker entry to `runtimes[]` in config):
 - **Docker** installed and running
 - OpenCode image pulled: `docker pull ghcr.io/anomalyco/opencode:1.17.4`
 
@@ -27,7 +27,23 @@ cp config/agentorchestrator.example.json config/agentorchestrator.json
 
 Default configuration works out of the box — OpenCode instances spawn directly on the host using port range `30000-30100`.
 
-For **Docker runtime**, set `"runtime": "docker"` in `config/agentorchestrator.json` and configure `runtimeConfig.docker.image`.
+For **Docker runtime**, add a docker entry to `orchestrator.runtimes[]` in `config/agentorchestrator.json`:
+
+```json
+"runtimes": [
+  {
+    "id": "opencode-docker",
+    "type": "docker",
+    "config": {
+      "binary": "opencode",
+      "docker": {
+        "image": "ghcr.io/anomalyco/opencode:1.17.4",
+        "containerPort": 3000
+      }
+    }
+  }
+]
+```
 
 Optional **API key authentication** — set `server.apiKey` (min 8 chars) or env `AGENTORCHESTRATOR_SERVER_APIKEY`. All endpoints except `/health`, `/metrics`, and `/api-docs*` require `Authorization: Bearer <key>`.
 

@@ -171,6 +171,7 @@ src/
   agent-runtime/
     types.ts                 # AgentRuntime interface, SpawnResult type
     registry.ts              # RuntimeRegistry — runtime lookup by agentType
+    runtime-manager.ts       # RuntimeManager — manages instance map, lifecycle, policy queries (LRU candidate, idle detection)
     runtimes/
       direct.ts              # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill. Accepts DirectRuntimeConfig ({ binary })
       docker.ts              # DockerRuntime — spawns Docker container, DockerHandle wraps docker rm -f. Accepts DockerRuntimeConfig ({ image, containerPort })
@@ -222,10 +223,8 @@ AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS=600000
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
 
-# Runtime-specific config
-AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_BINARY=opencode
-AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_DOCKER_IMAGE=ghcr.io/anomalyco/opencode:1.17.4
-AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_DOCKER_CONTAINERPORT=3000
+# Note: The `runtimes` array (list of runtime entries) is NOT overridable via env vars.
+# Arrays are treated as opaque by mergeDefaults. Multi-runtime setups use the JSON config file.
 ```
 
 ## Server Configuration
@@ -248,11 +247,13 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `idleSweepIntervalMs` | integer | 60000 | How often the background sweep checks for idle instances |
 | `portRange.start` | integer | 30000 | First port in the dynamic allocation range |
 | `portRange.end` | integer | 30100 | Last port in the dynamic allocation range |
-| `runtime` | string | 'direct' | Runtime mode: `direct` (spawn binary) or `docker` (Docker container) |
-| `instanceHost` | string | `'127.0.0.1'` | Hostname used to reach spawned OpenCode instances (change for remote Docker hosts) |
-| `runtimeConfig` | object | `{ binary: 'opencode' }` | Runtime-specific configuration (`{ binary, instanceHost }` for direct; `{ binary, instanceHost, docker: { image, containerPort, networkMode } }` for docker) |
-| `runtimeConfig.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
-| `agentType` | string | 'opencode' | Key used to look up the runtime implementation in RuntimeRegistry |
+| `defaultAgentType` | string | 'opencode' | Default agent type — must match the `id` of one runtime entry in `runtimes[]` |
+| `runtimes` | array | `[{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct` or `docker`), and `config` |
+| `runtimes[].config.binary` | string | `opencode` | OpenCode CLI command or absolute path |
+| `runtimes[].config.instanceHost` | string | `'127.0.0.1'` | Hostname used to reach spawned OpenCode instances (per-runtime, useful for remote Docker hosts) |
+| `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) |
+| `runtimes[].config.docker.containerPort` | integer | (required for docker) | Container port that OpenCode listens on |
+| `runtimes[].config.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
 | `healthCheck.clientTimeoutMs` | integer | 5000 | HTTP client timeout per health check request |

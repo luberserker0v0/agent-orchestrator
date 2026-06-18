@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { createHttpServer, type HttpServer } from './server.js';
-import { defaultOrchestratorConfig, dockerOrchestratorConfig } from '../test-fixtures/ao-configs.js';
+
 import { AppError, ErrorCodes } from '../utils/errors.js';
 import AdmZip from 'adm-zip';
 
@@ -155,7 +155,6 @@ describe('HTTP API Server', () => {
       mockInstanceManager,
       mockWorkspaceFactory,
       mockConversationState,
-      defaultOrchestratorConfig,
       mockConfigService,
       mockAgentService,
       mockSkillService,
@@ -232,7 +231,6 @@ describe('HTTP API Server', () => {
         mockInstanceManager,
         mockWorkspaceFactory,
         mockConversationState,
-        defaultOrchestratorConfig,
         mockConfigService,
         mockAgentService,
         mockSkillService,
@@ -960,7 +958,6 @@ describe('HTTP API Server', () => {
       mockInstanceManager,
       mockWorkspaceFactory,
       mockConversationState,
-      dockerOrchestratorConfig,
       mockConfigService,
       mockAgentService,
       mockSkillService,

@@ -3,11 +3,15 @@ import type { AgentRuntime } from './types.js';
 export class RuntimeRegistry {
   private runtimes = new Map<string, AgentRuntime>();
 
-  register(runtime: AgentRuntime): void {
-    if (this.runtimes.has(runtime.type)) {
-      throw new Error(`Runtime already registered: ${runtime.type}`);
+  register(id: string, runtime: AgentRuntime): void {
+    if (this.runtimes.has(id)) {
+      throw new Error(`Runtime already registered: ${id}`);
     }
-    this.runtimes.set(runtime.type, runtime);
+    this.runtimes.set(id, runtime);
+  }
+
+  has(id: string): boolean {
+    return this.runtimes.has(id);
   }
 
   get(type: string): AgentRuntime | undefined {
