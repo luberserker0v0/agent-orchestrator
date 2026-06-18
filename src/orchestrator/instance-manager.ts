@@ -46,7 +46,7 @@ export class InstanceManager {
 
     const password = generatePassword();
 
-    return this.runtimeManager.spawn(
+    return this.runtimeManager.start(
       id,
       workspace.path,
       { username: 'opencode', password },

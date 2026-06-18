@@ -25,7 +25,7 @@ export interface StartResult {
   agentType: string;
   status: string;
   ready: boolean;
-  port: number;
+  port?: number;
   wsUrl?: string;
   sessionId?: string;
 }

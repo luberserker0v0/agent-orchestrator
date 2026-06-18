@@ -22,8 +22,8 @@ describe('HTTP API Server', () => {
 
   beforeEach(() => {
     mockRuntimeRegistry = {
-      get: vi.fn().mockReturnValue({ spawn: vi.fn(), kill: vi.fn() }),
-      getOrThrow: vi.fn().mockReturnValue({ spawn: vi.fn(), kill: vi.fn() }),
+      get: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+      getOrThrow: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
       list: vi.fn().mockReturnValue(['opencode']),
       has: vi.fn().mockReturnValue(true),
     };

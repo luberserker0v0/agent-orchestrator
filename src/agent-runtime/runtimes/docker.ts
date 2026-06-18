@@ -4,7 +4,7 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { waitForHealthy } from '../health.js';
-import type { AgentRuntime, AgentCapabilities, SpawnResult, InstanceHandle, AgentClient, HealthCheckConfig } from '../types.js';
+import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, AgentClient, HealthCheckConfig } from '../types.js';
 import type { DockerRuntimeConfig } from '../../config-loader.js';
 
 class DockerHandle implements InstanceHandle {
@@ -66,12 +66,12 @@ export class DockerRuntime implements AgentRuntime {
     this.config = { instanceHost: '127.0.0.1', ...config };
   }
 
-  async spawn(
+  async start(
     id: string,
     workspacePath: string,
     auth: { username: string; password: string },
     healthCheckConfig: HealthCheckConfig,
-  ): Promise<SpawnResult> {
+  ): Promise<AgentEndpoint> {
     const port = await this.portPool.allocate();
     if (port === null) {
       throw new Error('No available ports in pool');
@@ -129,13 +129,13 @@ export class DockerRuntime implements AgentRuntime {
     }
   }
 
-  async kill(handle?: InstanceHandle): Promise<void> {
+  async stop(handle?: InstanceHandle): Promise<void> {
     if (handle) {
       await handle.kill();
     }
   }
 
-  async restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<SpawnResult> {
+  async restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<AgentEndpoint> {
     const containerName = `agentorchestrator-${id}`;
     logger.info(`Restarting container ${containerName}...`);
 
