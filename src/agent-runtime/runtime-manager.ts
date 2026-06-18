@@ -88,10 +88,15 @@ export class RuntimeManager {
     if (result.port !== inst.port) {
       this.portPool.release(inst.port);
     }
-    inst.client = result.client;
-    inst.port = result.port;
-    if (result.handle) inst.handle = result.handle;
-    inst.lastUsedAt = Date.now();
+    // Re-add to map in case onExit cleanup removed it during kill
+    const updated: InstanceInfo = {
+      ...inst,
+      client: result.client,
+      port: result.port,
+      lastUsedAt: Date.now(),
+    };
+    if (result.handle) updated.handle = result.handle;
+    this.instances.set(id, updated);
   }
 
   async cleanupOrphanContainers(): Promise<void> {
