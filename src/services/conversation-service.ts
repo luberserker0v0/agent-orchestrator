@@ -152,32 +152,25 @@ export class ConversationService {
 
     try {
       const hadInstance = previousStatus === 'running' || previousStatus === 'error';
-      let runtimeRestarted = false;
 
+      let instance: InstanceInfo;
       if (hadInstance) {
         this.conversationState.cancelReadyCheck(id);
         try {
           await this.instanceManager.restartInstance(id);
-          runtimeRestarted = true;
+          instance = this.instanceManager.getInstance(id)!;
         } catch {
-          await this.instanceManager.stopInstance(id).catch(() => {});
+          await this.instanceManager.destroyInstance(id).catch(() => {});
           this.conversationState.removeRunningInstance(id);
+          instance = await this.instanceManager.createInstance(id, state.agentType);
         }
+      } else {
+        instance = await this.instanceManager.createInstance(id, state.agentType);
       }
 
       this.conversationState.clearNeedsRestart(id);
-
-      let instance: InstanceInfo;
-      if (runtimeRestarted) {
-        instance = this.instanceManager.getInstance(id)!;
-      } else {
-        instance = await this.instanceManager.createInstance(id, state.agentType);
-        this.conversationState.setInstanceInfo(id, { port: instance.port });
-        this.conversationState.setRunningInstance(id, {
-          client: instance.client,
-        });
-      }
-
+      this.conversationState.setInstanceInfo(id, { port: instance.port });
+      this.conversationState.setRunningInstance(id, { client: instance.client });
       this.conversationState.transition(id, 'running');
       this.conversationState.startReadyCheck(id);
 

@@ -81,11 +81,16 @@ export class RuntimeManager {
     if (!inst) throw new Error(`Instance not found: ${id}`);
 
     const runtime = this.runtimes.get(agentType ?? this.defaultAgentType);
-    if (!runtime?.restart) {
-      throw new Error(`Runtime ${agentType ?? this.defaultAgentType} does not support restart`);
-    }
+    if (!runtime) throw new Error(`Runtime not found: ${agentType ?? this.defaultAgentType}`);
 
-    await runtime.restart(id, inst.client, healthCheckConfig ?? { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 });
+    const result = await runtime.restart(id, healthCheckConfig ?? { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 });
+
+    if (result.port !== inst.port) {
+      this.portPool.release(inst.port);
+    }
+    inst.client = result.client;
+    inst.port = result.port;
+    if (result.handle) inst.handle = result.handle;
     inst.lastUsedAt = Date.now();
   }
 

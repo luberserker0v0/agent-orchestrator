@@ -279,17 +279,22 @@ describe('DockerRuntime', () => {
     it('restarts container and waits for health check', async () => {
       const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
       (rt as any).instanceAuth.set('conv-restart', { baseUrl: 'http://127.0.0.1:3100', auth: { username: 'test', password: 'test' } });
+      (rt as any).clients.set('conv-restart', {});
+      (rt as any).ports.set('conv-restart', 3100);
       const restartProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(restartProc);
       mockFetch.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ healthy: true, version: '1.0.0' }) });
 
-      await rt.restart('conv-restart', {} as any, hcConfig);
+      const result = await rt.restart('conv-restart', hcConfig);
 
       expect(spawn).toHaveBeenCalledWith(
         'docker',
         ['restart', 'agentorchestrator-conv-restart'],
         expect.anything(),
       );
+      expect(result).toHaveProperty('client');
+      expect(result).toHaveProperty('port', 3100);
+      expect(result).toHaveProperty('handle');
     });
 
     it('throws when docker restart command fails', async () => {
@@ -297,7 +302,7 @@ describe('DockerRuntime', () => {
       const restartProc = createMockProc({ exitCode: 1 });
       (spawn as any).mockReturnValue(restartProc);
 
-      await expect(rt.restart('conv-fail', {} as any, hcConfig)).rejects.toThrow(
+      await expect(rt.restart('conv-fail', hcConfig)).rejects.toThrow(
         'docker restart failed for container agentorchestrator-conv-fail',
       );
     });
@@ -309,7 +314,7 @@ describe('DockerRuntime', () => {
       (spawn as any).mockReturnValue(restartProc);
       mockFetch.mockRejectedValue(new Error('connection refused'));
 
-      await expect(rt.restart('conv-health-fail', {} as any, hcConfig)).rejects.toThrow(
+      await expect(rt.restart('conv-health-fail', hcConfig)).rejects.toThrow(
         'OpenCode instance failed health check after 3 retries',
       );
     }, 15000);

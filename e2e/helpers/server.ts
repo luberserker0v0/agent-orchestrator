@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OrchestratorConfig, DirectRuntimeConfig, DockerRuntimeConfig } from '../../src/config-loader.js';
+import type { OrchestratorConfig } from '../../src/config-loader.js';
 import { createHttpServer, type HttpServer } from '../../src/http-api/server.js';
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
@@ -16,6 +16,7 @@ import { FileService } from '../../src/services/file-service.js';
 import { SessionService } from '../../src/services/session-service.js';
 import { MessageService } from '../../src/services/message-service.js';
 import { RuntimeRegistry } from '../../src/agent-runtime/registry.js';
+import { RuntimeFactory } from '../../src/agent-runtime/runtime-factory.js';
 import { DirectRuntime } from '../../src/agent-runtime/runtimes/direct.js';
 import { DockerRuntime } from '../../src/agent-runtime/runtimes/docker.js';
 import { PortPool } from '../../src/orchestrator/port-pool.js';
@@ -62,16 +63,15 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
 
   const workspaceFactory = new WorkspaceFactory(workspaceConfig);
 
+  const runtimeFactory = new RuntimeFactory();
+  runtimeFactory.register('direct', DirectRuntime);
+  runtimeFactory.register('docker', DockerRuntime);
+
   const runtimeRegistry = new RuntimeRegistry();
   const portPool = new PortPool(orchestratorConfig.portRange.start, orchestratorConfig.portRange.end, orchestratorConfig.portRange.allowDynamicFallback);
   for (const entry of orchestratorConfig.runtimes) {
-    if (entry.type === 'direct') {
-      const directRuntime = new DirectRuntime(portPool, entry.config as DirectRuntimeConfig);
-      runtimeRegistry.register(entry.id, directRuntime);
-    } else {
-      const dockerRuntime = new DockerRuntime(portPool, entry.config as DockerRuntimeConfig);
-      runtimeRegistry.register(entry.id, dockerRuntime);
-    }
+    const runtime = runtimeFactory.create(entry.type, portPool, entry.config);
+    runtimeRegistry.register(entry.id, runtime);
   }
 
   const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, orchestratorConfig.defaultAgentType);

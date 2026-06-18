@@ -65,6 +65,11 @@ export class DirectRuntime implements AgentRuntime {
 
   private portPool: PortPool;
   private config: DirectRuntimeConfig & { instanceHost: string };
+  private instanceState = new Map<string, {
+    workspacePath: string;
+    auth: { username: string; password: string };
+    handle: InstanceHandle;
+  }>();
 
   constructor(portPool: PortPool, config?: DirectRuntimeConfig) {
     this.portPool = portPool;
@@ -108,6 +113,55 @@ export class DirectRuntime implements AgentRuntime {
       await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
 
       const handle = new ChildProcessHandle(proc);
+      this.instanceState.set(id, { workspacePath, auth, handle });
+      return { client, port, handle };
+    } catch (err) {
+      this.portPool.release(port);
+      throw err;
+    }
+  }
+
+  async restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<SpawnResult> {
+    const state = this.instanceState.get(id);
+    if (!state) {
+      throw new Error(`No stored state for instance ${id}`);
+    }
+
+    logger.info(`Restarting OpenCode instance ${id}...`);
+
+    await state.handle.kill();
+
+    const port = await this.portPool.allocate();
+    if (port === null) {
+      throw new Error('No available ports in pool');
+    }
+
+    const baseUrl = `http://${this.config.instanceHost}:${port}`;
+    const client = new OpenCodeAgentClient(baseUrl, state.auth.username, state.auth.password);
+
+    try {
+      const proc = spawn(this.config.binary, ['serve', '--port', String(port), '--hostname', this.config.instanceHost], {
+        cwd: state.workspacePath,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+        env: {
+          ...process.env,
+          OPENCODE_SERVER_USERNAME: state.auth.username,
+          OPENCODE_SERVER_PASSWORD: state.auth.password,
+        },
+      });
+
+      proc.stdout?.on('data', (data: Buffer) => {
+        logger.info(`[OpenCode ${id}] stdout: ${data.toString().trim()}`);
+      });
+      proc.stderr?.on('data', (data: Buffer) => {
+        logger.warn(`[OpenCode ${id}] stderr: ${data.toString().trim()}`);
+      });
+
+      await waitForHealthy(id, baseUrl, state.auth, healthCheckConfig);
+
+      const handle = new ChildProcessHandle(proc);
+      this.instanceState.set(id, { ...state, handle });
       return { client, port, handle };
     } catch (err) {
       this.portPool.release(port);

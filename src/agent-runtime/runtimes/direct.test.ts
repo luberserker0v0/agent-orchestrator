@@ -212,4 +212,79 @@ describe('DirectRuntime', () => {
       await expect(rt.kill(undefined)).resolves.toBeUndefined();
     });
   });
+
+  describe('restart', () => {
+    it('kills old process and spawns new one', async () => {
+      const rt = new DirectRuntime(createPortPool(), { binary: 'opencode' });
+      const firstProc = createMockProc({ exitCode: null, pid: 1111 });
+      const secondProc = createMockProc({ exitCode: null, pid: 2222 });
+      (spawn as any)
+        .mockReturnValueOnce(firstProc)
+        .mockReturnValueOnce(secondProc);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      // First spawn
+      const first = await rt.spawn(
+        'test-restart', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      expect(first.handle).toBeDefined();
+      expect(first.port).toBeGreaterThanOrEqual(40000);
+
+      // Restart
+      const second = await rt.restart('test-restart', { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 });
+
+      expect(second.handle).toBeDefined();
+      expect(second.port).toBeGreaterThanOrEqual(40000);
+      expect(second.port).not.toBe(first.port);
+      expect(second.client).toBeDefined();
+      expect((spawn as any)).toHaveBeenCalledTimes(2);
+    });
+
+    it('throws when no stored state for id', async () => {
+      const rt = new DirectRuntime(createPortPool());
+      await expect(rt.restart('no-such-id', { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 }))
+        .rejects.toThrow('No stored state for instance no-such-id');
+    });
+
+    it('throws when spawn fails after kill', async () => {
+      const rt = new DirectRuntime(createPortPool(), { binary: 'opencode' });
+      const firstProc = createMockProc({ exitCode: null, pid: 1111 });
+      (spawn as any).mockReturnValueOnce(firstProc);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.spawn(
+        'test-restart-fail', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      // Second spawn fails
+      (spawn as any).mockReturnValueOnce(createMockProc({ exitCode: 1 }));
+      mockFetch.mockRejectedValue(new Error('connection refused'));
+
+      await expect(rt.restart('test-restart-fail', { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 }))
+        .rejects.toThrow();
+    });
+
+    it('throws when no ports available on restart', async () => {
+      const smallPool = new PortPool(40000, 40000, false);
+      const rt = new DirectRuntime(smallPool, { binary: 'opencode' });
+      const firstProc = createMockProc({ exitCode: null, pid: 1111 });
+      (spawn as any).mockReturnValue(firstProc);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.spawn(
+        'test-restart-noport', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      // Pool is exhausted (only 1 port, already allocated)
+      await expect(rt.restart('test-restart-noport', { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 }))
+        .rejects.toThrow('No available ports in pool');
+    });
+  });
 });

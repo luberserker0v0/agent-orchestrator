@@ -302,10 +302,10 @@ describe('ConversationService', () => {
       await expect(service.restart(testId)).rejects.toThrow(AppError);
     });
 
-    it('should stop then create new instance when restart is not supported', async () => {
+    it('should stop then create new instance when restart fails', async () => {
       mockConversationState.get.mockReturnValue({ ...mockState, status: 'running' });
-      mockInstanceManager.restartInstance.mockRejectedValue(new Error('does not support restart'));
-      mockInstanceManager.stopInstance.mockResolvedValue(undefined);
+      mockInstanceManager.restartInstance.mockRejectedValue(new Error('restart failed'));
+      mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
       mockInstanceManager.createInstance.mockResolvedValue({
         port: 41003,
         process: {},
@@ -315,7 +315,7 @@ describe('ConversationService', () => {
       await service.restart(testId);
 
       expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId);
-      expect(mockInstanceManager.stopInstance).toHaveBeenCalledWith(testId);
+      expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith(testId);
       expect(mockInstanceManager.createInstance).toHaveBeenCalledWith(testId, 'opencode');
     });
 

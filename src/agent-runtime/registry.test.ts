@@ -7,6 +7,7 @@ describe('RuntimeRegistry', () => {
     capabilities: { sessions: false, streaming: false, files: false, tools: false, config: false, agents: false, skills: false },
     spawn: async () => ({ client: {} as any, port: 30000 }),
     kill: async () => {},
+    restart: async () => ({ client: {} as any, port: 30000 }),
   };
 
   it('registers and retrieves a runtime by id', () => {

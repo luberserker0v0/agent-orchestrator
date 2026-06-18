@@ -151,5 +151,5 @@ export interface AgentRuntime {
   ): Promise<SpawnResult>;
   kill(handle?: InstanceHandle, signal?: string): Promise<void>;
   cleanupOrphans?(): Promise<void>;
-  restart?(id: string, client: AgentClient, healthCheckConfig: HealthCheckConfig): Promise<void>;
+  restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<SpawnResult>;
 }

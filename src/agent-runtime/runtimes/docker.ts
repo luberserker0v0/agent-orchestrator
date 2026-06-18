@@ -58,6 +58,8 @@ export class DockerRuntime implements AgentRuntime {
   private config: DockerRuntimeConfig;
   private containerNames = new Map<string, string>();
   private instanceAuth = new Map<string, { baseUrl: string; auth: { username: string; password: string } }>();
+  private clients = new Map<string, AgentClient>();
+  private ports = new Map<string, number>();
 
   constructor(portPool: PortPool, config: DockerRuntimeConfig) {
     this.portPool = portPool;
@@ -117,6 +119,8 @@ export class DockerRuntime implements AgentRuntime {
       await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
 
       this.instanceAuth.set(id, { baseUrl, auth });
+      this.clients.set(id, client);
+      this.ports.set(id, port);
       const handle = new DockerHandle(containerName);
       return { client, port, handle };
     } catch (err) {
@@ -131,7 +135,7 @@ export class DockerRuntime implements AgentRuntime {
     }
   }
 
-  async restart(id: string, _client: AgentClient, healthCheckConfig: HealthCheckConfig): Promise<void> {
+  async restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<SpawnResult> {
     const containerName = `agentorchestrator-${id}`;
     logger.info(`Restarting container ${containerName}...`);
 
@@ -146,6 +150,14 @@ export class DockerRuntime implements AgentRuntime {
       throw new Error(`No stored connection info for instance ${id}`);
     }
     await waitForHealthy(id, stored.baseUrl, stored.auth, healthCheckConfig);
+
+    const client = this.clients.get(id);
+    const port = this.ports.get(id);
+    if (!client || port === undefined) {
+      throw new Error(`No stored client info for instance ${id}`);
+    }
+    const handle = new DockerHandle(containerName);
+    return { client, port, handle };
   }
 
   async cleanupOrphans(): Promise<void> {

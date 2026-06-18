@@ -93,7 +93,7 @@ describe('InstanceManager', () => {
       capabilities: { sessions: true, streaming: true, files: true, tools: true, config: true, agents: true, skills: true },
       spawn: mockSpawnFn as AgentRuntime['spawn'],
       kill: vi.fn().mockResolvedValue(undefined),
-      restart: vi.fn().mockResolvedValue(undefined),
+      restart: vi.fn().mockResolvedValue({ client: mockClient, port: 0, handle: createMockHandle() }),
       cleanupOrphans: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -350,7 +350,7 @@ describe('InstanceManager', () => {
 
       await dockerManager.restartInstance('conv-restart');
 
-      expect(mockRuntime.restart).toHaveBeenCalledWith('conv-restart', mockClient, dockerOrchestratorConfig.healthCheck);
+      expect(mockRuntime.restart).toHaveBeenCalledWith('conv-restart', dockerOrchestratorConfig.healthCheck);
 
       await dockerManager.destroyInstance('conv-restart');
       dockerManager.destroy();

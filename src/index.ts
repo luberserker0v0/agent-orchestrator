@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import { loadConfig, loadCanonicalConfig } from './config-loader.js';
-import type { DirectRuntimeConfig, DockerRuntimeConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';
 import { RuntimeManager } from './agent-runtime/runtime-manager.js';
@@ -13,6 +12,7 @@ import { FileService } from './services/file-service.js';
 import { SessionService } from './services/session-service.js';
 import { MessageService } from './services/message-service.js';
 import { RuntimeRegistry } from './agent-runtime/registry.js';
+import { RuntimeFactory } from './agent-runtime/runtime-factory.js';
 import { DirectRuntime } from './agent-runtime/runtimes/direct.js';
 import { DockerRuntime } from './agent-runtime/runtimes/docker.js';
 import { PortPool } from './orchestrator/port-pool.js';
@@ -52,16 +52,15 @@ export async function main(cliArgs?: string[]) {
   const workspaceFactory = new WorkspaceFactory(config.workspace, canonicalConfig);
 
   // Set up runtime registry — register all runtimes from config
+  const runtimeFactory = new RuntimeFactory();
+  runtimeFactory.register('direct', DirectRuntime);
+  runtimeFactory.register('docker', DockerRuntime);
+
   const runtimeRegistry = new RuntimeRegistry();
   const portPool = new PortPool(config.orchestrator.portRange.start, config.orchestrator.portRange.end, config.orchestrator.portRange.allowDynamicFallback);
   for (const entry of config.orchestrator.runtimes) {
-    if (entry.type === 'direct') {
-      const directRuntime = new DirectRuntime(portPool, entry.config as DirectRuntimeConfig);
-      runtimeRegistry.register(entry.id, directRuntime);
-    } else {
-      const dockerRuntime = new DockerRuntime(portPool, entry.config as DockerRuntimeConfig);
-      runtimeRegistry.register(entry.id, dockerRuntime);
-    }
+    const runtime = runtimeFactory.create(entry.type, portPool, entry.config);
+    runtimeRegistry.register(entry.id, runtime);
   }
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);
 
