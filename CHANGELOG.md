@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- chore(deps): bump express from 4.22.2 to 5.2.1 and @types/express from 4 to 5 (#70)
+- chore(deps): bump the dev-dependencies group (eslint 10.4.1→10.5.0, prettier 3.8.3→3.8.4, typescript 5.9.3→6.0.3, typescript-eslint 8.60.1→8.61.1, vitest 4.1.8→4.1.9, @types/node 20.19.41→25.9.3) (#68)
+- chore(deps): bump @vitest/coverage-v8 from 4.1.8 to 4.1.9 (#69)
+- chore(deps): bump dotenv from 16.6.1 to 17.4.2 (#71)
+- chore(deps): bump actions/checkout from 4 to 6 (#67)
+- chore(deps): bump actions/upload-artifact from 4 to 7 (#66)
+- chore(deps): bump actions/setup-node from 4 to 6 (#65)
 - refactor(runtime): split OpenCodeRuntime into DirectRuntime and DockerRuntime standalone classes with InstanceHandle abstraction (port owned by runtime, ChildProcess behind handle interface)
 - refactor(config): add typed `DirectRuntimeConfig` / `DockerRuntimeConfig` interfaces; runtime constructors accept config objects instead of positional params
 - feat(config): add `getDirectRuntimeConfig()` / `getDockerRuntimeConfig()` typed helpers with validation
@@ -30,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- fix(http-api): add type assertions for Express 5 `req.params` compatibility (`string | string[]` → `string`) (#70)
 - fix(config-loader): deep-merge parsed config with defaults to prevent missing fields (`agentType` was undefined → kill logic skipped → workspace folder never released)
 
 ### Added
