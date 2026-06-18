@@ -3,7 +3,8 @@
   "server": {
     "port": 0,                 // 0 = auto-assign; set to e.g. 8080 for a fixed port
     "host": "127.0.0.1",      // Bind address (use "0.0.0.0" for all interfaces)
-    "shutdownTimeoutMs": 15000 // Max ms to wait for graceful shutdown before force exit
+    "shutdownTimeoutMs": 15000, // Max ms to wait for graceful shutdown before force exit
+    "apiKey": ""               // Optional: Bearer token for API auth (min 8 chars). Empty = no auth.
   },
 
   // ── WebSocket ─────────────────────────────────────────────────────
@@ -23,24 +24,42 @@
       "allowDynamicFallback": true  // When port range exhausted, use OS-assigned port
     },
 
+    // Default agent type — must match one of the runtime entry ids below
+    "defaultAgentType": "opencode",
+
+    // Runtime entries — each defines how OpenCode instances are spawned for a given agent type
     // "direct" = spawn opencode binary directly on the host
     // "docker" = spawn opencode inside a Docker container
-    "runtime": "direct",
-
-    // Runtime-specific configuration
-    // direct: { "binary": "opencode" }
-    // docker: { "binary": "opencode", "docker": { "image": "ghcr.io/anomalyco/opencode", "containerPort": 3000 } }
-    "runtimeConfig": {
-      "binary": "opencode"
-    },
-
-    // Agent type used to select the runtime implementation from RuntimeRegistry
-    "agentType": "opencode",
+    "runtimes": [
+      {
+        "id": "opencode",
+        "type": "direct",
+        "config": {
+          "binary": "opencode"
+          // "instanceHost": "127.0.0.1"  // Hostname to reach spawned instances (default: "127.0.0.1")
+        }
+      }
+    ],
+    // Docker runtime example (add another entry to runtimes[]):
+    // {
+    //   "id": "opencode-docker",
+    //   "type": "docker",
+    //   "config": {
+    //     "binary": "opencode",
+    //     "instanceHost": "127.0.0.1",
+    //     "docker": {
+    //       "image": "ghcr.io/anomalyco/opencode:1.17.4",
+    //       "containerPort": 3000,
+    //       "networkMode": "bridge"
+    //     }
+    //   }
+    // }
 
     // Health check — how long to wait for an OpenCode instance to become ready
     "healthCheck": {
-      "retries": 10,   // Number of health check attempts before giving up
-      "intervalMs": 500 // Delay between retries (ms)
+      "retries": 10,         // Number of health check attempts before giving up
+      "intervalMs": 500,     // Delay between retries (ms)
+      "clientTimeoutMs": 5000 // HTTP client timeout per health check request (ms)
     }
   },
 
@@ -50,6 +69,8 @@
     // When true: user-submitted opencode.json is merged with canonical-opencode.json,
     // and canonical keys always win (security enforcement).
     // When false: user-submitted opencode.json is written verbatim.
-    "enforceCanonicalConfig": true
+    "enforceCanonicalConfig": true,
+    // Maximum size of a workspace directory in bytes (default: 50 MB)
+    "maxSizeBytes": 52428800
   }
 }

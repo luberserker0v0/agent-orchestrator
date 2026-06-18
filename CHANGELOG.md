@@ -7,12 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- test(health): add 7 unit tests for waitForHealthy retry/failure/timeout logic
+- docs(test): add testing strategy section (three-tier) and k8s integration guide to QUICKTEST.md
+- feat(ci): add Dockerfile for orchestrator containerization (multi-stage, node:20-alpine, healthcheck)
+- feat(ci): add .dockerignore for efficient Docker builds
+- feat(ci): add Dependabot config for weekly npm and GitHub Actions updates
+- feat(ci): add Docker build job to CI workflow (push to main)
+- docs: add RUNBOOK.md with operations guide, troubleshooting, and maintenance tasks
+- docs: update README.md with new config fields (apiKey, instanceHost, maxSizeBytes), security features, observability, and multi-runtime support
+- docs: update ARCHITECTURE.md for DirectRuntime/DockerRuntime split, InstanceHandle, health.ts, Logger.child, metrics registry, security layer
+- docs: update API.md metrics table with 4 new metrics, add auth header note
+
+### Changed
+
+- refactor(runtime): split OpenCodeRuntime into DirectRuntime and DockerRuntime standalone classes with InstanceHandle abstraction (port owned by runtime, ChildProcess behind handle interface)
+- refactor(config): add typed `DirectRuntimeConfig` / `DockerRuntimeConfig` interfaces; runtime constructors accept config objects instead of positional params
+- feat(config): add `getDirectRuntimeConfig()` / `getDockerRuntimeConfig()` typed helpers with validation
+- feat(config): add env var overrides for runtime config (`AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_BINARY`, `RUNTIMECONFIG_DOCKER_IMAGE`, `RUNTIMECONFIG_DOCKER_CONTAINERPORT`)
+- chore(config): validate runtime field (`"direct"` or `"docker"`) and required docker sub-config
+
 ### Fixed
 
 - fix(config-loader): deep-merge parsed config with defaults to prevent missing fields (`agentType` was undefined → kill logic skipped → workspace folder never released)
 
 ### Added
 
+- feat(network): add configurable `instanceHost` for OpenCode instance URLs (default: `127.0.0.1`), replacing hardcoded host
+- feat(network): add `networkMode` to DockerRuntimeConfig (`host`, `bridge`, or custom network name); when `host`, port mapping is skipped
+- feat(network): add `instanceHost` env override (`AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIMECONFIG_INSTANCEHOST`)
+- feat(observability): add Logger.child() for context-bound structured logging with requestId/conversationId propagation
+- feat(observability): add agentorchestrator_instances_errors_total counter (label: type) for spawn/health errors
+- feat(observability): add agentorchestrator_instance_spawn_duration_seconds histogram for spawn timing
+- feat(observability): add agentorchestrator_http_request_duration_seconds histogram (labels: method, status)
+- feat(observability): add agentorchestrator_conversation_state_changes_total counter (label: status) for lifecycle transitions
+- feat(security): add optional apiKey bearer token authentication for HTTP API (min 8 chars, off by default)
+- feat(security): add security headers middleware (X-Content-Type-Options, X-Frame-Options, X-DNS-Prefetch-Control)
+- feat(security): add apiKey config validation and env override (AGENTORCHESTRATOR_SERVER_APIKEY)
+- feat(agent-runtime): add InstanceHandle interface (pid, exitCode, kill, waitForExit, onExit)
+- feat(agent-runtime): add ChildProcessHandle wrapping ChildProcess + treeKill in DirectRuntime
+- feat(agent-runtime): add DockerHandle wrapping docker rm -f in DockerRuntime
 - feat(e2e): verify workspace folder is removed after DELETE conversation in lifecycle, agent-crud, file-crud tests
 - feat(instance-manager): log OS-level PID verification (tasklist) after kill cycle to detect surviving processes
 - feat(services): add ConversationService, FileService, SessionService, MessageService between transport and domain layers
@@ -21,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(errors): add error code constants (ErrorCodes) for all HTTP and WS error types (#59)
 - feat(agent-runtime): add AgentRuntime interface with spawn/kill/restart/cleanupOrphans (#57)
 - feat(agent-runtime): add RuntimeRegistry for runtime lookup by agentType (#57)
-- feat(agent-runtime): add OpenCodeRuntime with Docker container lifecycle (#57)
+- feat(agent-runtime): add DirectRuntime and DockerRuntime with InstanceHandle abstraction
 
 ### Changed
 

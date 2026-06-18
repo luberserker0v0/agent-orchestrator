@@ -2,6 +2,8 @@
 
 AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介面。
 
+> **認證說明**：若伺服器設定了 `server.apiKey`（設定檔或環境變數 `AGENTORCHESTRATOR_SERVER_APIKEY`），所有請求（除 `/health`、`/metrics`、`/api-docs*` 外）需要在 HTTP 標頭中包含 `Authorization: Bearer <apiKey>`。
+
 ---
 
 ## REST API
@@ -52,9 +54,13 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 |--------|------|-------------|
 | `agentorchestrator_instances_active` | Gauge | 目前活躍的 OpenCode 實例數 |
 | `agentorchestrator_instances_total_created` | Counter | 啟動以來建立的總實例數 |
+| `agentorchestrator_instances_errors_total` | Counter | 實例錯誤數（labels: type: spawn|health|kill） |
+| `agentorchestrator_instance_spawn_duration_seconds` | Histogram | 啟動 OpenCode 實例耗時 |
 | `agentorchestrator_port_pool_available` | Gauge | 動態端口池中可用端口數 |
 | `agentorchestrator_websocket_connections_active` | Gauge | 活躍的 WebSocket 連線數 |
 | `agentorchestrator_http_requests_total` | Counter | 總 HTTP 請求數（labels: method, status） |
+| `agentorchestrator_http_request_duration_seconds` | Histogram | HTTP 請求持續時間（labels: method, status） |
+| `agentorchestrator_conversation_state_changes_total` | Counter | 對話狀態轉換數（labels: status） |
 | `nodejs_*` | Various | Node.js 程序指標（memory, CPU, GC, event loop） |
 
 ---

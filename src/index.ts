@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { loadConfig, loadCanonicalConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';
+import { RuntimeManager } from './agent-runtime/runtime-manager.js';
 import { ConversationState } from './orchestrator/conversation-state.js';
 import { ConfigService } from './services/config-service.js';
 import { AgentService } from './services/agent-service.js';
@@ -11,7 +12,10 @@ import { FileService } from './services/file-service.js';
 import { SessionService } from './services/session-service.js';
 import { MessageService } from './services/message-service.js';
 import { RuntimeRegistry } from './agent-runtime/registry.js';
-import { OpenCodeRuntime } from './agent-runtime/runtimes/opencode.js';
+import { RuntimeFactory } from './agent-runtime/runtime-factory.js';
+import { DirectRuntime } from './agent-runtime/runtimes/direct.js';
+import { DockerRuntime } from './agent-runtime/runtimes/docker.js';
+import { PortPool } from './orchestrator/port-pool.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
 import { parseCliArgs, printHelp } from './cli.js';
@@ -47,21 +51,34 @@ export async function main(cliArgs?: string[]) {
 
   const workspaceFactory = new WorkspaceFactory(config.workspace, canonicalConfig);
 
-  // Set up runtime registry
+  // Set up runtime registry — register all runtimes from config
+  const runtimeFactory = new RuntimeFactory();
+  runtimeFactory.register('direct', DirectRuntime);
+  runtimeFactory.register('docker', DockerRuntime, (config) => {
+    const errs: string[] = [];
+    const cfg = config as Record<string, unknown>;
+    if (!cfg?.image || typeof cfg.image !== 'string') errs.push('"image" is required');
+    if (!Number.isInteger(cfg?.containerPort)) errs.push('"containerPort" must be a positive integer');
+    if (cfg?.networkMode !== undefined && typeof cfg.networkMode !== 'string')
+      errs.push('"networkMode" must be a string');
+    return errs;
+  });
+
   const runtimeRegistry = new RuntimeRegistry();
-  const opencodeRuntime = new OpenCodeRuntime(
-    config.orchestrator.runtime,
-    config.orchestrator.runtimeConfig,
-  );
-  runtimeRegistry.register(opencodeRuntime);
+  const portPool = new PortPool(config.orchestrator.portRange.start, config.orchestrator.portRange.end, config.orchestrator.portRange.allowDynamicFallback);
+  for (const entry of config.orchestrator.runtimes) {
+    const runtime = runtimeFactory.create(entry.type, portPool, entry.config);
+    runtimeRegistry.register(entry.id, runtime);
+  }
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);
 
-  const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeRegistry);
+  const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, config.orchestrator.defaultAgentType);
+  const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeManager);
   const conversationState = new ConversationState();
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
-  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeRegistry, config.server, config.orchestrator.runtime);
+  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeManager, config.server, config.orchestrator.defaultAgentType);
   const fileService = new FileService(workspaceFactory, conversationState);
   const sessionService = new SessionService(instanceManager, conversationState);
   const messageService = new MessageService(instanceManager, conversationState);
@@ -70,7 +87,7 @@ export async function main(cliArgs?: string[]) {
   await instanceManager.cleanupOrphanContainers();
   workspaceFactory.cleanupOrphans();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, config.orchestrator, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();

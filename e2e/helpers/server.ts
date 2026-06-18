@@ -6,6 +6,7 @@ import type { OrchestratorConfig } from '../../src/config-loader.js';
 import { createHttpServer, type HttpServer } from '../../src/http-api/server.js';
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
+import { RuntimeManager } from '../../src/agent-runtime/runtime-manager.js';
 import { ConversationState } from '../../src/orchestrator/conversation-state.js';
 import { ConfigService } from '../../src/services/config-service.js';
 import { AgentService } from '../../src/services/agent-service.js';
@@ -15,7 +16,10 @@ import { FileService } from '../../src/services/file-service.js';
 import { SessionService } from '../../src/services/session-service.js';
 import { MessageService } from '../../src/services/message-service.js';
 import { RuntimeRegistry } from '../../src/agent-runtime/registry.js';
-import { OpenCodeRuntime } from '../../src/agent-runtime/runtimes/opencode.js';
+import { RuntimeFactory } from '../../src/agent-runtime/runtime-factory.js';
+import { DirectRuntime } from '../../src/agent-runtime/runtimes/direct.js';
+import { DockerRuntime } from '../../src/agent-runtime/runtimes/docker.js';
+import { PortPool } from '../../src/orchestrator/port-pool.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE } from '../../src/test-fixtures/ao-configs.js';
 
 export interface E2EServer {
@@ -42,7 +46,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const serverConfig = { port: 0, host, shutdownTimeoutMs };
   const wsConfig = { heartbeatIntervalMs, idleTimeoutMs };
 
-  const runtime = orchestratorOverrides?.runtime || process.env.E2E_RUNTIME || 'direct';
+  const runtime = orchestratorOverrides?.runtimes?.[0]?.type || process.env.E2E_RUNTIME || 'direct';
 
   if (runtime === 'docker') {
     const info = spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 5000 });
@@ -59,16 +63,24 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
 
   const workspaceFactory = new WorkspaceFactory(workspaceConfig);
 
-  const runtimeRegistry = new RuntimeRegistry();
-  const opencodeRuntime = new OpenCodeRuntime(orchestratorConfig.runtime, orchestratorConfig.runtimeConfig);
-  runtimeRegistry.register(opencodeRuntime);
+  const runtimeFactory = new RuntimeFactory();
+  runtimeFactory.register('direct', DirectRuntime);
+  runtimeFactory.register('docker', DockerRuntime);
 
-  const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory, runtimeRegistry);
+  const runtimeRegistry = new RuntimeRegistry();
+  const portPool = new PortPool(orchestratorConfig.portRange.start, orchestratorConfig.portRange.end, orchestratorConfig.portRange.allowDynamicFallback);
+  for (const entry of orchestratorConfig.runtimes) {
+    const runtime = runtimeFactory.create(entry.type, portPool, entry.config);
+    runtimeRegistry.register(entry.id, runtime);
+  }
+
+  const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, orchestratorConfig.defaultAgentType);
+  const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory, runtimeManager);
   const conversationState = new ConversationState();
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
-  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeRegistry, serverConfig, runtime);
+  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeManager, serverConfig, orchestratorConfig.defaultAgentType);
   const fileService = new FileService(workspaceFactory, conversationState);
   const sessionService = new SessionService(instanceManager, conversationState);
   const messageService = new MessageService(instanceManager, conversationState);
@@ -79,7 +91,6 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     instanceManager,
     workspaceFactory,
     conversationState,
-    orchestratorConfig,
     configService,
     agentService,
     skillService,

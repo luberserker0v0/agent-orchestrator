@@ -3,7 +3,6 @@ import { createServer, type Server } from 'node:http';
 import { WebSocketServer } from 'ws';
 import swaggerUi from 'swagger-ui-express';
 import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
-import type { OrchestratorConfig } from '../config-loader.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
@@ -17,7 +16,7 @@ import { SessionService } from '../services/session-service.js';
 import { MessageService } from '../services/message-service.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
-import { metricsRegistry, httpRequestsTotal } from '../metrics/registry.js';
+import { metricsRegistry, httpRequestsTotal, httpRequestDurationSeconds } from '../metrics/registry.js';
 import { openapiSpec } from './openapi.js';
 import { ErrorCodes, isAppError, toHttpErrorResponse } from '../utils/errors.js';
 
@@ -33,7 +32,6 @@ export function createHttpServer(
   instanceManager: InstanceManager,
   workspaceFactory: WorkspaceFactory,
   conversationState: ConversationState,
-  orchestratorConfig: OrchestratorConfig,
   configService: ConfigService,
   agentService: AgentService,
   skillService: SkillService,
@@ -49,12 +47,15 @@ export function createHttpServer(
 
   let activeRequests = 0;
 
-  // Track active requests and count finished requests
+  // Track active requests, duration, and count finished requests
   app.use((req, res, next) => {
     activeRequests++;
+    const endTimer = httpRequestDurationSeconds.startTimer({ method: req.method });
     res.on('finish', () => {
       activeRequests--;
-      httpRequestsTotal.inc({ method: req.method, status: String(res.statusCode) });
+      const status = String(res.statusCode);
+      endTimer({ status });
+      httpRequestsTotal.inc({ method: req.method, status });
     });
     next();
   });
@@ -63,13 +64,35 @@ export function createHttpServer(
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
       res.sendStatus(200);
       return;
     }
     next();
   });
+
+  // Security headers
+  app.use((_req, res, next) => {
+    res.header('X-Content-Type-Options', 'nosniff');
+    res.header('X-Frame-Options', 'DENY');
+    res.header('X-DNS-Prefetch-Control', 'off');
+    next();
+  });
+
+  // API key authentication (optional)
+  const PUBLIC_PATHS = ['/health', '/metrics', '/api-docs', '/api-docs.json'];
+  if (serverConfig.apiKey) {
+    app.use((req, res, next) => {
+      if (PUBLIC_PATHS.includes(req.path)) return next();
+      const header = req.headers.authorization;
+      if (!header || !header.startsWith('Bearer ') || header.slice(7) !== serverConfig.apiKey) {
+        res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or missing API key' } });
+        return;
+      }
+      next();
+    });
+  }
 
   // ─── Helpers ─────────────────────────────────────────────
 

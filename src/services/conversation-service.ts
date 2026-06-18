@@ -1,6 +1,6 @@
 import type { ServerConfig } from '../config-loader.js';
-import { RuntimeRegistry } from '../agent-runtime/registry.js';
-import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
+import { RuntimeManager, type InstanceInfo } from '../agent-runtime/runtime-manager.js';
+import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { WorkspaceFactory } from '../orchestrator/workspace-factory.js';
 import { ConversationState, type ConversationEvent } from '../orchestrator/conversation-state.js';
 import type { AgentClient } from '../agent-runtime/types.js';
@@ -35,9 +35,9 @@ export class ConversationService {
     private instanceManager: InstanceManager,
     private conversationState: ConversationState,
     private workspaceFactory: WorkspaceFactory,
-    private runtimeRegistry: RuntimeRegistry,
+    private runtimeManager: RuntimeManager,
     private serverConfig: ServerConfig,
-    private runtime: string
+    private defaultAgentType: string,
   ) {}
 
   create(id?: string, agentType?: string): ConversationData {
@@ -47,9 +47,9 @@ export class ConversationService {
       throw new AppError(409, ErrorCodes.CONVERSATION_ALREADY_EXISTS, `Conversation already exists: ${conversationId}`);
     }
 
-    const resolvedType = agentType ?? 'opencode';
-    if (!this.runtimeRegistry.get(resolvedType)) {
-      throw new AppError(400, ErrorCodes.UNKNOWN_AGENT_TYPE, `Unknown agent type: ${resolvedType}. Available: ${this.runtimeRegistry.list().join(', ')}`);
+    const resolvedType = agentType ?? this.defaultAgentType;
+    if (!this.runtimeManager.hasAgentType(resolvedType)) {
+      throw new AppError(400, ErrorCodes.UNKNOWN_AGENT_TYPE, `Unknown agent type: ${resolvedType}. Available: ${this.runtimeManager.listAgentTypes().join(', ')}`);
     }
 
     this.workspaceFactory.create(conversationId);
@@ -96,7 +96,6 @@ export class ConversationService {
       const instance = await this.instanceManager.createInstance(id, state.agentType);
       this.conversationState.setInstanceInfo(id, { port: instance.port });
       this.conversationState.setRunningInstance(id, {
-        process: instance.process!,
         client: instance.client,
       });
       this.conversationState.transition(id, 'running');
@@ -153,38 +152,25 @@ export class ConversationService {
 
     try {
       const hadInstance = previousStatus === 'running' || previousStatus === 'error';
-      let dockerRestarted = false;
 
+      let instance: InstanceInfo;
       if (hadInstance) {
         this.conversationState.cancelReadyCheck(id);
-        if (this.runtime === 'docker') {
-          try {
-            await this.instanceManager.restartInstance(id);
-            dockerRestarted = true;
-          } catch {
-            await this.instanceManager.stopInstance(id).catch(() => {});
-            this.conversationState.removeRunningInstance(id);
-          }
-        } else {
-          await this.instanceManager.stopInstance(id);
+        try {
+          await this.instanceManager.restartInstance(id);
+          instance = this.instanceManager.getInstance(id)!;
+        } catch {
+          await this.instanceManager.destroyInstance(id).catch(() => {});
           this.conversationState.removeRunningInstance(id);
+          instance = await this.instanceManager.createInstance(id, state.agentType);
         }
+      } else {
+        instance = await this.instanceManager.createInstance(id, state.agentType);
       }
 
       this.conversationState.clearNeedsRestart(id);
-
-      let instance: InstanceInfo;
-      if (dockerRestarted) {
-        instance = this.instanceManager.getInstance(id)!;
-      } else {
-        instance = await this.instanceManager.createInstance(id, state.agentType);
-        this.conversationState.setInstanceInfo(id, { port: instance.port });
-        this.conversationState.setRunningInstance(id, {
-          process: instance.process!,
-          client: instance.client,
-        });
-      }
-
+      this.conversationState.setInstanceInfo(id, { port: instance.port });
+      this.conversationState.setRunningInstance(id, { client: instance.client });
       this.conversationState.transition(id, 'running');
       this.conversationState.startReadyCheck(id);
 

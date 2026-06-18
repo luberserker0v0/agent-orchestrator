@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'node:child_process';
+import { conversationStateChangesTotal } from '../metrics/registry.js';
 import type { AgentClient } from '../agent-runtime/types.js';
 
 export type ConversationStatus =
@@ -33,7 +33,6 @@ export interface ConversationStateData {
 }
 
 export interface RunningInstanceInfo {
-  process: ChildProcess;
   client: AgentClient;
 }
 
@@ -110,6 +109,7 @@ export class ConversationState {
 
     state.status = status;
     state.updatedAt = Date.now();
+    conversationStateChangesTotal.inc({ status });
 
     if (status === 'error' && payload?.error) {
       state.lastError = String(payload.error);

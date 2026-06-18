@@ -12,6 +12,11 @@
 - **LRU 資源淘汰**：達到上限時自動回收最久未使用的實例
 - **WebSocket 即時通訊**：JSON-RPC 2.0 協議，支援 heartbeat 與 idle timeout
 - **Basic Auth 自動注入**：每個 OpenCode 實例動態生成密碼，避免與使用者全域設定衝突
+- **API 金鑰認證**：可選 Bearer token 認證，保護所有非公開端點
+- **安全 HTTP 標頭**：自動注入 `X-Content-Type-Options`、`X-Frame-Options` 等防護標頭
+- **Prometheus 指標**：內建 9 項自訂指標（實例數、請求量、延遲、錯誤、狀態轉換等）與 Node.js 程序指標
+- **結構化日誌**：支援文字與 JSON 格式，可透過 `Logger.child()` 綁定 requestId 等上下文
+- **多執行環境**：支援直接執行（direct）與 Docker 容器兩種 OpenCode 執行模式
 - **跨平台**：支援 Windows、macOS、Linux（透過 `cross-spawn` 與 `tree-kill`）
 
 ---
@@ -82,7 +87,8 @@ aor [options]
   "server": {
     "port": 0,
     "host": "127.0.0.1",
-    "shutdownTimeoutMs": 15000
+    "shutdownTimeoutMs": 15000,
+    "apiKey": ""
   },
   "websocket": {
     "heartbeatIntervalMs": 30000,
@@ -97,19 +103,26 @@ aor [options]
       "end": 30100,
       "allowDynamicFallback": true
     },
-    "runtime": "direct",
-    "runtimeConfig": {
-      "binary": "opencode"
-    },
-    "agentType": "opencode",
+    "defaultAgentType": "opencode",
+    "runtimes": [
+      {
+        "id": "opencode",
+        "type": "direct",
+        "config": {
+          "binary": "opencode"
+        }
+      }
+    ],
     "healthCheck": {
       "retries": 10,
-      "intervalMs": 500
+      "intervalMs": 500,
+      "clientTimeoutMs": 5000
     }
   },
   "workspace": {
     "basePath": "./workspace",
-    "enforceCanonicalConfig": true
+    "enforceCanonicalConfig": true,
+    "maxSizeBytes": 52428800
   }
 }
 ```
@@ -129,20 +142,22 @@ aor [options]
 | `orchestrator.portRange.start` | `number` | 動態端口範圍起始 | `30000` |
 | `orchestrator.portRange.end` | `number` | 動態端口範圍結束 | `30100` |
 | `orchestrator.portRange.allowDynamicFallback` | `boolean` | 範圍耗盡時是否使用 OS 分配端口 | `true` |
-| `orchestrator.runtime` | `"direct"\|"docker"` | 執行環境（直接執行或 Docker 容器） | `"direct"` |
-| `orchestrator.runtimeConfig` | `object` | Runtime 特定設定。`direct`：`{ binary }`；`docker`：`{ binary, docker: { image, containerPort } }` | `{ binary: "opencode" }` |
-| `orchestrator.runtimeConfig.binary` | `string` | OpenCode CLI 指令或絕對路徑（所有 runtime 共用） | `opencode` |
-| `orchestrator.runtimeConfig.docker.image` | `string` | Docker 映像名稱（僅 `docker` 模式） | `ghcr.io/anomalyco/opencode` |
-| `orchestrator.runtimeConfig.docker.containerPort` | `number` | 容器內 OpenCode 監聽端口（僅 `docker` 模式） | `3000` |
-| `orchestrator.agentType` | `string` | Runtime registry 中對應的 agent 類型識別符 | `"opencode"` |
+| `orchestrator.defaultAgentType` | `string` | 預設 agent 類型，須對應 `runtimes[]` 中某個 entry 的 `id` | `"opencode"` |
+| `orchestrator.runtimes` | `array` | Runtime 條目陣列，每個條目有 `id`、`type`（`direct` / `docker`）、`config` | `[{ id: "opencode", type: "direct", config: { binary: "opencode" } }]` |
+| `orchestrator.runtimes[].config.binary` | `string` | OpenCode CLI 指令或絕對路徑 | `opencode` |
+| `orchestrator.runtimes[].config.instanceHost` | `string` | 到達 OpenCode 實例的主機名稱（依 runtime 設定，遠端 Docker 主機時有用） | `127.0.0.1` |
+| `orchestrator.runtimes[].config.docker.image` | `string` | Docker 映像名稱（僅 `docker` 模式） | `ghcr.io/anomalyco/opencode:1.17.4` |
+| `orchestrator.runtimes[].config.docker.containerPort` | `number` | 容器內 OpenCode 監聽端口（僅 `docker` 模式） | `3000` |
+| `orchestrator.runtimes[].config.docker.networkMode` | `string` | Docker 網路模式（`host` / `bridge` / 自訂網路名），`host` 時跳過 port mapping | (無) |
 | `orchestrator.healthCheck.retries` | `number` | 健康檢查重試次數 | `10` |
 | `orchestrator.healthCheck.intervalMs` | `number` | 健康檢查重試間隔 | `500` |
+| `orchestrator.healthCheck.clientTimeoutMs` | `number` | 健康檢查 HTTP 請求超時 | `5000` |
 | `workspace.basePath` | `string` | Workspace 資料夾根目錄 | `./workspace` |
 | `workspace.enforceCanonicalConfig` | `boolean` | 寫入 `opencode.json` 時強制合併 canonical 系統預設（保護 `$schema` 與 `permission`） | `true` |
 
 ### 環境變數覆寫
 
-任何 `config/agentorchestrator.json` 的欄位都可以透過環境變數覆寫，命名規則為 `AGENTORCHESTRATOR_<path>`（底線分隔、小寫駝峰）：
+任何 `config/agentorchestrator.json` 的欄位（除陣列型欄位如 `runtimes[]` 外）都可以透過環境變數覆寫，命名規則為 `AGENTORCHESTRATOR_<path>`（底線分隔、小寫駝峰）：
 
 ```bash
 # 覆寫 server.port
@@ -150,9 +165,6 @@ AGENTORCHESTRATOR_SERVER_PORT=8080
 
 # 覆寫 orchestrator.maxInstances
 AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
-
-# 覆寫 runtimeConfig.binary 為絕對路徑
-AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIME_CONFIG_BINARY=/usr/local/bin/opencode
 ```
 
 ---
@@ -364,7 +376,8 @@ wscat -c ws://127.0.0.1:11697/ws/demo
        v
 [Domain Layer]
   • ConversationState (event-driven lifecycle)
-  • InstanceManager   (workspace reuse, LRU eviction)
+  • InstanceManager   (LRU eviction, idle sweep, delegates to RuntimeManager)
+  • RuntimeManager    (instance map, lifecycle, policy queries)
   • WorkspaceFactory  (config/agent/file CRUD, quota)
   • PortPool          (dynamic allocation)
   • RuntimeRegistry   (runtime lookup by agentType)
@@ -391,7 +404,7 @@ Event Stream (WebSocket push via conversationState.subscribe):
 | `src/services/session-service.ts` | Session 代理含 `ensureReady` 保護（status=running && ready=true） |
 | `src/services/message-service.ts` | 訊息發送含 model 解析、session 確保、事件發射 |
 | `src/orchestrator/conversation-state.ts` | 事件驅動對話生命周期狀態機（prepared → running → stopped/destroyed），訂閱與事件回放 |
-| `src/orchestrator/instance-manager.ts` | 管理 OpenCode 實例生命周期（啟動、健康檢查、銷毀、LRU），支援 workspace 重用 |
+| `src/orchestrator/instance-manager.ts` | 管理 OpenCode 實例生命周期（建立、LRU 淘汰、閒置清理），透過 RuntimeManager 委派 spawn/kill/restart |
 | `src/orchestrator/port-pool.ts` | 動態端口分配與回收 |
 | `src/orchestrator/workspace-factory.ts` | 建立 workspace，config / agent / file CRUD，copyFromLocal，配額與路徑防護 |
 | `src/opencode-http/client.ts` | 與 OpenCode HTTP API 通訊（含 Basic Auth、會話樹 API） |
@@ -421,23 +434,19 @@ Event Stream (WebSocket push via conversationState.subscribe):
 
 - **原因**：OpenCode 實例未能在指定重試次數內通過健康檢查。
 - **排查**：
-  - 確認 `runtimeConfig.binary` 路徑正確（`which opencode` 或 `where opencode`）
+  - 確認 `runtimes[].config.binary` 路徑正確（`which opencode` 或 `where opencode`）
   - 確認 `portRange` 內的端口未被占用
   - 檢查 OpenCode 日誌（`~/.local/share/opencode/log/`）
 
 ### 2. OpenCode CLI 路徑問題
 
-若 `opencode` 不在系統 PATH 中，修改 `config/agentorchestrator.json`：
+若 `opencode` 不在系統 PATH 中，修改 `config/agentorchestrator.json` 中對應 runtime entry 的 `config.binary`：
 
 ```json
-"runtimeConfig": { "binary": "C:\\Users\\<user>\\AppData\\Roaming\\npm\\opencode.cmd" }
+"runtimes": [{ "id": "opencode", "type": "direct", "config": { "binary": "C:\\Users\\<user>\\AppData\\Roaming\\npm\\opencode.cmd" } }]
 ```
 
-或使用環境變數：
-
-```bash
-AGENTORCHESTRATOR_ORCHESTRATOR_RUNTIME_CONFIG_BINARY=/usr/local/bin/opencode
-```
+或使用環境變數（注意 `runtimes[]` 不支援環境變數覆寫，須直接修改設定檔）。
 
 ### 3. 端口被占用
 

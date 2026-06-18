@@ -109,6 +109,9 @@ export class WSRouter {
 
     const unsub = this.conversationState.subscribe(conversationId, (event) => {
       connection.sendEvent(event.type, event.payload);
+      if (event.type === 'conversation.destroyed') {
+        setTimeout(() => connection.close(1000, 'Conversation deleted'), 2000);
+      }
     });
     this.eventUnsubscribers.set(conversationId, unsub);
 

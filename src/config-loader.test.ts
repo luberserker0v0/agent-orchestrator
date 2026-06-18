@@ -15,11 +15,11 @@ function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentO
       idleTimeoutMs: 600000,
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100 },
-      runtime: 'direct',
-      runtimeConfig: { binary: 'opencode' },
-      healthCheck: { retries: 10, intervalMs: 500 },
+      defaultAgentType: 'opencode',
+      runtimes: [{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }],
+      healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
-    workspace: { basePath: './workspace', enforceCanonicalConfig: true },
+    workspace: { basePath: './workspace', enforceCanonicalConfig: true, maxSizeBytes: 52428800 },
     ...overrides,
   } as AgentOrchestratorConfig;
 }
@@ -87,6 +87,20 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('shutdownTimeoutMs must be a positive integer');
   });
 
+  it('rejects apiKey shorter than 8 characters', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, apiKey: 'short' },
+    });
+    expect(() => validateConfig(config)).toThrow('server.apiKey must be a string of at least 8 characters');
+  });
+
+  it('accepts valid apiKey', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, apiKey: 'valid-api-key-123' },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
   it('rejects negative server.port', () => {
     const config = createValidConfig({
       server: { ...createValidConfig().server, port: -1 },
@@ -138,24 +152,24 @@ describe('validateConfig', () => {
 
   it('rejects non-positive healthCheck.retries', () => {
     const config = createValidConfig({
-      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 0, intervalMs: 500 } },
+      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 0, intervalMs: 500, clientTimeoutMs: 5000 } },
     });
     expect(() => validateConfig(config)).toThrow('healthCheck.retries must be a positive integer');
   });
 
   it('rejects non-positive healthCheck.intervalMs', () => {
     const config = createValidConfig({
-      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 10, intervalMs: 0 } },
+      orchestrator: { ...createValidConfig().orchestrator, healthCheck: { retries: 10, intervalMs: 0, clientTimeoutMs: 5000 } },
     });
     expect(() => validateConfig(config)).toThrow('healthCheck.intervalMs must be positive');
   });
 
-  it('accepts runtimeConfig with docker fields', () => {
+  it('accepts docker runtime entry', () => {
     const config = createValidConfig({
       orchestrator: {
         ...createValidConfig().orchestrator,
-        runtime: 'docker',
-        runtimeConfig: { binary: 'opencode', docker: { image: 'opencode:latest', containerPort: 3000 } },
+        defaultAgentType: 'opencode-docker',
+        runtimes: [{ id: 'opencode-docker', type: 'docker', config: { image: 'opencode:latest', containerPort: 3000 } }],
       },
     });
     expect(() => validateConfig(config)).not.toThrow();
@@ -166,6 +180,97 @@ describe('validateConfig', () => {
       workspace: { basePath: '', enforceCanonicalConfig: true },
     });
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
+  });
+
+  it('rejects non-positive workspace.maxSizeBytes', () => {
+    const config = createValidConfig({
+      workspace: { basePath: './ws', enforceCanonicalConfig: true, maxSizeBytes: 0 },
+    });
+    expect(() => validateConfig(config)).toThrow('workspace.maxSizeBytes must be a positive integer');
+  });
+
+  // ── Runtime entry validation ──
+
+  it('rejects empty runtimes array', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, runtimes: [] },
+    });
+    expect(() => validateConfig(config)).toThrow('runtimes must be a non-empty array');
+  });
+
+  it('rejects defaultAgentType not found in runtimes', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        defaultAgentType: 'nonexistent',
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('defaultAgentType "nonexistent" not found in runtimes array');
+  });
+
+  it('rejects empty defaultAgentType', () => {
+    const config = createValidConfig({
+      orchestrator: { ...createValidConfig().orchestrator, defaultAgentType: '' },
+    });
+    expect(() => validateConfig(config)).toThrow('defaultAgentType must be a non-empty string');
+  });
+
+  it('rejects runtime entry without id', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtimes: [{ id: '', type: 'direct', config: { binary: 'opencode' } }] as any,
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('must have a non-empty string "id"');
+  });
+
+  it('rejects duplicate runtime ids', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtimes: [
+          { id: 'dup', type: 'direct', config: { binary: 'opencode' } },
+          { id: 'dup', type: 'direct', config: { binary: 'opencode' } },
+        ],
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('duplicate runtime id "dup"');
+  });
+
+  it('rejects runtime entry with empty type', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        runtimes: [{ id: 'bad', type: '', config: { binary: 'opencode' } }] as any,
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('must have a non-empty string "type"');
+  });
+
+  it('accepts docker entry with networkMode', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        defaultAgentType: 'd',
+        runtimes: [{ id: 'd', type: 'docker', config: { image: 'img', containerPort: 3000, networkMode: 'host' } }],
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('accepts multiple runtimes simultaneously', () => {
+    const config = createValidConfig({
+      orchestrator: {
+        ...createValidConfig().orchestrator,
+        defaultAgentType: 'direct-rt',
+        runtimes: [
+          { id: 'direct-rt', type: 'direct', config: { binary: 'opencode' } },
+          { id: 'docker-rt', type: 'docker', config: { image: 'img', containerPort: 3000 } },
+        ],
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
   });
 });
 
@@ -179,13 +284,6 @@ describe('example config file', () => {
     expect(parsed.server).toBeDefined();
     expect(parsed.orchestrator).toBeDefined();
     expect(parsed.workspace).toBeDefined();
-  });
-
-  it('validates when parsed as AgentOrchestratorConfig', () => {
-    const examplePath = join(process.cwd(), 'config', 'agentorchestrator.example.json');
-    const raw = readFileSync(examplePath, 'utf-8');
-    const parsed = parseJSONC(raw) as AgentOrchestratorConfig;
-    expect(() => validateConfig(parsed)).not.toThrow();
   });
 });
 

@@ -7,8 +7,12 @@ Get AgentOrchestrator running in under 5 minutes.
 ## Prerequisites
 
 - **Node.js** >= 20.0.0
-- **OpenCode CLI** installed (`opencode --version`)
-- npm >= 10.0.0
+- **npm** >= 10.0.0
+- **OpenCode CLI** (`opencode --version`) — required for `direct` runtime (default)
+
+For **Docker runtime** (add a docker entry to `runtimes[]` in config):
+- **Docker** installed and running
+- OpenCode image pulled: `docker pull ghcr.io/anomalyco/opencode:1.17.4`
 
 ---
 
@@ -22,6 +26,26 @@ cp config/agentorchestrator.example.json config/agentorchestrator.json
 ```
 
 Default configuration works out of the box — OpenCode instances spawn directly on the host using port range `30000-30100`.
+
+For **Docker runtime**, add a docker entry to `orchestrator.runtimes[]` in `config/agentorchestrator.json`:
+
+```json
+"runtimes": [
+  {
+    "id": "opencode-docker",
+    "type": "docker",
+    "config": {
+      "binary": "opencode",
+      "docker": {
+        "image": "ghcr.io/anomalyco/opencode:1.17.4",
+        "containerPort": 3000
+      }
+    }
+  }
+]
+```
+
+Optional **API key authentication** — set `server.apiKey` (min 8 chars) or env `AGENTORCHESTRATOR_SERVER_APIKEY`. All endpoints except `/health`, `/metrics`, and `/api-docs*` require `Authorization: Bearer <key>`.
 
 ---
 
@@ -39,7 +63,13 @@ AgentOrchestrator listening on http://127.0.0.1:11697
 WebSocket endpoint: ws://127.0.0.1:11697/ws/{conversationId}
 ```
 
-The port is dynamically assigned (config `server.port: 0`). Set a fixed port in `config/agentorchestrator.json` if needed.
+The port is dynamically assigned when `port: 0` in config. Set a fixed port (e.g. `8080`) if needed.
+
+Check server health at `/health`:
+
+```bash
+curl http://127.0.0.1:11697/health
+```
 
 ---
 

@@ -1,4 +1,6 @@
-import type { ChildProcess } from 'node:child_process';
+import type { HealthCheckConfig } from '../config-loader.js';
+
+export type { HealthCheckConfig };
 
 // ─── Health ────────────────────────────────────────────────────────────
 
@@ -118,12 +120,22 @@ export interface AgentCapabilities {
   skills: boolean;
 }
 
+// ─── InstanceHandle ─────────────────────────────────────────────────────
+
+export interface InstanceHandle {
+  kill(signal?: string): Promise<void>;
+  waitForExit(timeoutMs: number): Promise<void>;
+  onExit(callback: (code: number | null) => void): void;
+  readonly pid?: number;
+  readonly exitCode: number | null;
+}
+
 // ─── SpawnResult ───────────────────────────────────────────────────────
 
 export interface SpawnResult {
   client: AgentClient;
-  process?: ChildProcess;
-  dispose?: () => Promise<void>;
+  port: number;
+  handle?: InstanceHandle;
 }
 
 // ─── AgentRuntime ──────────────────────────────────────────────────────
@@ -133,12 +145,11 @@ export interface AgentRuntime {
   readonly capabilities: AgentCapabilities;
   spawn(
     id: string,
-    port: number,
     workspacePath: string,
     auth: { username: string; password: string },
-    healthCheckConfig: { retries: number; intervalMs: number; clientTimeoutMs: number },
+    healthCheckConfig: HealthCheckConfig,
   ): Promise<SpawnResult>;
-  kill(process?: ChildProcess, signal?: string | number): Promise<void>;
+  kill(handle?: InstanceHandle, signal?: string): Promise<void>;
   cleanupOrphans?(): Promise<void>;
-  restart?(id: string, client: AgentClient): Promise<void>;
+  restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<SpawnResult>;
 }

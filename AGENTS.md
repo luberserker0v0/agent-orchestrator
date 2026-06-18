@@ -171,8 +171,10 @@ src/
   agent-runtime/
     types.ts                 # AgentRuntime interface, SpawnResult type
     registry.ts              # RuntimeRegistry — runtime lookup by agentType
+    runtime-manager.ts       # RuntimeManager — manages instance map, lifecycle, policy queries (LRU candidate, idle detection)
     runtimes/
-      opencode.ts            # OpenCodeRuntime — Docker container lifecycle (spawn, kill, restart, cleanupOrphans)
+      direct.ts              # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill. Accepts DirectRuntimeConfig ({ binary })
+      docker.ts              # DockerRuntime — spawns Docker container, DockerHandle wraps docker rm -f. Accepts DockerRuntimeConfig ({ image, containerPort })
   http-api/
     server.ts                # Express HTTP server with conversation lifecycle, config, agents, files, sessions, events endpoints
   orchestrator/
@@ -220,6 +222,9 @@ AGENTORCHESTRATOR_SERVER_SHUTDOWN_TIMEOUT_MS=15000
 AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS=600000
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
+
+# Note: The `runtimes` array (list of runtime entries) is NOT overridable via env vars.
+# Arrays are treated as opaque by mergeDefaults. Multi-runtime setups use the JSON config file.
 ```
 
 ## Server Configuration
@@ -229,6 +234,7 @@ AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
 | `port` | integer | 0 | HTTP server port (0 = auto-assign) |
 | `host` | string | '127.0.0.1' | Bind address |
 | `shutdownTimeoutMs` | integer | 15000 | Maximum time in ms for graceful shutdown before force exit |
+| `apiKey` | string | (none) | Optional bearer token for API authentication. All endpoints except `/health`, `/metrics`, `/api-docs*` require `Authorization: Bearer <key>`. Min 8 characters. |
 
 ## Orchestrator Configuration
 
@@ -241,11 +247,16 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `idleSweepIntervalMs` | integer | 60000 | How often the background sweep checks for idle instances |
 | `portRange.start` | integer | 30000 | First port in the dynamic allocation range |
 | `portRange.end` | integer | 30100 | Last port in the dynamic allocation range |
-| `runtime` | string | 'direct' | Runtime mode: `direct` (spawn binary) or `docker` (Docker container) |
-| `runtimeConfig` | object | `{ binary: 'opencode' }` | Runtime-specific configuration (`{ binary }` for direct; `{ binary, docker: { image, containerPort } }` for docker) |
-| `agentType` | string | 'opencode' | Key used to look up the runtime implementation in RuntimeRegistry |
+| `defaultAgentType` | string | 'opencode' | Default agent type — must match the `id` of one runtime entry in `runtimes[]` |
+| `runtimes` | array | `[{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct` or `docker`), and `config` |
+| `runtimes[].config.binary` | string | `opencode` | OpenCode CLI command or absolute path |
+| `runtimes[].config.instanceHost` | string | `'127.0.0.1'` | Hostname used to reach spawned OpenCode instances (per-runtime, useful for remote Docker hosts) |
+| `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) |
+| `runtimes[].config.docker.containerPort` | integer | (required for docker) | Container port that OpenCode listens on |
+| `runtimes[].config.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
+| `healthCheck.clientTimeoutMs` | integer | 5000 | HTTP client timeout per health check request |
 
 **Validation rule:** `maxInstances` must not exceed the number of available ports (`portRange.end - portRange.start + 1`). The application will refuse to start if this constraint is violated.
 
@@ -274,9 +285,13 @@ curl http://localhost:8080/metrics
 |--------|------|-------------|
 | `agentorchestrator_instances_active` | Gauge | Currently active OpenCode instances |
 | `agentorchestrator_instances_total_created` | Counter | Total instances created since startup |
+| `agentorchestrator_instances_errors_total` | Counter | Total instance errors (labels: type) |
+| `agentorchestrator_instance_spawn_duration_seconds` | Histogram | Time to spawn an OpenCode instance |
 | `agentorchestrator_port_pool_available` | Gauge | Available ports in the dynamic pool |
 | `agentorchestrator_websocket_connections_active` | Gauge | Active WebSocket connections |
 | `agentorchestrator_http_requests_total` | Counter | Total HTTP requests (labels: method, status) |
+| `agentorchestrator_http_request_duration_seconds` | Histogram | HTTP request duration in seconds (labels: method, status) |
+| `agentorchestrator_conversation_state_changes_total` | Counter | Total conversation state transitions (labels: status) |
 | `nodejs_*` | Various | Node.js process metrics (memory, CPU, GC, event loop) |
 
 ### Configuration for Prometheus
@@ -304,6 +319,26 @@ npm run lint:fix      # Auto-fix lint issues
 npm run preflight     # Run lint + test + build in sequence
 node scripts/setup-hooks.js  # Install Git hooks
 ```
+
+### Docker Build (for orchestrator container)
+```bash
+docker build -t agent-orchestrator .
+docker run -p 8080:8080 -v /path/to/config:/app/config agent-orchestrator
+```
+
+## CI/CD Infrastructure
+
+### GitHub Actions (`.github/workflows/ci.yml`)
+- Triggered on `push`/`PR` to `main`/`master`
+- **Matrix**: Node.js 20.x and 22.x
+- **Steps**: `npm ci` → `npm run preflight` (lint + test + build) → `npm run test:coverage` → upload coverage artifact
+
+- **Dependabot**: Weekly updates for npm (grouped dev dependencies) and GitHub Actions (`.github/dependabot.yml`)
+
+### Git Hooks (custom, no Husky)
+- **pre-commit**: `npm run lint`
+- **pre-push**: `npm run preflight` (lint + test + build)
+- Install: `node scripts/setup-hooks.js`
 
 ## Important Notes for AI Agents
 

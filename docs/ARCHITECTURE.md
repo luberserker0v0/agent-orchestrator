@@ -38,18 +38,20 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
 │    Domain Layer         │  │  OpenCode HTTP   │
 │  • ConversationState    │  │  API (internal)  │
 │  • InstanceManager      │  │  /session        │
-│  • WorkspaceFactory     │  │  /global/health  │
-│  • PortPool             │  │  /provider       │
-└─────────────────────────┘  └──────────────────┘
+│  • RuntimeManager       │  │  /global/health  │
+│  • WorkspaceFactory     │  │  /provider       │
+│  • PortPool             │  └──────────────────┘
+└─────────────────────────┘
               │
-              │ RuntimeRegistry.getOrThrow(agentType)
+               │ RuntimeManager (delegates to RuntimeRegistry for spawn/kill)
               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                Runtime Abstraction Layer                     │
-│  • RuntimeRegistry (agentType → AgentRuntime)               │
+│  • RuntimeRegistry (id → AgentRuntime)                      │
+│  • RuntimeManager (instance map, lifecycle, policy queries) │
 │  • AgentRuntime (interface: spawn, kill, restart, cleanup)  │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  OpenCodeRuntime (direct spawn / Docker container)    │  │
+│  │  DirectRuntime / DockerRuntime                        │  │
 │  └──────────────────────────┬────────────────────────────┘  │
 └─────────────────────────────┼───────────────────────────────┘
                                │ spawn() / kill()
@@ -101,7 +103,7 @@ AgentOrchestrator HTTP Server → ConversationService.start(id)
   │ 1. ConversationService 呼叫 InstanceManager.createInstance(id)
   │    │ 1a. 若 workspace 已存在 → 跳過 create，直接使用
   │    │ 1b. PortPool.allocate() → 動態端口
-  │    │ 1c. runtimeRegistry.getOrThrow(agentType).spawn(id, port, workspacePath, agentType)
+   │    │ 1c. RuntimeManager.spawn(id, port, workspacePath, agentType)
   │    │     → 啟動 OpenCode（direct spawn 或 Docker 容器）
   │    │ 1d. 輪詢 GET /global/health 直到通過
   │    │ 1e. POST /session → 建立初始 Session（background）
@@ -299,7 +301,33 @@ OpenCode Session 代理，含 `ensureReady` 保護。
 
 #### `src/orchestrator/conversation-state.ts`
 
-事件驅動的對話生命周期狀態機，管理從 `prepared` 到 `destroyed` 的所有狀態轉換，並提供訂閱機制供 WebSocket 推送即時事件。
+事件驅動的對話生命周期狀態機，管理從 `prepared` 到 `destroyed` 的所有狀態轉換，並提供訂閱機制供 WebSocket 推送即時事件。每次 `transition()` 呼叫會增加 `agentorchestrator_conversation_state_changes_total{status="<to>"}` counter。
+
+#### `src/utils/logger.ts`
+
+結構化日誌工具，支援動態日誌層級與格式切換。
+
+**`Logger`**：
+- 層級：`debug` < `info` < `warn` < `error`
+- 格式：`text`（人類可讀時間戳+層級+訊息）或 `json`（結構化 JSON）
+- `Logger.child(context: object)`：建立綁定 context 的子 Logger，所有輸出自動附加固定欄位（如 `requestId`、`conversationId`），適合非同步請求追蹤
+
+#### `src/metrics/registry.ts`
+
+Prometheus 指標註冊中心，整合 `prom-client`。
+
+**自訂指標**（共 9 項）：
+| Metric | Type | Labels |
+|--------|------|--------|
+| `agentorchestrator_instances_active` | Gauge | — |
+| `agentorchestrator_instances_total_created` | Counter | — |
+| `agentorchestrator_instances_errors_total` | Counter | `type` (spawn, health, kill) |
+| `agentorchestrator_instance_spawn_duration_seconds` | Histogram | — |
+| `agentorchestrator_port_pool_available` | Gauge | — |
+| `agentorchestrator_websocket_connections_active` | Gauge | — |
+| `agentorchestrator_http_requests_total` | Counter | `method`, `status` |
+| `agentorchestrator_http_request_duration_seconds` | Histogram | `method`, `status` |
+| `agentorchestrator_conversation_state_changes_total` | Counter | `status` |
 
 **關鍵類別**：`ConversationState`
 
@@ -325,9 +353,9 @@ OpenCode Session 代理，含 `ensureReady` 保護。
 
 ### Runtime Abstraction Layer (`src/agent-runtime/`)
 
-獨立的可插拔 Runtime 抽象層，定義 `AgentRuntime` 介面並提供 `OpenCodeRuntime` 實作。`InstanceManager` 不直接操作進程，而是透過 `RuntimeRegistry` 查詢對應的 `AgentRuntime` 實作來委派 spawn/kill/restart。
+獨立的可插拔 Runtime 抽象層，定義 `AgentRuntime` 介面、`InstanceHandle` 抽象、共享健康檢查工具，並提供 `DirectRuntime` 與 `DockerRuntime` 兩種實作。`InstanceManager` 不直接操作 Runtime，而是透過 `RuntimeManager` 間接操作，再由 `RuntimeManager` 委派 `RuntimeRegistry` 查詢對應的 `AgentRuntime` 實作來 spawn/kill/restart。
 
-**`src/agent-runtime/types.ts`** — `AgentRuntime` 介面與 `SpawnResult` 型別：
+**`src/agent-runtime/types.ts`** — `AgentRuntime` 介面、`SpawnResult`、`InstanceHandle`、`HealthCheckConfig` 型別：
 
 ```ts
 interface AgentRuntime {
@@ -342,32 +370,68 @@ interface SpawnResult {
   client: OpenCodeClient;   // HTTP 客戶端（連到該實例）
   dispose?: () => Promise<void>;  // 清理回呼
 }
+
+interface InstanceHandle {
+  pid: number;
+  exitCode: number | null;
+  kill(signal?: string): Promise<void>;
+  waitForExit(): Promise<number | null>;
+  onExit(callback: (code: number | null) => void): void;
+}
 ```
 
-**`src/agent-runtime/registry.ts`** — `RuntimeRegistry`：依 `agentType` 字串查詢對應的 Runtime 實作。
+**`src/agent-runtime/registry.ts`** — `RuntimeRegistry`：依 `id` 字串註冊與查詢對應的 Runtime 實作。
 
-**`src/agent-runtime/runtimes/opencode.ts`** — `OpenCodeRuntime`：實作 `AgentRuntime`，支援 direct spawn 與 Docker 容器兩種模式。
+**`src/agent-runtime/runtime-manager.ts`** — `RuntimeManager`：管理所有活躍實例的狀態映射（`Map<string, InstanceInfo>`），提供實例註冊/查詢/銷毀，以及政策查詢方法（LRU 淘汰候選、閒置偵測），委派 `RuntimeRegistry` 進行實際 spawn/kill/restart 操作。
+
+**`src/agent-runtime/health.ts`** — 共享健康檢查工具：
+
+```ts
+function waitForHealthy(
+  client: OpenCodeClient,
+  config: HealthCheckConfig,
+  logger?: Logger
+): Promise<void>;
+```
+
+- 封裝輪詢 `GET /global/health` 的邏輯
+- 接受 `retries`、`intervalMs`、`clientTimeoutMs` 參數
+- 所有 runtime 實作（DirectRuntime、DockerRuntime）共享此工具，消除重複程式碼
+
+**`src/agent-runtime/runtimes/direct.ts`** — `DirectRuntime`：
+- 使用 `cross-spawn` 啟動 `opencode serve` 為子進程
+- `ChildProcessHandle` 包裝 `ChildProcess` + `treeKill` 實作 `InstanceHandle`
+- 接受 `DirectRuntimeConfig`（`{ binary, instanceHost }`）
+- 支援可設定的 `instanceHost`（預設 `127.0.0.1`）
+
+**`src/agent-runtime/runtimes/docker.ts`** — `DockerRuntime`：
+- 使用 `docker run` 啟動 OpenCode 容器
+- `DockerHandle` 包裝 `docker rm -f` 實作 `InstanceHandle`
+- 接受 `DockerRuntimeConfig`（`{ binary, instanceHost, docker: { image, containerPort, networkMode } }`）
+- 支援 `networkMode`：`'host'` 跳過 port mapping；`'bridge'` 或自訂網路名稱加入 `--network` 旗標
 
 ---
 
 #### `src/orchestrator/instance-manager.ts`
 
-管理所有 OpenCode 實例的生命周期，透過 `RuntimeRegistry` 呼叫對應的 runtime 實作。
+管理所有 OpenCode 實例的生命周期，透過 `RuntimeManager` 委派對應的 runtime 實作。`RuntimeManager` 維護實例狀態映射，並提供政策查詢（LRU 候選、閒置偵測）供 `InstanceManager` 執行淘汰決策。
 
 **關鍵類別**：`InstanceManager`
 
 | 方法 | 職責 |
 |------|------|
-| `createInstance(id)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、透過 runtime.spawn() 啟動 OpenCode、健康檢查、建立 Session |
-| `getInstance(id)` | 取得實例資訊，並更新 `lastUsedAt` |
-| `destroyInstance(id)` | 銷毀實例：呼叫 runtime.kill() 或 dispose()、釋放端口、**移除 workspace** |
-| `stopInstance(id)` | 停止實例：呼叫 runtime.kill()、釋放端口，**保留 workspace** |
-| `restartInstance(id)` | 透過 runtime.restart() 原地重啟（相同 port、workspace），10 秒超時後 fallback 到 kill + respawn |
-| `listInstances()` | 列出所有活躍實例 |
-| `evictLRU()` | 私有方法：達上限時淘汰最久未使用的實例 |
-| `cleanupOrphanContainers()` | 迭代所有已註冊 runtime，呼叫其 cleanupOrphans() |
+| `createInstance(id, agentType?)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、透過 RuntimeManager.spawn() 啟動 OpenCode、健康檢查、建立 Session |
+| `getInstance(id)` | 取得實例資訊（委派 RuntimeManager） |
+| `destroyInstance(id)` | 銷毀實例（委派 RuntimeManager） |
+| `stopInstance(id)` | 停止實例（委派 RuntimeManager），**保留 workspace** |
+| `restartInstance(id)` | 嘗試原地重啟（委派 RuntimeManager.restartInstance），fallback 到 stop + create |
+| `listInstances()` | 列出所有活躍實例（委派 RuntimeManager） |
+| `cleanupOrphanContainers()` | 迭代所有已註冊 runtime，呼叫其 cleanupOrphans()（委派 RuntimeManager） |
 
-**`InstanceInfo` 結構**：
+**日誌與指標**：
+- `createInstance` 記錄 spawn 持續時間至 `agentorchestrator_instance_spawn_duration_seconds` histogram
+- `destroyInstance` / `stopInstance` 在 runtime.kill() 失敗時增加 `agentorchestrator_instances_errors_total{type="kill"}` counter
+- 錯誤事件（spawn、health check、kill）使用綁定 conversationId 的 logger 輸出
 ```ts
 {
   id: string;              // conversation ID
@@ -490,7 +554,7 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話。**不再�
 
 **`loadConfig()`**：
 1. 讀取 `config/agentorchestrator.json`
-2. `applyEnvOverrides()`：掃描 `AGENTORCHESTRATOR_*` 環境變數並覆寫對應路徑
+2. `applyEnvOverrides()`：掃描 `AGENTORCHESTRATOR_*` 環境變數並覆寫對應路徑（陣列型欄位如 `runtimes[]` 不支援 env 覆寫）
 3. 回傳 `AgentOrchestratorConfig` 型別物件
 
 **`loadCanonicalConfig()`**：
@@ -500,17 +564,31 @@ WebSocket 連線路由器，將 `/ws/{id}` 路由到對應的對話。**不再�
 
 ---
 
+### `src/http-api/server.ts` — HTTP 伺服器與安全層
+
+Express HTTP 伺服器，整合認證、安全標頭與指標中介層。
+
+**功能**：
+- **API 金鑰認證**：當 `server.apiKey` 設定時（最少 8 字元），所有請求（除 `/health`、`/metrics`、`/api-docs*` 外）需要 `Authorization: Bearer <key>` 標頭
+- **安全標頭**：所有回應附加 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`X-DNS-Prefetch-Control: off`
+- **請求持續時間指標**：每個 HTTP 請求記錄至 `agentorchestrator_http_request_duration_seconds` 與 `agentorchestrator_http_requests_total`
+- **CORS**：支援跨域請求，`Authorization` 標頭列入 allow list
+
+---
+
 ## 安全設計
 
 1. **進程級隔離**：每個對話獨立 `opencode serve`，互不影響
 2. **檔案系統沙箱**：`config/canonical-opencode.example.json` 定義系統預設 `$schema` 與 `permission` 區塊，寫入 `opencode.json` 時強制合併（`enforceCanonicalConfig=true` 預設），確保權限設定不被使用者覆寫
 3. **動態 Basic Auth**：每個 OpenCode 實例自動生成獨立密碼，避免與使用者全域設定衝突
-4. **自動資源回收**：LRU 淘汰與刪除時的 `treeKill` + `rmSync`，防止殭屍進程與磁碟洩漏
-5. **Workspace 配額限制**：單一 workspace 上限 50 MB，超過時寫入操作被拒絕
-6. **路徑遍歷防護**：所有檔案操作必須通過 `sanitizeRelativePath()`，拒絕 `..` 與絕對路徑；檔案路徑統一放於 request body 或 query string，避免 URL routing 層被惡意路徑段繞過
+4. **API 金鑰認證**：可選的 Bearer token 認證（`server.apiKey`），保護服務端點免於未授權存取。`/health`、`/metrics`、`/api-docs*` 端點不需認證
+4. **安全 HTTP 標頭**：所有 HTTP 回應自動注入 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`X-DNS-Prefetch-Control: off`
+5. **自動資源回收**：LRU 淘汰與刪除時的 `treeKill` + `rmSync`，防止殭屍進程與磁碟洩漏
+6. **Workspace 配額限制**：單一 workspace 上限可設定（`workspace.maxSizeBytes`，預設 50 MB），超過時寫入操作被拒絕
+7. **路徑遍歷防護**：所有檔案操作必須通過 `sanitizeRelativePath()`，拒絕 `..` 與絕對路徑；檔案路徑統一放於 request body 或 query string，避免 URL routing 層被惡意路徑段繞過
 7. **本地複製白名單**：`copyFromLocal` 與 `importSkillFromLocal` 僅允許來源為 `{cwd}/assets/`、`{cwd}/templates/` 或 `{cwd}/skills/`；使用 `resolve()` + `sep` 邊界檢查取代字首比對，前綴相同的兄弟目錄（如 `skills_evil/`）一律拒絕
-8. **Skill 名稱驗證**：`validateSkillName()` 只允許 `[A-Za-z0-9_-]`，最大長度 128；API 層拒絕非法名稱後才進入檔案系統操作
-9. **Zip Slip 防護**：`skills/upload` 逐條驗證 zip entry 路徑，拒絕 `..`、絕對路徑與磁碟機路徑；`resolve()` 確認最終輸出路徑仍在 `destPath` 內才執行 extraction
-10. **Skill 結構驗證**：`skills/upload` 要求 zip 根層級必須包含 `SKILL.md`，否則直接拒絕
-11. **未壓縮大小檢查**：`skills/upload` 計算 `sum(entry.header.size)` 並調用 `assertQuota`，防止 zip bomb 繞過 request body limit
-12. **延遲啟動隔離**：`POST /conversations` 僅建立 workspace，不啟動 OpenCode；Agent 與 Skill 可在啟動前預先注入，確保 OpenCode 啟動時即擁有完整上下文，同時避免未準備完成的實例被外部誤用
+9. **Skill 名稱驗證**：`validateSkillName()` 只允許 `[A-Za-z0-9_-]`，最大長度 128；API 層拒絕非法名稱後才進入檔案系統操作
+10. **Zip Slip 防護**：`skills/upload` 逐條驗證 zip entry 路徑，拒絕 `..`、絕對路徑與磁碟機路徑；`resolve()` 確認最終輸出路徑仍在 `destPath` 內才執行 extraction
+11. **Skill 結構驗證**：`skills/upload` 要求 zip 根層級必須包含 `SKILL.md`，否則直接拒絕
+12. **未壓縮大小檢查**：`skills/upload` 計算 `sum(entry.header.size)` 並調用 `assertQuota`，防止 zip bomb 繞過 request body limit
+13. **延遲啟動隔離**：`POST /conversations` 僅建立 workspace，不啟動 OpenCode；Agent 與 Skill 可在啟動前預先注入，確保 OpenCode 啟動時即擁有完整上下文，同時避免未準備完成的實例被外部誤用

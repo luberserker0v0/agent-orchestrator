@@ -6,6 +6,7 @@ export interface ServerConfig {
   port: number;
   host: string;
   shutdownTimeoutMs: number;
+  apiKey?: string;
 }
 
 export interface WebSocketConfig {
@@ -16,7 +17,41 @@ export interface WebSocketConfig {
 export interface HealthCheckConfig {
   retries: number;
   intervalMs: number;
+  /** Timeout per health-check HTTP request in ms (default: 5000) */
+  clientTimeoutMs: number;
 }
+
+export interface DirectRuntimeConfig {
+  /** Path or name of the `opencode` binary (default: `opencode`) */
+  binary: string;
+  /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
+  instanceHost?: string;
+}
+
+export interface DockerRuntimeConfig {
+  /** Docker image to pull and run (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) */
+  image: string;
+  /** Port inside the container that opencode serves on (default: 3000) */
+  containerPort: number;
+  /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
+  instanceHost?: string;
+  /** Docker network mode (e.g. `host`, `bridge`, or a custom network name). When `host`, port mapping is skipped. */
+  networkMode?: string;
+}
+
+export interface DirectRuntimeEntry {
+  id: string;
+  type: 'direct';
+  config: DirectRuntimeConfig;
+}
+
+export interface DockerRuntimeEntry {
+  id: string;
+  type: 'docker';
+  config: DockerRuntimeConfig;
+}
+
+export type RuntimeEntry = DirectRuntimeEntry | DockerRuntimeEntry;
 
 export interface OrchestratorConfig {
   maxInstances: number;
@@ -28,15 +63,15 @@ export interface OrchestratorConfig {
     /** When true (default), PortPool falls back to OS-assigned port when the configured range is exhausted */
     allowDynamicFallback?: boolean;
   };
-  runtime: string;
-  runtimeConfig: Record<string, unknown>;
-  agentType: string;
+  defaultAgentType: string;
+  runtimes: RuntimeEntry[];
   healthCheck: HealthCheckConfig;
 }
 
 export interface WorkspaceConfig {
   basePath: string;
   enforceCanonicalConfig: boolean;
+  maxSizeBytes?: number;
 }
 
 export interface AgentOrchestratorConfig {
@@ -96,6 +131,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   if (typeof server.shutdownTimeoutMs !== 'number' || !Number.isInteger(server.shutdownTimeoutMs) || server.shutdownTimeoutMs <= 0) {
     throw new Error(`Config validation failed: server.shutdownTimeoutMs must be a positive integer, got ${server.shutdownTimeoutMs}`);
   }
+  if (server.apiKey !== undefined && server.apiKey !== '' && (typeof server.apiKey !== 'string' || server.apiKey.length < 8)) {
+    throw new Error(`Config validation failed: server.apiKey must be a string of at least 8 characters, got ${typeof server.apiKey === 'string' ? 'too short' : typeof server.apiKey}`);
+  }
 
   // WebSocket validation
   if (typeof websocket.heartbeatIntervalMs !== 'number' || websocket.heartbeatIntervalMs <= 0) {
@@ -138,12 +176,45 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     }
   }
 
+  // Runtime entries validation
+  if (!Array.isArray(orchestrator.runtimes) || orchestrator.runtimes.length === 0) {
+    throw new Error('Config validation failed: orchestrator.runtimes must be a non-empty array');
+  }
+  if (typeof orchestrator.defaultAgentType !== 'string' || !orchestrator.defaultAgentType) {
+    throw new Error(`Config validation failed: orchestrator.defaultAgentType must be a non-empty string, got ${orchestrator.defaultAgentType}`);
+  }
+  const runtimeIds = new Set<string>();
+  let defaultFound = false;
+  for (const entry of orchestrator.runtimes) {
+    if (typeof entry.id !== 'string' || !entry.id) {
+      throw new Error('Config validation failed: each runtime entry must have a non-empty string "id"');
+    }
+    if (runtimeIds.has(entry.id)) {
+      throw new Error(`Config validation failed: duplicate runtime id "${entry.id}"`);
+    }
+    runtimeIds.add(entry.id);
+    if (entry.id === orchestrator.defaultAgentType) defaultFound = true;
+
+    if (typeof entry.type !== 'string' || !entry.type) {
+      throw new Error('Config validation failed: each runtime entry must have a non-empty string "type"');
+    }
+    if (typeof entry.config !== 'object' || entry.config === null) {
+      throw new Error(`Config validation failed: runtime entry "${entry.id}" must have a "config" object`);
+    }
+  }
+  if (!defaultFound) {
+    throw new Error(`Config validation failed: defaultAgentType "${orchestrator.defaultAgentType}" not found in runtimes array`);
+  }
+
   // Health check validation
   if (typeof orchestrator.healthCheck.retries !== 'number' || !Number.isInteger(orchestrator.healthCheck.retries) || orchestrator.healthCheck.retries <= 0) {
     throw new Error(`Config validation failed: healthCheck.retries must be a positive integer, got ${orchestrator.healthCheck.retries}`);
   }
   if (typeof orchestrator.healthCheck.intervalMs !== 'number' || orchestrator.healthCheck.intervalMs <= 0) {
     throw new Error(`Config validation failed: healthCheck.intervalMs must be positive, got ${orchestrator.healthCheck.intervalMs}`);
+  }
+  if (typeof orchestrator.healthCheck.clientTimeoutMs !== 'number' || !Number.isInteger(orchestrator.healthCheck.clientTimeoutMs) || orchestrator.healthCheck.clientTimeoutMs <= 0) {
+    throw new Error(`Config validation failed: healthCheck.clientTimeoutMs must be a positive integer, got ${orchestrator.healthCheck.clientTimeoutMs}`);
   }
 
   // Workspace validation
@@ -152,6 +223,11 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   }
   if (typeof config.workspace.enforceCanonicalConfig !== 'boolean') {
     throw new Error(`Config validation failed: workspace.enforceCanonicalConfig must be a boolean, got ${config.workspace.enforceCanonicalConfig}`);
+  }
+  if (config.workspace.maxSizeBytes !== undefined) {
+    if (typeof config.workspace.maxSizeBytes !== 'number' || !Number.isInteger(config.workspace.maxSizeBytes) || config.workspace.maxSizeBytes <= 0) {
+      throw new Error(`Config validation failed: workspace.maxSizeBytes must be a positive integer, got ${config.workspace.maxSizeBytes}`);
+    }
   }
 }
 
@@ -192,14 +268,14 @@ export function defaultConfig(): AgentOrchestratorConfig {
       idleTimeoutMs: 600000,
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100, allowDynamicFallback: true },
-      runtime: 'direct',
-      runtimeConfig: { binary: 'opencode' },
-      agentType: 'opencode',
-      healthCheck: { retries: 10, intervalMs: 500 },
+      defaultAgentType: 'opencode',
+      runtimes: [{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }],
+      healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
     workspace: {
       basePath: './workspace',
       enforceCanonicalConfig: true,
+      maxSizeBytes: 50 * 1024 * 1024,
     },
   };
 }
