@@ -35,10 +35,10 @@ export class InstanceManager {
 
     let workspace;
     try {
-      if (this.workspaceFactory.hasWorkspace(id)) {
-        workspace = this.workspaceFactory.ensure(id);
+      if (await this.workspaceFactory.hasWorkspace(id)) {
+        workspace = await this.workspaceFactory.ensure(id);
       } else {
-        workspace = this.workspaceFactory.create(id);
+        workspace = await this.workspaceFactory.create(id);
       }
     } catch (err) {
       throw new Error(`Failed to create workspace: ${(err as Error).message}`, { cause: err });
@@ -52,6 +52,7 @@ export class InstanceManager {
       { username: 'opencode', password },
       this.config.healthCheck,
       agentType ?? this.config.defaultAgentType,
+      workspace.runtimeAccess,
     );
   }
 

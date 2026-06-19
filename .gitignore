@@ -34,6 +34,9 @@ coverage/
 config/agentorchestrator.json
 config/canonical-opencode.json
 
+# npm pack artifacts
+*.tgz
+
 # Temporary files
 *.tmp
 *.temp

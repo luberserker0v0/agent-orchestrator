@@ -8,22 +8,22 @@ export class ConfigService {
     private conversationState: ConversationState
   ) {}
 
-  readConfig(id: string): OpencodeConfig {
+  async readConfig(id: string): Promise<OpencodeConfig> {
     return this.workspaceFactory.readConfig(id);
   }
 
-  writeConfig(id: string, config: OpencodeConfig): void {
-    this.workspaceFactory.writeConfig(id, config);
+  async writeConfig(id: string, config: OpencodeConfig): Promise<void> {
+    await this.workspaceFactory.writeConfig(id, config);
     this.markNeedsRestartIfRunning(id, 'opencode.json changed');
     this.conversationState.emitEvent(id, 'conversation.configChanged', {
       changedFiles: ['.opencode/opencode.json'],
     });
   }
 
-  patchConfig(id: string, patch: Record<string, unknown>): void {
-    const current = this.workspaceFactory.readConfig(id);
+  async patchConfig(id: string, patch: Record<string, unknown>): Promise<void> {
+    const current = await this.workspaceFactory.readConfig(id);
     const merged = this.deepMerge(current as unknown as Record<string, unknown>, patch);
-    this.workspaceFactory.writeConfig(id, merged as unknown as OpencodeConfig);
+    await this.workspaceFactory.writeConfig(id, merged as unknown as OpencodeConfig);
     this.markNeedsRestartIfRunning(id, 'opencode.json changed');
     this.conversationState.emitEvent(id, 'conversation.configChanged', {
       changedFiles: ['.opencode/opencode.json'],

@@ -4,7 +4,7 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { waitForHealthy } from '../health.js';
-import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, AgentClient, HealthCheckConfig } from '../types.js';
+import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, AgentClient, HealthCheckConfig, RuntimeAccess } from '../types.js';
 import type { DockerRuntimeConfig } from '../../config-loader.js';
 
 class DockerHandle implements InstanceHandle {
@@ -71,7 +71,9 @@ export class DockerRuntime implements AgentRuntime {
     workspacePath: string,
     auth: { username: string; password: string },
     healthCheckConfig: HealthCheckConfig,
+    runtimeAccess?: RuntimeAccess,
   ): Promise<AgentEndpoint> {
+    const vol = runtimeAccess?.type === 'docker' ? runtimeAccess : undefined;
     const port = await this.portPool.allocate();
     if (port === null) {
       throw new Error('No available ports in pool');
@@ -94,7 +96,7 @@ export class DockerRuntime implements AgentRuntime {
         }
       }
       dockerArgs.push(
-        '-v', `${workspacePath}:/workspace`,
+        ...(vol ? ['--volumes-from', vol.container] : ['-v', `${workspacePath}:/workspace`]),
         '-w', '/workspace',
         '-e', `OPENCODE_SERVER_USERNAME=${auth.username}`,
         '-e', `OPENCODE_SERVER_PASSWORD=${auth.password}`,

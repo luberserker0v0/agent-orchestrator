@@ -60,7 +60,7 @@ describe('SkillService', () => {
 
     mockWorkspaceFactory = {
       resolveWorkspacePath: vi.fn().mockReturnValue(mockWsPath),
-      assertQuota: vi.fn(),
+      assertQuota: vi.fn().mockResolvedValue(undefined),
     };
 
     mockConversationState = {
@@ -85,10 +85,10 @@ describe('SkillService', () => {
   }
 
   describe('uploadSkill', () => {
-    it('should extract zip to skill directory', () => {
+    it('should extract zip to skill directory', async () => {
       mockZipEntries([makeMockEntry('SKILL.md')]);
 
-      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
+      await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
 
       expect(AdmZip).toHaveBeenCalledWith(Buffer.from('zip data'));
       expect(mockWorkspaceFactory.resolveWorkspacePath).toHaveBeenCalledWith(testId);
@@ -97,64 +97,60 @@ describe('SkillService', () => {
       expect(mkdirSync).toHaveBeenCalledWith(destPath, { recursive: true });
     });
 
-    it('should reject zip without SKILL.md at root', () => {
+    it('should reject zip without SKILL.md at root', async () => {
       mockZipEntries([makeMockEntry('subdir/file.js')]);
 
-      expect(() => skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).toThrow(
+      await expect(skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).rejects.toThrow(
         'Skill archive must contain SKILL.md at the root'
       );
     });
 
-    it('should reject zip with path traversal in entry', () => {
+    it('should reject zip with path traversal in entry', async () => {
       mockZipEntries([
         makeMockEntry('SKILL.md'),
         makeMockEntry('../escape.txt'),
       ]);
 
-      expect(() => skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).toThrow(
+      await expect(skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).rejects.toThrow(
         'Invalid zip entry path'
       );
     });
 
-    it('should reject zip with absolute path entry', () => {
+    it('should reject zip with absolute path entry', async () => {
       mockZipEntries([
         makeMockEntry('SKILL.md'),
         makeMockEntry('/etc/passwd'),
       ]);
 
-      expect(() => skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).toThrow(
+      await expect(skillService.uploadSkill(testId, 'bad-skill', Buffer.from('zip'))).rejects.toThrow(
         'Invalid zip entry path'
       );
     });
 
-    it('should check quota before extracting', () => {
+    it('should check quota before extracting', async () => {
       mockZipEntries([makeMockEntry('SKILL.md')]);
 
-      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
+      await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
 
-      expect(mockWorkspaceFactory.assertQuota).toHaveBeenCalledWith(
-        mockWsPath,
-        expect.any(Number),
-        join(mockWsPath, '.opencode', 'skills', 'my-skill')
-      );
+      expect(mockWorkspaceFactory.assertQuota).toHaveBeenCalledWith(testId, expect.any(Number));
     });
 
-    it('should write zip entries to disk', () => {
+    it('should write zip entries to disk', async () => {
       mockZipEntries([
         makeMockEntry('SKILL.md'),
         makeMockEntry('scripts/main.ts'),
       ]);
 
-      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip'));
+      await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip'));
 
       expect(writeFileSync).toHaveBeenCalledTimes(2);
     });
 
-    it('should mark needsRestart and emit event when running', () => {
+    it('should mark needsRestart and emit event when running', async () => {
       makeRunning();
       mockZipEntries([makeMockEntry('SKILL.md')]);
 
-      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
+      await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
 
       expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith(testId, 'skill my-skill uploaded');
       expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
@@ -162,10 +158,10 @@ describe('SkillService', () => {
       });
     });
 
-    it('should not mark needsRestart when not running', () => {
+    it('should not mark needsRestart when not running', async () => {
       mockZipEntries([makeMockEntry('SKILL.md')]);
 
-      skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
+      await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
 
       expect(mockConversationState.markNeedsRestart).not.toHaveBeenCalled();
       expect(mockConversationState.emitEvent).toHaveBeenCalled();
@@ -173,67 +169,63 @@ describe('SkillService', () => {
   });
 
   describe('importSkill', () => {
-    it('should copy source directory to skills', () => {
+    it('should copy source directory to skills', async () => {
       const srcPath = join(process.cwd(), 'skills', 'custom-skill');
 
-      skillService.importSkill(testId, srcPath, 'imported-skill');
+      await skillService.importSkill(testId, srcPath, 'imported-skill');
 
       const destPath = join(mockWsPath, '.opencode', 'skills', 'imported-skill');
       expect(cpSync).toHaveBeenCalledWith(srcPath, destPath, { recursive: true, force: true });
     });
 
-    it('should reject non-allowed source path', () => {
-      expect(() => skillService.importSkill(testId, '/etc/passwd', 'bad')).toThrow(
+    it('should reject non-allowed source path', async () => {
+      await expect(skillService.importSkill(testId, '/etc/passwd', 'bad')).rejects.toThrow(
         'Source path not allowed'
       );
     });
 
-    it('should reject non-existent source', () => {
+    it('should reject non-existent source', async () => {
       const srcPath = join(process.cwd(), 'skills', 'custom-skill');
       vi.mocked(existsSync).mockReturnValue(false);
 
-      expect(() => skillService.importSkill(testId, srcPath, 'imported-skill')).toThrow(
+      await expect(skillService.importSkill(testId, srcPath, 'imported-skill')).rejects.toThrow(
         'Source not found'
       );
     });
 
-    it('should reject non-directory source', () => {
+    it('should reject non-directory source', async () => {
       const srcPath = join(process.cwd(), 'skills', 'custom-skill');
       vi.mocked(statSync).mockReturnValue({ isDirectory: () => false } as any);
       vi.mocked(existsSync).mockReturnValue(true);
 
-      expect(() => skillService.importSkill(testId, srcPath, 'imported-skill')).toThrow(
+      await expect(skillService.importSkill(testId, srcPath, 'imported-skill')).rejects.toThrow(
         'Source must be a directory'
       );
     });
 
-    it('should check quota before copying', () => {
+    it('should check quota before copying', async () => {
       const srcPath = join(process.cwd(), 'skills', 'custom-skill');
 
-      skillService.importSkill(testId, srcPath, 'imported-skill');
+      await skillService.importSkill(testId, srcPath, 'imported-skill');
 
-      expect(mockWorkspaceFactory.assertQuota).toHaveBeenCalledWith(
-        mockWsPath,
-        expect.any(Number),
-        join(mockWsPath, '.opencode', 'skills', 'imported-skill')
-      );
+      expect(mockWorkspaceFactory.assertQuota).toHaveBeenCalledWith(testId, expect.any(Number));
     });
 
-    it('should reject non-allowed path under allowed base', () => {
+    it('should reject non-allowed path under allowed base', async () => {
       const skipPath = join(process.cwd(), '.opencode', 'secrets');
       const srcPath = join(skipPath, 'my-skill');
       vi.mocked(existsSync).mockReturnValue(true);
 
-      expect(() => skillService.importSkill(testId, srcPath, 'imported-skill')).toThrow(
+      await expect(skillService.importSkill(testId, srcPath, 'imported-skill')).rejects.toThrow(
         'Source path not allowed'
       );
     });
 
-    it('should mark needsRestart and emit event when running', () => {
+    it('should mark needsRestart and emit event when running', async () => {
       makeRunning();
       const srcPath = join(process.cwd(), 'skills', 'custom-skill');
 
-      skillService.importSkill(testId, srcPath, 'imported-skill');
+      await skillService.importSkill(testId, srcPath, 'imported-skill');
 
       expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith(testId, 'skill imported-skill imported');
       expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {

@@ -19,7 +19,7 @@ export class SkillService {
     ];
   }
 
-  uploadSkill(id: string, name: string, zipBuffer: Buffer): void {
+  async uploadSkill(id: string, name: string, zipBuffer: Buffer): Promise<void> {
     const skillName = validateSkillName(name);
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
@@ -55,7 +55,7 @@ export class SkillService {
       totalUncompressedSize += entry.header.size;
     }
 
-    this.workspaceFactory.assertQuota(wsPath, totalUncompressedSize, destPath);
+    await this.workspaceFactory.assertQuota(id, totalUncompressedSize);
 
     mkdirSync(destPath, { recursive: true });
     for (const entry of entries) {
@@ -72,7 +72,7 @@ export class SkillService {
     });
   }
 
-  importSkill(id: string, source: string, name: string): void {
+  async importSkill(id: string, source: string, name: string): Promise<void> {
     const skillName = validateSkillName(name);
     const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
     const destPath = join(wsPath, '.opencode', 'skills', skillName);
@@ -98,7 +98,7 @@ export class SkillService {
     }
 
     const dirSize = getDirSize(resolvedSource);
-    this.workspaceFactory.assertQuota(wsPath, dirSize, destPath);
+    await this.workspaceFactory.assertQuota(id, dirSize);
 
     mkdirSync(destPath, { recursive: true });
     cpSync(resolvedSource, destPath, { recursive: true, force: true });

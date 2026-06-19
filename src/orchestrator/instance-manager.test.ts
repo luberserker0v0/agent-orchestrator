@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { InstanceManager } from './instance-manager.js';
 import { RuntimeManager } from '../agent-runtime/runtime-manager.js';
 import { WorkspaceFactory } from './workspace-factory.js';
+import { LocalStorage } from '../storage/index.js';
 import type { OrchestratorConfig, WorkspaceConfig } from '../config-loader.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig } from '../test-fixtures/ao-configs.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
@@ -41,6 +42,7 @@ function createMockHandle(overrides: Partial<InstanceHandle> & { exitCode?: numb
 const workspaceConfig: WorkspaceConfig = {
   basePath: 'test-workspace-im',
   enforceCanonicalConfig: true,
+  storage: { type: 'local' },
 };
 
 let nextPort = 41000;
@@ -67,7 +69,7 @@ describe('InstanceManager', () => {
 
   beforeEach(() => {
     cleanup();
-    workspaceFactory = new WorkspaceFactory(workspaceConfig);
+    workspaceFactory = new WorkspaceFactory(workspaceConfig, new LocalStorage('test-workspace-im'));
 
     mockClient = {
       health: vi.fn().mockResolvedValue({ healthy: true, version: '1.0.0' }),
@@ -282,6 +284,7 @@ describe('InstanceManager', () => {
         expect.stringContaining('conv-docker'),
         expect.objectContaining({ username: 'opencode' }),
         expect.any(Object),
+        expect.objectContaining({ type: 'local' }),
       );
 
       // Cleanup

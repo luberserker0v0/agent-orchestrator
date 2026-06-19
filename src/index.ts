@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { loadConfig, loadCanonicalConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
+import { LocalStorage } from './storage/index.js';
+import type { StorageBackend } from './storage/types.js';
 import { InstanceManager } from './orchestrator/instance-manager.js';
 import { RuntimeManager } from './agent-runtime/runtime-manager.js';
 import { ConversationState } from './orchestrator/conversation-state.js';
@@ -49,7 +51,14 @@ export async function main(cliArgs?: string[]) {
   const canonicalConfig = loadCanonicalConfig(config.workspace.enforceCanonicalConfig);
   logger.info('Configuration loaded');
 
-  const workspaceFactory = new WorkspaceFactory(config.workspace, canonicalConfig);
+  let storage: StorageBackend;
+  if (config.workspace.storage.type === 'local') {
+    storage = new LocalStorage(config.workspace.basePath);
+  } else {
+    throw new Error(`Unsupported storage type: ${(config.workspace.storage as { type: string }).type}`);
+  }
+
+  const workspaceFactory = new WorkspaceFactory(config.workspace, storage, canonicalConfig);
 
   // Set up runtime registry — register all runtimes from config
   const runtimeFactory = new RuntimeFactory();
@@ -85,7 +94,7 @@ export async function main(cliArgs?: string[]) {
 
   // Clean up orphan resources from previous runs (e.g., after SIGKILL/crash)
   await instanceManager.cleanupOrphanContainers();
-  workspaceFactory.cleanupOrphans();
+  await workspaceFactory.cleanupOrphans();
 
   const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService);
 

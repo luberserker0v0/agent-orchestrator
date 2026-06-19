@@ -5,7 +5,7 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { waitForHealthy } from '../health.js';
-import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, HealthCheckConfig } from '../types.js';
+import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, HealthCheckConfig, RuntimeAccess } from '../types.js';
 import type { DirectRuntimeConfig } from '../../config-loader.js';
 
 class ChildProcessHandle implements InstanceHandle {
@@ -66,7 +66,7 @@ export class DirectRuntime implements AgentRuntime {
   private portPool: PortPool;
   private config: DirectRuntimeConfig & { instanceHost: string };
   private instanceState = new Map<string, {
-    workspacePath: string;
+    cwd: string;
     auth: { username: string; password: string };
     handle: InstanceHandle;
   }>();
@@ -81,6 +81,7 @@ export class DirectRuntime implements AgentRuntime {
     workspacePath: string,
     auth: { username: string; password: string },
     healthCheckConfig: HealthCheckConfig,
+    runtimeAccess?: RuntimeAccess,
   ): Promise<AgentEndpoint> {
     const port = await this.portPool.allocate();
     if (port === null) {
@@ -90,10 +91,12 @@ export class DirectRuntime implements AgentRuntime {
     const baseUrl = `http://${this.config.instanceHost}:${port}`;
     const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
 
+    const cwd = runtimeAccess?.type === 'local' ? runtimeAccess.cwd : workspacePath;
+
     try {
-      logger.info(`Spawning OpenCode instance on port ${port} at ${workspacePath} (binary: ${this.config.binary})`);
+      logger.info(`Spawning OpenCode instance on port ${port} at ${cwd} (binary: ${this.config.binary})`);
       const proc = spawn(this.config.binary, ['serve', '--port', String(port), '--hostname', this.config.instanceHost], {
-        cwd: workspacePath,
+        cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
         env: {
@@ -113,7 +116,7 @@ export class DirectRuntime implements AgentRuntime {
       await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
 
       const handle = new ChildProcessHandle(proc);
-      this.instanceState.set(id, { workspacePath, auth, handle });
+      this.instanceState.set(id, { cwd, auth, handle });
       return { client, port, handle };
     } catch (err) {
       this.portPool.release(port);
@@ -141,7 +144,7 @@ export class DirectRuntime implements AgentRuntime {
 
     try {
       const proc = spawn(this.config.binary, ['serve', '--port', String(port), '--hostname', this.config.instanceHost], {
-        cwd: state.workspacePath,
+        cwd: state.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
         env: {
