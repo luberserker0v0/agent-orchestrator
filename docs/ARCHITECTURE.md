@@ -49,12 +49,12 @@ AgentOrchestrator 是一個 Node.js 長期執行服務，作為 OpenCode 實例�
 │                Runtime Abstraction Layer                     │
 │  • RuntimeRegistry (id → AgentRuntime)                      │
 │  • RuntimeManager (instance map, lifecycle, policy queries) │
-│  • AgentRuntime (interface: spawn, kill, restart, cleanup)  │
+│    •  AgentRuntime (interface: start, stop, restart, cleanupOrphans)  │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  DirectRuntime / DockerRuntime                        │  │
 │  └──────────────────────────┬────────────────────────────┘  │
 └─────────────────────────────┼───────────────────────────────┘
-                               │ spawn() / kill()
+                               │ start() / stop()
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     OpenCode Instance                        │
@@ -103,7 +103,7 @@ AgentOrchestrator HTTP Server → ConversationService.start(id)
   │ 1. ConversationService 呼叫 InstanceManager.createInstance(id)
   │    │ 1a. 若 workspace 已存在 → 跳過 create，直接使用
   │    │ 1b. PortPool.allocate() → 動態端口
-   │    │ 1c. RuntimeManager.spawn(id, port, workspacePath, agentType)
+   │    │ 1c. RuntimeManager.start(id, port, workspacePath, auth)
   │    │     → 啟動 OpenCode（direct spawn 或 Docker 容器）
   │    │ 1d. 輪詢 GET /global/health 直到通過
   │    │ 1e. POST /session → 建立初始 Session（background）
@@ -150,7 +150,7 @@ Client → DELETE /api/conversations/{id}
   ▼
 AgentOrchestrator HTTP Server → ConversationService.delete(id)
   │ 1. ConversationService 呼叫 InstanceManager.destroyInstance(id) (若 running)
-  │    │ 1a. runtime.kill(id) → 終止 OpenCode（direct 模式 tree-kill，docker 模式 kill container）
+   │    │ 1a. runtime.stop(id) → 終止 OpenCode（direct 模式 tree-kill，docker 模式 kill container）
   │    │ 1b. PortPool.release(port)
   │ 2. ConversationService 更新 ConversationState → status = 'destroyed'
   │    → emit 'conversation.destroyed'
@@ -353,22 +353,22 @@ Prometheus 指標註冊中心，整合 `prom-client`。
 
 ### Runtime Abstraction Layer (`src/agent-runtime/`)
 
-獨立的可插拔 Runtime 抽象層，定義 `AgentRuntime` 介面、`InstanceHandle` 抽象、共享健康檢查工具，並提供 `DirectRuntime` 與 `DockerRuntime` 兩種實作。`InstanceManager` 不直接操作 Runtime，而是透過 `RuntimeManager` 間接操作，再由 `RuntimeManager` 委派 `RuntimeRegistry` 查詢對應的 `AgentRuntime` 實作來 spawn/kill/restart。
+獨立的可插拔 Runtime 抽象層，定義 `AgentRuntime` 介面、`InstanceHandle` 抽象、共享健康檢查工具，並提供 `DirectRuntime` 與 `DockerRuntime` 兩種實作。`InstanceManager` 不直接操作 Runtime，而是透過 `RuntimeManager` 間接操作，再由 `RuntimeManager` 委派 `RuntimeRegistry` 查詢對應的 `AgentRuntime` 實作來 start/stop/restart/cleanupOrphans。
 
-**`src/agent-runtime/types.ts`** — `AgentRuntime` 介面、`SpawnResult`、`InstanceHandle`、`HealthCheckConfig` 型別：
+**`src/agent-runtime/types.ts`** — `AgentRuntime` 介面、`AgentEndpoint`、`InstanceHandle`、`HealthCheckConfig` 型別：
 
 ```ts
 interface AgentRuntime {
-  spawn(id: string, port: number, workspacePath: string, agentType: string): Promise<SpawnResult>;
-  kill(id: string): Promise<void>;
-  restart(id: string, port: number, workspacePath: string): Promise<SpawnResult>;
+  start(id: string, port: number, workspacePath: string, auth: { username: string; password: string }): Promise<AgentEndpoint>;
+  stop(id: string): Promise<void>;
+  restart(id: string, workspacePath: string, healthCheckConfig: HealthCheckConfig): Promise<AgentEndpoint>;
   cleanupOrphans(): Promise<void>;
 }
 
-interface SpawnResult {
-  process?: ChildProcess;   // 本地進程（direct 模式）；可選（如 docker 模式無直接子進程）
+interface AgentEndpoint {
+  handle?: InstanceHandle;  // 本地進程或 docker handle，可選（如 API agent 無 handle）
   client: OpenCodeClient;   // HTTP 客戶端（連到該實例）
-  dispose?: () => Promise<void>;  // 清理回呼
+  port?: number;            // 監聽埠，可選（API agent 不用 port）
 }
 
 interface InstanceHandle {
@@ -420,7 +420,7 @@ function waitForHealthy(
 
 | 方法 | 職責 |
 |------|------|
-| `createInstance(id, agentType?)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、透過 RuntimeManager.spawn() 啟動 OpenCode、健康檢查、建立 Session |
+| `createInstance(id, agentType?)` | 建立新實例：若 workspace 已存在則**直接重用**，分配端口、透過 RuntimeManager.start() 啟動 OpenCode、健康檢查、建立 Session |
 | `getInstance(id)` | 取得實例資訊（委派 RuntimeManager） |
 | `destroyInstance(id)` | 銷毀實例（委派 RuntimeManager） |
 | `stopInstance(id)` | 停止實例（委派 RuntimeManager），**保留 workspace** |
@@ -430,8 +430,8 @@ function waitForHealthy(
 
 **日誌與指標**：
 - `createInstance` 記錄 spawn 持續時間至 `agentorchestrator_instance_spawn_duration_seconds` histogram
-- `destroyInstance` / `stopInstance` 在 runtime.kill() 失敗時增加 `agentorchestrator_instances_errors_total{type="kill"}` counter
-- 錯誤事件（spawn、health check、kill）使用綁定 conversationId 的 logger 輸出
+- `destroyInstance` / `stopInstance` 在 runtime.stop() 失敗時增加 `agentorchestrator_instances_errors_total{type="stop"}` counter
+- 錯誤事件（start、health check、stop）使用綁定 conversationId 的 logger 輸出
 ```ts
 {
   id: string;              // conversation ID

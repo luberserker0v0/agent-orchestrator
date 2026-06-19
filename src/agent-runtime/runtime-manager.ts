@@ -7,7 +7,7 @@ import { instancesActive, instancesTotalCreated, instancesErrorsTotal, instanceS
 
 export interface InstanceInfo {
   id: string;
-  port: number;
+  port?: number;
   workspacePath: string;
   handle?: InstanceHandle;
   client: AgentClient;
@@ -27,7 +27,7 @@ export class RuntimeManager {
     this.defaultAgentType = defaultAgentType;
   }
 
-  async spawn(
+  async start(
     id: string,
     workspacePath: string,
     auth: { username: string; password: string },
@@ -38,12 +38,12 @@ export class RuntimeManager {
 
     const endSpawnTimer = instanceSpawnDurationSeconds.startTimer();
     let client: AgentClient;
-    let port: number;
+    let port: number | undefined;
     let handle: InstanceHandle | undefined;
     try {
-      ({ client, port, handle } = await runtime.spawn(id, workspacePath, auth, healthCheckConfig));
+      ({ client, port, handle } = await runtime.start(id, workspacePath, auth, healthCheckConfig));
     } catch (err) {
-      instancesErrorsTotal.inc({ type: 'spawn' });
+      instancesErrorsTotal.inc({ type: 'start' });
       throw err;
     } finally {
       endSpawnTimer();
@@ -68,7 +68,7 @@ export class RuntimeManager {
     this.instances.set(id, instance);
     instancesActive.inc();
     instancesTotalCreated.inc();
-    logger.info(`Instance ${id} ready on port ${port}`);
+    logger.info(`Instance ${id} ready${port !== undefined ? ` on port ${port}` : ''}`);
     return instance;
   }
 
@@ -85,7 +85,7 @@ export class RuntimeManager {
 
     const result = await runtime.restart(id, healthCheckConfig ?? { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 });
 
-    if (result.port !== inst.port) {
+    if (result.port !== inst.port && result.port !== undefined && inst.port !== undefined) {
       this.portPool.release(inst.port);
     }
     // Re-add to map in case onExit cleanup removed it during kill
@@ -213,7 +213,9 @@ export class RuntimeManager {
       }
     }
 
-    this.portPool.release(inst.port);
+    if (inst.port !== undefined) {
+      this.portPool.release(inst.port);
+    }
     instancesActive.dec();
     logger.info(`Instance ${id} destroyed`);
   }

@@ -98,14 +98,14 @@ describe('DockerRuntime', () => {
     });
   });
 
-  describe('spawn', () => {
+  describe('start', () => {
     it('calls docker run with correct args', async () => {
       const rt = new DockerRuntime(createPortPool(), { image: 'test-image', containerPort: 3100 });
       const mockProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      const result = await rt.spawn(
+      const result = await rt.start(
         'conv-d', '/tmp/docker-ws',
         { username: 'u', password: 'p' },
         { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -132,7 +132,7 @@ describe('DockerRuntime', () => {
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      const result = await rt.spawn(
+      const result = await rt.start(
         'conv-host', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -148,7 +148,7 @@ describe('DockerRuntime', () => {
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      await rt.spawn(
+      await rt.start(
         'conv-nethost', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -169,7 +169,7 @@ describe('DockerRuntime', () => {
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      await rt.spawn(
+      await rt.start(
         'conv-net', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -191,7 +191,7 @@ describe('DockerRuntime', () => {
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockRejectedValue(new Error('timeout'));
 
-      await expect(rt.spawn(
+      await expect(rt.start(
         'conv-fail', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -202,14 +202,14 @@ describe('DockerRuntime', () => {
     });
   });
 
-  describe('kill', () => {
+  describe('stop', () => {
     it('calls docker rm -f via handle', async () => {
       const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
       const runProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(runProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      const result = await rt.spawn(
+      const result = await rt.start(
         'conv-kill', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -219,7 +219,7 @@ describe('DockerRuntime', () => {
       (spawn as any).mockReset();
       (spawn as any).mockReturnValue(rmProc);
 
-      await rt.kill(result.handle);
+      await rt.stop(result.handle);
 
       expect(spawn).toHaveBeenCalledWith(
         'docker',
@@ -230,7 +230,7 @@ describe('DockerRuntime', () => {
 
     it('noop when handle is undefined', async () => {
       const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
-      await expect(rt.kill(undefined)).resolves.toBeUndefined();
+      await expect(rt.stop(undefined)).resolves.toBeUndefined();
     });
   });
 

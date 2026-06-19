@@ -112,7 +112,7 @@ which opencode
 netstat -an | grep 30000
 
 # 檢查伺服器日誌
-# 確認 runtimeConfig.binary 指向正確的可執行檔
+# 確認 runtimes[].config.binary 指向正確的可執行檔
 ```
 
 ### 健康檢查失敗

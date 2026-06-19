@@ -143,6 +143,27 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     throw new Error(`Config validation failed: websocket.idleTimeoutMs must be positive, got ${websocket.idleTimeoutMs}`);
   }
 
+  // Check for deprecated orchestrator fields
+  const orchestratorRaw = orchestrator as unknown as Record<string, unknown>;
+  if ('runtime' in orchestratorRaw) {
+    throw new Error(
+      'Config validation failed: orchestrator.runtime is deprecated. ' +
+      'Use orchestrator.runtimes (array) instead. See config/agentorchestrator.example.json.'
+    );
+  }
+  if ('runtimeConfig' in orchestratorRaw) {
+    throw new Error(
+      'Config validation failed: orchestrator.runtimeConfig is deprecated. ' +
+      'Move each runtime config into orchestrator.runtimes[].config. See config/agentorchestrator.example.json.'
+    );
+  }
+  if ('agentType' in orchestratorRaw) {
+    throw new Error(
+      'Config validation failed: orchestrator.agentType is deprecated. ' +
+      'Use orchestrator.defaultAgentType instead. See config/agentorchestrator.example.json.'
+    );
+  }
+
   // Orchestrator validation
   if (typeof orchestrator.maxInstances !== 'number' || !Number.isInteger(orchestrator.maxInstances) || orchestrator.maxInstances <= 0) {
     throw new Error(`Config validation failed: orchestrator.maxInstances must be a positive integer, got ${orchestrator.maxInstances}`);

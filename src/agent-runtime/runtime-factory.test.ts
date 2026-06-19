@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PortPool } from '../orchestrator/port-pool.js';
 import { RuntimeFactory } from './runtime-factory.js';
-import type { AgentRuntime, AgentCapabilities, SpawnResult } from './types.js';
+import type { AgentRuntime, AgentCapabilities, AgentEndpoint } from './types.js';
 
 class FakeRuntime implements AgentRuntime {
   readonly type = 'fake';
@@ -9,9 +9,9 @@ class FakeRuntime implements AgentRuntime {
     sessions: false, streaming: false, files: false,
     tools: false, config: false, agents: false, skills: false,
   };
-  async spawn(): Promise<SpawnResult> { return { client: {} as any, port: 0 }; }
-  async kill(): Promise<void> {}
-  async restart(): Promise<SpawnResult> { return { client: {} as any, port: 0 }; }
+  async start(): Promise<AgentEndpoint> { return { client: {} as any, port: 0 }; }
+  async stop(): Promise<void> {}
+  async restart(): Promise<AgentEndpoint> { return { client: {} as any, port: 0 }; }
 }
 
 describe('RuntimeFactory', () => {
@@ -36,9 +36,9 @@ describe('RuntimeFactory', () => {
         sessions: false, streaming: false, files: false,
         tools: false, config: false, agents: false, skills: false,
       };
-      async spawn(): Promise<SpawnResult> { return { client: {} as any, port: 0 }; }
-      async kill(): Promise<void> {}
-      async restart(): Promise<SpawnResult> { return { client: {} as any, port: 0 }; }
+      async start(): Promise<AgentEndpoint> { return { client: {} as any, port: 0 }; }
+      async stop(): Promise<void> {}
+      async restart(): Promise<AgentEndpoint> { return { client: {} as any, port: 0 }; }
     }
     class RT2 implements AgentRuntime {
       readonly type = 'rt2';
@@ -46,9 +46,9 @@ describe('RuntimeFactory', () => {
         sessions: false, streaming: false, files: false,
         tools: false, config: false, agents: false, skills: false,
       };
-      async spawn(): Promise<SpawnResult> { return { client: {} as any, port: 0 }; }
-      async kill(): Promise<void> {}
-      async restart(): Promise<SpawnResult> { return { client: {} as any, port: 0 }; }
+      async start(): Promise<AgentEndpoint> { return { client: {} as any, port: 0 }; }
+      async stop(): Promise<void> {}
+      async restart(): Promise<AgentEndpoint> { return { client: {} as any, port: 0 }; }
     }
 
     const factory = new RuntimeFactory();

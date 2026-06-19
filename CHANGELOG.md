@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(http-api): add GET /api/runtimes endpoint exposing registered runtimes
+- feat(config): add Makefile for Docker builds
+- feat(config): validate deprecated orchestrator fields (runtime, runtimeConfig, agentType)
 - test(health): add 7 unit tests for waitForHealthy retry/failure/timeout logic
 - docs(test): add testing strategy section (three-tier) and k8s integration guide to QUICKTEST.md
 - feat(ci): add Dockerfile for orchestrator containerization (multi-stage, node:20-alpine, healthcheck)

@@ -130,11 +130,11 @@ export interface InstanceHandle {
   readonly exitCode: number | null;
 }
 
-// ─── SpawnResult ───────────────────────────────────────────────────────
+// ─── AgentEndpoint ────────────────────────────────────────────────────
 
-export interface SpawnResult {
+export interface AgentEndpoint {
   client: AgentClient;
-  port: number;
+  port?: number;
   handle?: InstanceHandle;
 }
 
@@ -143,13 +143,13 @@ export interface SpawnResult {
 export interface AgentRuntime {
   readonly type: string;
   readonly capabilities: AgentCapabilities;
-  spawn(
+  start(
     id: string,
     workspacePath: string,
     auth: { username: string; password: string },
     healthCheckConfig: HealthCheckConfig,
-  ): Promise<SpawnResult>;
-  kill(handle?: InstanceHandle, signal?: string): Promise<void>;
+  ): Promise<AgentEndpoint>;
+  stop(handle?: InstanceHandle, signal?: string): Promise<void>;
   cleanupOrphans?(): Promise<void>;
-  restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<SpawnResult>;
+  restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<AgentEndpoint>;
 }

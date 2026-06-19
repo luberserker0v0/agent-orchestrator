@@ -115,14 +115,14 @@ describe('DirectRuntime', () => {
     });
   });
 
-  describe('spawn', () => {
+  describe('start', () => {
     it('calls spawn with correct binary and args', async () => {
       const rt = new DirectRuntime(createPortPool(), { binary: 'my-opencode' });
       const mockProc = createMockProc();
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      const result = await rt.spawn(
+      const result = await rt.start(
         'test-id',
         '/tmp/ws',
         { username: 'u', password: 'p' },
@@ -151,7 +151,7 @@ describe('DirectRuntime', () => {
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockRejectedValue(new Error('connection refused'));
 
-      await expect(rt.spawn(
+      await expect(rt.start(
         'test-id', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -166,7 +166,7 @@ describe('DirectRuntime', () => {
         .mockRejectedValueOnce(new Error('not ready'))
         .mockResolvedValue(makeHealthyFetch());
 
-      const result = await rt.spawn(
+      const result = await rt.start(
         'test-id', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 3, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -181,7 +181,7 @@ describe('DirectRuntime', () => {
       await smallPool.allocate();
       // Only one port and it's taken
       const rt = new DirectRuntime(smallPool);
-      await expect(rt.spawn(
+      await expect(rt.start(
         'test-id', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -189,27 +189,27 @@ describe('DirectRuntime', () => {
     });
   });
 
-  describe('kill', () => {
+  describe('stop', () => {
     it('calls treeKill via handle', async () => {
       const rt = new DirectRuntime(createPortPool());
       const mockProc = createMockProc({ exitCode: null, pid: 9999 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      const result = await rt.spawn(
+      const result = await rt.start(
         'test-kill', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
       );
 
-      await rt.kill(result.handle);
+      await rt.stop(result.handle);
       const { default: treeKill } = await import('tree-kill');
       expect(treeKill).toHaveBeenCalledWith(9999, 'SIGTERM', expect.any(Function));
     });
 
     it('noop when handle is undefined', async () => {
       const rt = new DirectRuntime(createPortPool());
-      await expect(rt.kill(undefined)).resolves.toBeUndefined();
+      await expect(rt.stop(undefined)).resolves.toBeUndefined();
     });
   });
 
@@ -224,7 +224,7 @@ describe('DirectRuntime', () => {
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
       // First spawn
-      const first = await rt.spawn(
+      const first = await rt.start(
         'test-restart', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -255,7 +255,7 @@ describe('DirectRuntime', () => {
       (spawn as any).mockReturnValueOnce(firstProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      await rt.spawn(
+      await rt.start(
         'test-restart-fail', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 },
@@ -276,7 +276,7 @@ describe('DirectRuntime', () => {
       (spawn as any).mockReturnValue(firstProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
 
-      await rt.spawn(
+      await rt.start(
         'test-restart-noport', '/tmp/ws',
         { username: 'u', password: 'p' },
         { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },

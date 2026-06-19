@@ -91,8 +91,8 @@ describe('InstanceManager', () => {
     mockRuntime = {
       type: 'opencode',
       capabilities: { sessions: true, streaming: true, files: true, tools: true, config: true, agents: true, skills: true },
-      spawn: mockSpawnFn as AgentRuntime['spawn'],
-      kill: vi.fn().mockResolvedValue(undefined),
+      start: mockSpawnFn as AgentRuntime['start'],
+      stop: vi.fn().mockResolvedValue(undefined),
       restart: vi.fn().mockResolvedValue({ client: mockClient, port: 0, handle: createMockHandle() }),
       cleanupOrphans: vi.fn().mockResolvedValue(undefined),
     };
