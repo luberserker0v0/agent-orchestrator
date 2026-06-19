@@ -78,6 +78,37 @@ aor [options]
 
 ---
 
+### 以 Docker 執行
+
+```bash
+# Build
+docker build -t agent-orchestrator .
+
+# Run（container 內固定監聽 8080，外部 port 由 -p 控制）
+docker run -d --name aor \
+  -p 8080:8080 \
+  -v /path/to/config:/app/config \
+  agent-orchestrator
+
+# 或從 Docker Hub 直接拉取
+docker pull luberserker/agent-orchestrator
+docker run -d --name aor \
+  -p 8080:8080 \
+  luberserker/agent-orchestrator
+```
+
+參數可透過環境變數覆寫，例如：
+
+```bash
+docker run -d --name aor \
+  -p 8080:8080 \
+  -e AGENTORCHESTRATOR_SERVER_APIKEY=your-secret-key \
+  -e AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20 \
+  luberserker/agent-orchestrator
+```
+
+---
+
 ## 設定檔
 
 設定檔位於 `config/agentorchestrator.json`（參考 `config/agentorchestrator.example.json`）：
