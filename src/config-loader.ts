@@ -68,10 +68,15 @@ export interface OrchestratorConfig {
   healthCheck: HealthCheckConfig;
 }
 
+export interface StorageConfig {
+  type: 'local';
+}
+
 export interface WorkspaceConfig {
   basePath: string;
   enforceCanonicalConfig: boolean;
   maxSizeBytes?: number;
+  storage: StorageConfig;
 }
 
 export interface AgentOrchestratorConfig {
@@ -250,6 +255,11 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       throw new Error(`Config validation failed: workspace.maxSizeBytes must be a positive integer, got ${config.workspace.maxSizeBytes}`);
     }
   }
+  if (config.workspace.storage) {
+    if (config.workspace.storage.type !== 'local') {
+      throw new Error(`Config validation failed: workspace.storage.type must be "local", got ${config.workspace.storage.type}`);
+    }
+  }
 }
 
 export function readJSON(path: string): Record<string, unknown> {
@@ -297,6 +307,7 @@ export function defaultConfig(): AgentOrchestratorConfig {
       basePath: './workspace',
       enforceCanonicalConfig: true,
       maxSizeBytes: 50 * 1024 * 1024,
+      storage: { type: 'local' },
     },
   };
 }

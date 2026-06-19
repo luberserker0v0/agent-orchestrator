@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process';
 import { logger } from '../utils/logger.js';
-import type { AgentClient, InstanceHandle, HealthCheckConfig } from './types.js';
+import type { AgentClient, InstanceHandle, HealthCheckConfig, RuntimeAccess } from './types.js';
 import { RuntimeRegistry } from './registry.js';
 import { PortPool } from '../orchestrator/port-pool.js';
 import { instancesActive, instancesTotalCreated, instancesErrorsTotal, instanceSpawnDurationSeconds } from '../metrics/registry.js';
@@ -33,6 +33,7 @@ export class RuntimeManager {
     auth: { username: string; password: string },
     healthCheckConfig: HealthCheckConfig,
     agentType?: string,
+    runtimeAccess?: RuntimeAccess,
   ): Promise<InstanceInfo> {
     const runtime = this.runtimes.getOrThrow(agentType ?? this.defaultAgentType);
 
@@ -41,7 +42,7 @@ export class RuntimeManager {
     let port: number | undefined;
     let handle: InstanceHandle | undefined;
     try {
-      ({ client, port, handle } = await runtime.start(id, workspacePath, auth, healthCheckConfig));
+      ({ client, port, handle } = await runtime.start(id, workspacePath, auth, healthCheckConfig, runtimeAccess));
     } catch (err) {
       instancesErrorsTotal.inc({ type: 'start' });
       throw err;

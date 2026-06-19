@@ -16,8 +16,8 @@ describe('ConfigService', () => {
 
   beforeEach(() => {
     mockWorkspaceFactory = {
-      readConfig: vi.fn().mockReturnValue({ ...sampleConfig }),
-      writeConfig: vi.fn(),
+      readConfig: vi.fn().mockResolvedValue({ ...sampleConfig }),
+      writeConfig: vi.fn().mockResolvedValue(undefined),
     };
     mockConversationState = {
       get: vi.fn(),
@@ -28,23 +28,23 @@ describe('ConfigService', () => {
   });
 
   describe('readConfig', () => {
-    it('should delegate to workspaceFactory.readConfig', () => {
-      const result = configService.readConfig(testId);
+    it('should delegate to workspaceFactory.readConfig', async () => {
+      const result = await configService.readConfig(testId);
       expect(mockWorkspaceFactory.readConfig).toHaveBeenCalledWith(testId);
       expect(result).toEqual(sampleConfig);
     });
   });
 
   describe('writeConfig', () => {
-    it('should write config through workspaceFactory', () => {
-      configService.writeConfig(testId, sampleConfig);
+    it('should write config through workspaceFactory', async () => {
+      await configService.writeConfig(testId, sampleConfig);
       expect(mockWorkspaceFactory.writeConfig).toHaveBeenCalledWith(testId, sampleConfig);
     });
 
-    it('should mark needsRestart and emit event when conversation is running', () => {
+    it('should mark needsRestart and emit event when conversation is running', async () => {
       mockConversationState.get.mockReturnValue({ status: 'running' });
 
-      configService.writeConfig(testId, sampleConfig);
+      await configService.writeConfig(testId, sampleConfig);
 
       expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith(testId, 'opencode.json changed');
       expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
@@ -52,19 +52,19 @@ describe('ConfigService', () => {
       });
     });
 
-    it('should not mark needsRestart when conversation is not running', () => {
+    it('should not mark needsRestart when conversation is not running', async () => {
       mockConversationState.get.mockReturnValue({ status: 'prepared' });
 
-      configService.writeConfig(testId, sampleConfig);
+      await configService.writeConfig(testId, sampleConfig);
 
       expect(mockConversationState.markNeedsRestart).not.toHaveBeenCalled();
       expect(mockConversationState.emitEvent).toHaveBeenCalled();
     });
 
-    it('should not mark needsRestart when conversation does not exist', () => {
+    it('should not mark needsRestart when conversation does not exist', async () => {
       mockConversationState.get.mockReturnValue(undefined);
 
-      configService.writeConfig(testId, sampleConfig);
+      await configService.writeConfig(testId, sampleConfig);
 
       expect(mockConversationState.markNeedsRestart).not.toHaveBeenCalled();
       expect(mockConversationState.emitEvent).toHaveBeenCalled();
@@ -72,10 +72,10 @@ describe('ConfigService', () => {
   });
 
   describe('patchConfig', () => {
-    it('should deep merge patch with current config and write', () => {
+    it('should deep merge patch with current config and write', async () => {
       const patch = { model: 'openai/gpt-4' };
 
-      configService.patchConfig(testId, patch);
+      await configService.patchConfig(testId, patch);
 
       expect(mockWorkspaceFactory.readConfig).toHaveBeenCalledWith(testId);
       const written = mockWorkspaceFactory.writeConfig.mock.calls[0][1] as OpencodeConfig;
@@ -83,14 +83,14 @@ describe('ConfigService', () => {
       expect(written.provider).toEqual(sampleConfig.provider);
     });
 
-    it('should deep merge nested objects', () => {
+    it('should deep merge nested objects', async () => {
       const patch = {
         provider: {
           anthropic: { name: 'anthropic', options: { baseURL: 'https://custom.com' } },
         },
       };
 
-      configService.patchConfig(testId, patch);
+      await configService.patchConfig(testId, patch);
 
       const written = mockWorkspaceFactory.writeConfig.mock.calls[0][1] as Record<string, unknown>;
       const provider = written.provider as Record<string, unknown>;
@@ -100,30 +100,30 @@ describe('ConfigService', () => {
       expect((anthropic as Record<string, unknown>).models).toEqual({});
     });
 
-    it('should replace arrays instead of merging', () => {
-      mockWorkspaceFactory.readConfig.mockReturnValue({ model: 'a/b', tags: ['old'] });
+    it('should replace arrays instead of merging', async () => {
+      mockWorkspaceFactory.readConfig.mockReturnValue(Promise.resolve({ model: 'a/b', tags: ['old'] }));
       const patch = { tags: ['new'] };
 
-      configService.patchConfig(testId, patch);
+      await configService.patchConfig(testId, patch);
 
       const written = mockWorkspaceFactory.writeConfig.mock.calls[0][1] as Record<string, unknown>;
       expect(written.tags).toEqual(['new']);
     });
 
-    it('should set new top-level keys', () => {
+    it('should set new top-level keys', async () => {
       const patch = { customKey: 'customValue' };
 
-      configService.patchConfig(testId, patch);
+      await configService.patchConfig(testId, patch);
 
       const written = mockWorkspaceFactory.writeConfig.mock.calls[0][1] as Record<string, unknown>;
       expect(written.customKey).toBe('customValue');
     });
 
-    it('should mark needsRestart and emit event', () => {
+    it('should mark needsRestart and emit event', async () => {
       mockConversationState.get.mockReturnValue({ status: 'running' });
       const patch = { model: 'o3-mini' };
 
-      configService.patchConfig(testId, patch);
+      await configService.patchConfig(testId, patch);
 
       expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith(testId, 'opencode.json changed');
       expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
@@ -131,11 +131,11 @@ describe('ConfigService', () => {
       });
     });
 
-    it('should not mark needsRestart when not running', () => {
+    it('should not mark needsRestart when not running', async () => {
       mockConversationState.get.mockReturnValue(undefined);
       const patch = { model: 'o3-mini' };
 
-      configService.patchConfig(testId, patch);
+      await configService.patchConfig(testId, patch);
 
       expect(mockConversationState.markNeedsRestart).not.toHaveBeenCalled();
     });

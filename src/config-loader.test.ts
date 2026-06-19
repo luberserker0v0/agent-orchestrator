@@ -19,7 +19,7 @@ function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentO
       runtimes: [{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }],
       healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
-    workspace: { basePath: './workspace', enforceCanonicalConfig: true, maxSizeBytes: 52428800 },
+    workspace: { basePath: './workspace', enforceCanonicalConfig: true, maxSizeBytes: 52428800, storage: { type: 'local' } },
     ...overrides,
   } as AgentOrchestratorConfig;
 }
@@ -201,14 +201,14 @@ describe('validateConfig', () => {
 
   it('rejects empty workspace.basePath', () => {
     const config = createValidConfig({
-      workspace: { basePath: '', enforceCanonicalConfig: true },
+      workspace: { basePath: '', enforceCanonicalConfig: true, storage: { type: 'local' } },
     });
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
   });
 
   it('rejects non-positive workspace.maxSizeBytes', () => {
     const config = createValidConfig({
-      workspace: { basePath: './ws', enforceCanonicalConfig: true, maxSizeBytes: 0 },
+      workspace: { basePath: './ws', enforceCanonicalConfig: true, maxSizeBytes: 0, storage: { type: 'local' } },
     });
     expect(() => validateConfig(config)).toThrow('workspace.maxSizeBytes must be a positive integer');
   });

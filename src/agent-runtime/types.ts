@@ -1,6 +1,7 @@
 import type { HealthCheckConfig } from '../config-loader.js';
+import type { RuntimeAccess } from '../storage/types.js';
 
-export type { HealthCheckConfig };
+export type { HealthCheckConfig, RuntimeAccess };
 
 // ─── Health ────────────────────────────────────────────────────────────
 
@@ -148,6 +149,7 @@ export interface AgentRuntime {
     workspacePath: string,
     auth: { username: string; password: string },
     healthCheckConfig: HealthCheckConfig,
+    runtimeAccess?: RuntimeAccess,
   ): Promise<AgentEndpoint>;
   stop(handle?: InstanceHandle, signal?: string): Promise<void>;
   cleanupOrphans?(): Promise<void>;

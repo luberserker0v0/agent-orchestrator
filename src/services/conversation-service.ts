@@ -40,7 +40,7 @@ export class ConversationService {
     private defaultAgentType: string,
   ) {}
 
-  create(id?: string, agentType?: string): ConversationData {
+  async create(id?: string, agentType?: string): Promise<ConversationData> {
     const conversationId = id ?? this.generateId();
 
     if (this.conversationState.has(conversationId)) {
@@ -52,7 +52,7 @@ export class ConversationService {
       throw new AppError(400, ErrorCodes.UNKNOWN_AGENT_TYPE, `Unknown agent type: ${resolvedType}. Available: ${this.runtimeManager.listAgentTypes().join(', ')}`);
     }
 
-    this.workspaceFactory.create(conversationId);
+    await this.workspaceFactory.create(conversationId);
 
     const wsUrl = `ws://${this.serverConfig.host}:${this.serverConfig.port}/ws/${conversationId}`;
     const state = this.conversationState.create(conversationId, resolvedType, wsUrl);

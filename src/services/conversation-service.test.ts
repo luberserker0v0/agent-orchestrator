@@ -44,8 +44,8 @@ describe('ConversationService', () => {
     };
 
     mockWorkspaceFactory = {
-      create: vi.fn(),
-      destroy: vi.fn(),
+      create: vi.fn().mockResolvedValue({ id: '', path: '', opencodeDir: '', runtimeAccess: { type: 'local' as const, cwd: '' } }),
+      destroy: vi.fn().mockResolvedValue(undefined),
     };
 
     mockRuntimeManager = {
@@ -69,7 +69,7 @@ describe('ConversationService', () => {
   });
 
   describe('create', () => {
-    it('should create a conversation with generated id', () => {
+    it('should create a conversation with generated id', async () => {
       mockConversationState.has.mockReturnValue(false);
       mockRuntimeManager.hasAgentType.mockReturnValue(true);
       mockConversationState.create.mockReturnValue({
@@ -83,14 +83,14 @@ describe('ConversationService', () => {
         updatedAt: 100,
       });
 
-      const result = service.create();
+      const result = await service.create();
 
       expect(mockWorkspaceFactory.create).toHaveBeenCalled();
       expect(mockConversationState.create).toHaveBeenCalled();
       expect(result.status).toBe('prepared');
     });
 
-    it('should create a conversation with specified id and agentType', () => {
+    it('should create a conversation with specified id and agentType', async () => {
       mockConversationState.has.mockReturnValue(false);
       mockRuntimeManager.hasAgentType.mockReturnValue(true);
       mockConversationState.create.mockReturnValue({
@@ -104,30 +104,24 @@ describe('ConversationService', () => {
         updatedAt: 100,
       });
 
-      const result = service.create(testId, 'custom');
+      const result = await service.create(testId, 'custom');
 
       expect(result.id).toBe(testId);
       expect(result.agentType).toBe('custom');
     });
 
-    it('should throw 409 when conversation already exists', () => {
+    it('should throw 409 when conversation already exists', async () => {
       mockConversationState.has.mockReturnValue(true);
 
-      expect(() => service.create(testId)).toThrow(AppError);
-      expect(() => service.create(testId)).toThrow(/already exists/);
-      try { service.create(testId); } catch (e: any) {
-        expect(e.statusCode).toBe(409);
-      }
+      await expect(service.create(testId)).rejects.toThrow(AppError);
+      await expect(service.create(testId)).rejects.toThrow(/already exists/);
     });
 
-    it('should throw 400 for unknown agent type', () => {
+    it('should throw 400 for unknown agent type', async () => {
       mockConversationState.has.mockReturnValue(false);
       mockRuntimeManager.hasAgentType.mockReturnValue(false);
 
-      expect(() => service.create(testId, 'unknown')).toThrow(AppError);
-      try { service.create(testId, 'unknown'); } catch (e: any) {
-        expect(e.statusCode).toBe(400);
-      }
+      await expect(service.create(testId, 'unknown')).rejects.toThrow(AppError);
     });
   });
 

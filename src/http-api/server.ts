@@ -161,7 +161,7 @@ export function createHttpServer(
     try {
       const id = typeof req.body.id === 'string' ? req.body.id : undefined;
       const agentType = typeof req.body.agentType === 'string' ? req.body.agentType : undefined;
-      const data = conversationService.create(id, agentType);
+      const data = await conversationService.create(id, agentType);
       res.status(201).json(data);
     } catch (err) {
       logger.error('Failed to create conversation:', err);
@@ -247,19 +247,19 @@ export function createHttpServer(
 
   // ─── Config ──────────────────────────────────────────────
 
-  app.get('/api/conversations/:id/config', (req: Request, res: Response) => {
+  app.get('/api/conversations/:id/config', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
     try {
-      const config = configService.readConfig(id);
+      const config = await configService.readConfig(id);
       res.json(config);
     } catch (err) {
       handleControllerError(res, err);
     }
   });
 
-  app.post('/api/conversations/:id/config', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/config', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -269,7 +269,7 @@ export function createHttpServer(
         sendError(res, 400, ErrorCodes.INVALID_REQUEST_BODY, 'Request body must be a JSON object');
         return;
       }
-      configService.writeConfig(id, config);
+      await configService.writeConfig(id, config);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to write config for ${id}:`, err);
@@ -277,7 +277,7 @@ export function createHttpServer(
     }
   });
 
-  app.patch('/api/conversations/:id/config', (req: Request, res: Response) => {
+  app.patch('/api/conversations/:id/config', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -288,7 +288,7 @@ export function createHttpServer(
         return;
       }
 
-      configService.patchConfig(id, patch);
+      await configService.patchConfig(id, patch);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to patch config for ${id}:`, err);
@@ -403,7 +403,7 @@ export function createHttpServer(
 
   // ─── Files ───────────────────────────────────────────────
 
-  app.put('/api/conversations/:id/files', (req: Request, res: Response) => {
+  app.put('/api/conversations/:id/files', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -416,7 +416,7 @@ export function createHttpServer(
     }
 
     try {
-      fileService.write(id, path, content);
+      await fileService.write(id, path, content);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to write file ${path} for ${id}:`, err);
@@ -424,7 +424,7 @@ export function createHttpServer(
     }
   });
 
-  app.post('/api/conversations/:id/files/read', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/files/read', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -435,14 +435,14 @@ export function createHttpServer(
     }
 
     try {
-      const content = fileService.read(id, path);
+      const content = await fileService.read(id, path);
       res.json({ path, content });
     } catch (err) {
       handleControllerError(res, err, 404);
     }
   });
 
-  app.post('/api/conversations/:id/files/delete', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/files/delete', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -453,7 +453,7 @@ export function createHttpServer(
     }
 
     try {
-      fileService.delete(id, path);
+      await fileService.delete(id, path);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to delete file ${path} for ${id}:`, err);
@@ -461,7 +461,7 @@ export function createHttpServer(
     }
   });
 
-  app.post('/api/conversations/:id/files/copy', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/files/copy', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -474,7 +474,7 @@ export function createHttpServer(
     }
 
     try {
-      fileService.copy(id, source, dest);
+      await fileService.copy(id, source, dest);
       res.status(204).send();
     } catch (err) {
       logger.error(`Failed to copy file for ${id}:`, err);
@@ -482,14 +482,14 @@ export function createHttpServer(
     }
   });
 
-  app.post('/api/conversations/:id/files/list', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/files/list', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
     const path = typeof req.body.path === 'string' ? req.body.path : undefined;
 
     try {
-      const files = fileService.list(id, path);
+      const files = await fileService.list(id, path);
       res.json({ path: path || '.', files });
     } catch (err) {
       handleControllerError(res, err);
@@ -612,7 +612,7 @@ export function createHttpServer(
   // ─── Skills ────────────────────────────────────────────
 
   // Upload skill as zip archive
-  app.post('/api/conversations/:id/skills/upload', express.raw({ type: 'application/zip', limit: '10mb' }), (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/skills/upload', express.raw({ type: 'application/zip', limit: '10mb' }), async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -630,7 +630,7 @@ export function createHttpServer(
     }
 
     try {
-      skillService.uploadSkill(id, rawName, req.body as Buffer);
+      await skillService.uploadSkill(id, rawName, req.body as Buffer);
       res.status(204).send();
     } catch (err) {
       const message = (err as Error).message;
@@ -650,7 +650,7 @@ export function createHttpServer(
   });
 
   // Import skill from local directory
-  app.post('/api/conversations/:id/skills/import', (req: Request, res: Response) => {
+  app.post('/api/conversations/:id/skills/import', async (req: Request, res: Response) => {
     const id = getConversationId(req);
     if (!ensureConversation(res, id)) return;
 
@@ -670,7 +670,7 @@ export function createHttpServer(
     }
 
     try {
-      skillService.importSkill(id, source, name);
+      await skillService.importSkill(id, source, name);
       res.status(204).send();
     } catch (err) {
       const message = (err as Error).message;

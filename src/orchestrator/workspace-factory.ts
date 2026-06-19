@@ -1,51 +1,23 @@
-import {
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-  existsSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-  copyFileSync,
-  cpSync,
-} from 'node:fs';
-import { rm } from 'node:fs/promises';
-import { join, dirname, resolve, sep } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { WorkspaceConfig } from '../config-loader.js';
 import type { OpencodeConfig } from '../opencode-http/types.js';
+import type { StorageBackend } from '../storage/index.js';
+import type { RuntimeAccess } from '../storage/types.js';
 
 export interface WorkspaceInfo {
   id: string;
   path: string;
   opencodeDir: string;
+  runtimeAccess: RuntimeAccess;
 }
 
 const DEFAULT_MAX_WORKSPACE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 function sanitizeId(raw: string): string {
   return raw.replace(/[\\/]/g, '_').replace(/\.{2,}/g, '_');
-}
-
-async function retryRm(dirPath: string, maxRetries = 3, baseDelay = 500): Promise<void> {
-  let lastErr: Error | undefined;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      await rm(dirPath, { recursive: true, force: true });
-      return;
-    } catch (err) {
-      lastErr = err as Error;
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'ENOTEMPTY') {
-        throw err;
-      }
-      if (i < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, Math.min(baseDelay * Math.pow(2, i), 2000)));
-      }
-    }
-  }
-  throw lastErr;
 }
 
 function sanitizeRelativePath(raw: string): string {
@@ -94,25 +66,17 @@ export function getDirSize(dirPath: string): number {
   return total;
 }
 
-function ensureWithinWorkspace(workspacePath: string, relativePath: string): string {
-  const resolved = join(workspacePath, relativePath);
-  const realWorkspace = workspacePath;
-  if (!resolved.startsWith(realWorkspace)) {
-    throw new Error('Invalid path: resolves outside workspace');
-  }
-  return resolved;
-}
-
 export class WorkspaceFactory {
   private basePath: string;
+  private storage: StorageBackend;
   private canonicalConfig: Record<string, unknown>;
   private enforceCanonicalConfig: boolean;
   private maxSizeBytes: number;
   private allowedCopySources: string[];
-  private cleanupAttempts = new Map<string, number>();
 
-  constructor(config: WorkspaceConfig, canonicalConfig?: Record<string, unknown>) {
+  constructor(config: WorkspaceConfig, storage: StorageBackend, canonicalConfig?: Record<string, unknown>) {
     this.basePath = resolve(process.cwd(), config.basePath);
+    this.storage = storage;
     this.enforceCanonicalConfig = config.enforceCanonicalConfig;
     this.maxSizeBytes = config.maxSizeBytes ?? DEFAULT_MAX_WORKSPACE_SIZE;
     this.canonicalConfig = canonicalConfig ?? {};
@@ -123,100 +87,62 @@ export class WorkspaceFactory {
     ];
   }
 
-  create(id?: string): WorkspaceInfo {
+  async create(id?: string): Promise<WorkspaceInfo> {
     const wsId = id ? sanitizeId(id) : randomUUID();
     const wsPath = join(this.basePath, wsId);
     const opencodeDir = join(wsPath, '.opencode');
 
-    mkdirSync(opencodeDir, { recursive: true });
+    await this.storage.createWorkspaceDir(wsId);
+    await this.storage.ensureDir(wsId, '.opencode');
 
     logger.info(`Workspace created: ${wsPath}`);
-    return { id: wsId, path: wsPath, opencodeDir };
+    return {
+      id: wsId,
+      path: wsPath,
+      opencodeDir,
+      runtimeAccess: { type: 'local', cwd: wsPath },
+    };
   }
 
-  ensure(id: string): WorkspaceInfo {
+  async ensure(id: string): Promise<WorkspaceInfo> {
     const wsId = sanitizeId(id);
     const wsPath = join(this.basePath, wsId);
     const opencodeDir = join(wsPath, '.opencode');
-    mkdirSync(opencodeDir, { recursive: true });
-    return { id: wsId, path: wsPath, opencodeDir };
+    if (!await this.storage.hasWorkspace(wsId)) {
+      await this.storage.createWorkspaceDir(wsId);
+      await this.storage.ensureDir(wsId, '.opencode');
+    }
+    return {
+      id: wsId,
+      path: wsPath,
+      opencodeDir,
+      runtimeAccess: { type: 'local', cwd: wsPath },
+    };
   }
 
   async destroy(id: string): Promise<void> {
     const wsId = sanitizeId(id);
     const wsPath = join(this.basePath, wsId);
-    if (existsSync(wsPath)) {
+    if (await this.storage.hasWorkspace(wsId)) {
       try {
-        await retryRm(wsPath);
+        await this.storage.destroyWorkspace(wsId);
         logger.info(`Workspace destroyed: ${wsPath}`);
       } catch (err) {
         logger.warn(`Failed to destroy workspace: ${wsPath}`, err);
-        this.scheduleCleanup(wsPath);
       }
     } else {
       logger.warn(`Workspace not found for destruction: ${wsPath}`);
     }
   }
 
-  private scheduleCleanup(wsPath: string): void {
-    const key = wsPath.toLowerCase();
-    if (this.cleanupAttempts.has(key)) return;
-    this.cleanupAttempts.set(key, 0);
-
-    const attempt = (): void => {
-      const n = this.cleanupAttempts.get(key) ?? 0;
-      const delay = Math.min(10000 * Math.pow(1.5, n), 120000);
-      setTimeout(async () => {
-        try {
-          await retryRm(wsPath, 5, 1000);
-          logger.info(`Background workspace cleanup succeeded: ${wsPath}`);
-          this.cleanupAttempts.delete(key);
-        } catch {
-          if (n < 30) {
-            this.cleanupAttempts.set(key, n + 1);
-            attempt();
-          } else {
-            logger.error(`Background cleanup failed after 30 attempts: ${wsPath}`);
-            this.cleanupAttempts.delete(key);
-          }
-        }
-      }, delay);
-    };
-
-    attempt();
-  }
-
-  cleanupOrphans(): void {
-    if (!existsSync(this.basePath)) {
-      logger.info('No workspace directory to clean up');
-      return;
-    }
-
-    const entries = readdirSync(this.basePath);
-    if (entries.length === 0) {
-      logger.info('Workspace directory is empty, nothing to clean up');
-      return;
-    }
-
-    let cleaned = 0;
-    for (const entry of entries) {
-      const fullPath = join(this.basePath, entry);
-      try {
-        rmSync(fullPath, { recursive: true, force: true });
-        cleaned++;
-      } catch (err) {
-        logger.error(`Failed to remove orphan workspace: ${fullPath}`, err);
-      }
-    }
-    logger.info(`Cleaned up ${cleaned} orphan workspace(s)`);
+  async cleanupOrphans(): Promise<void> {
+    await this.storage.cleanupOrphans();
   }
 
   // ─── Config ──────────────────────────────────────────────
 
-  writeConfig(id: string, config: OpencodeConfig): void {
-    const wsPath = this.resolveWorkspacePath(id);
-    const opencodeDir = join(wsPath, '.opencode');
-    mkdirSync(opencodeDir, { recursive: true });
+  async writeConfig(id: string, config: OpencodeConfig): Promise<void> {
+    const wsId = sanitizeId(id);
 
     let result: Record<string, unknown>;
     if (this.enforceCanonicalConfig) {
@@ -230,81 +156,57 @@ export class WorkspaceFactory {
       result = config as unknown as Record<string, unknown>;
     }
 
-    writeFileSync(
-      join(opencodeDir, 'opencode.json'),
-      JSON.stringify(result, null, 2),
-      'utf-8'
-    );
-    logger.info(`Config written for workspace: ${wsPath}`);
+    await this.storage.writeFile(wsId, '.opencode/opencode.json', JSON.stringify(result, null, 2));
+    logger.info(`Config written for workspace: ${this.resolveWorkspacePath(id)}`);
   }
 
-  readConfig(id: string): OpencodeConfig {
-    const wsPath = this.resolveWorkspacePath(id);
-    const configPath = join(wsPath, '.opencode', 'opencode.json');
-    if (!existsSync(configPath)) {
-      return {};
+  async readConfig(id: string): Promise<OpencodeConfig> {
+    const wsId = sanitizeId(id);
+    try {
+      const raw = await this.storage.readFile(wsId, '.opencode/opencode.json');
+      return JSON.parse(raw.toString('utf-8')) as OpencodeConfig;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+      throw err;
     }
-    const raw = readFileSync(configPath, 'utf-8');
-    return JSON.parse(raw) as OpencodeConfig;
   }
 
   // ─── Generic Files ───────────────────────────────────────
 
-  writeFile(id: string, relativePath: string, content: string): void {
+  async writeFile(id: string, relativePath: string, content: string): Promise<void> {
+    const wsId = sanitizeId(id);
     const sanitized = sanitizeRelativePath(relativePath);
-    const wsPath = this.resolveWorkspacePath(id);
-    const filePath = ensureWithinWorkspace(wsPath, sanitized);
-
     const size = Buffer.byteLength(content, 'utf-8');
-    this.assertQuota(wsPath, size, filePath);
-
-    mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, content, 'utf-8');
-    logger.info(`File written: ${filePath}`);
+    await this.assertQuota(wsId, size);
+    await this.storage.writeFile(wsId, sanitized, content);
+    logger.info(`File written: ${this.resolveWorkspacePath(id)}/${sanitized}`);
   }
 
-  readFile(id: string, relativePath: string): string {
+  async readFile(id: string, relativePath: string): Promise<string> {
+    const wsId = sanitizeId(id);
     const sanitized = sanitizeRelativePath(relativePath);
-    const wsPath = this.resolveWorkspacePath(id);
-    const filePath = ensureWithinWorkspace(wsPath, sanitized);
-    if (!existsSync(filePath)) {
-      throw new Error(`File not found: ${sanitized}`);
-    }
-    return readFileSync(filePath, 'utf-8');
+    const raw = await this.storage.readFile(wsId, sanitized);
+    return raw.toString('utf-8');
   }
 
-  listFiles(id: string, relativePath = ''): string[] {
+  async listFiles(id: string, relativePath = ''): Promise<string[]> {
+    const wsId = sanitizeId(id);
     const sanitized = relativePath ? sanitizeRelativePath(relativePath) : '';
-    const wsPath = this.resolveWorkspacePath(id);
-    const dirPath = sanitized ? ensureWithinWorkspace(wsPath, sanitized) : wsPath;
-    if (!existsSync(dirPath) || !statSync(dirPath).isDirectory()) {
-      throw new Error(`Directory not found: ${sanitized || '.'}`);
-    }
-    return readdirSync(dirPath);
+    return this.storage.listEntries(wsId, sanitized);
   }
 
-  deleteFile(id: string, relativePath: string): void {
+  async deleteFile(id: string, relativePath: string): Promise<void> {
+    const wsId = sanitizeId(id);
     const sanitized = sanitizeRelativePath(relativePath);
-    const wsPath = this.resolveWorkspacePath(id);
-    const filePath = ensureWithinWorkspace(wsPath, sanitized);
-    if (!existsSync(filePath)) {
-      throw new Error(`File not found: ${sanitized}`);
-    }
-    const stat = statSync(filePath);
-    if (stat.isDirectory()) {
-      rmSync(filePath, { recursive: true, force: true });
-    } else {
-      rmSync(filePath, { force: true });
-    }
-    logger.info(`File deleted: ${filePath}`);
+    await this.storage.deleteEntry(wsId, sanitized);
+    logger.info(`File deleted: ${this.resolveWorkspacePath(id)}/${sanitized}`);
   }
 
   // ─── Copy from local ─────────────────────────────────────
 
-  copyFromLocal(id: string, source: string, dest: string): void {
+  async copyFromLocal(id: string, source: string, dest: string): Promise<void> {
+    const wsId = sanitizeId(id);
     const sanitizedDest = sanitizeRelativePath(dest);
-    const wsPath = this.resolveWorkspacePath(id);
-    const destPath = ensureWithinWorkspace(wsPath, sanitizedDest);
 
     // Validate source is within allowed directories
     const resolvedSource = resolve(process.cwd(), source);
@@ -322,48 +224,35 @@ export class WorkspaceFactory {
       throw new Error(`Source not found: ${source}`);
     }
 
-    const stat = statSync(resolvedSource);
-    if (stat.isDirectory()) {
+    const srcStat = statSync(resolvedSource);
+    if (srcStat.isDirectory()) {
       const dirSize = getDirSize(resolvedSource);
-      this.assertQuota(wsPath, dirSize, destPath);
-      mkdirSync(destPath, { recursive: true });
-      cpSync(resolvedSource, destPath, { recursive: true, force: true });
+      await this.assertQuota(wsId, dirSize);
+      await this.storage.copyToStorageRecursive(wsId, resolvedSource, sanitizedDest);
     } else {
-      this.assertQuota(wsPath, stat.size, destPath);
-      mkdirSync(dirname(destPath), { recursive: true });
-      copyFileSync(resolvedSource, destPath);
+      await this.assertQuota(wsId, srcStat.size);
+      await this.storage.copyToStorage(wsId, resolvedSource, sanitizedDest);
     }
-    logger.info(`Copied from local: ${resolvedSource} → ${destPath}`);
+    logger.info(`Copied from local: ${resolvedSource} → ${this.resolveWorkspacePath(id)}/${sanitizedDest}`);
   }
 
   // ─── Quota helpers ───────────────────────────────────────
 
-  hasWorkspace(id: string): boolean {
-    return existsSync(join(this.basePath, sanitizeId(id)));
+  async hasWorkspace(id: string): Promise<boolean> {
+    return this.storage.hasWorkspace(sanitizeId(id));
   }
 
-  getWorkspaceSize(id: string): number {
-    const wsPath = this.resolveWorkspacePath(id);
-    if (!existsSync(wsPath)) return 0;
-    return getDirSize(wsPath);
+  async getWorkspaceSize(id: string): Promise<number> {
+    return this.storage.getWorkspaceSize(sanitizeId(id));
   }
 
   resolveWorkspacePath(id: string): string {
     return join(this.basePath, sanitizeId(id));
   }
 
-  assertQuota(wsPath: string, additionalBytes: number, excludingFile?: string): void {
-    const currentSize = getDirSize(wsPath);
-    // Exclude the file being overwritten so we don't double-count
-    let excluding = 0;
-    if (excludingFile && existsSync(excludingFile)) {
-      try {
-        excluding = statSync(excludingFile).size;
-      } catch {
-        // ignore
-      }
-    }
-    if (currentSize - excluding + additionalBytes > this.maxSizeBytes) {
+  async assertQuota(wsId: string, additionalBytes: number): Promise<void> {
+    const currentSize = await this.storage.getWorkspaceSize(wsId);
+    if (currentSize + additionalBytes > this.maxSizeBytes) {
       throw new Error(
         `Workspace quota exceeded. Current: ${currentSize} bytes, Adding: ${additionalBytes} bytes, Limit: ${this.maxSizeBytes} bytes`
       );
