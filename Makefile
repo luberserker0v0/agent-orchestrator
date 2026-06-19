@@ -1,5 +1,5 @@
 IMAGE_NAME ?= agent-orchestrator
-REGISTRY  ?= ghcr.io/anomalyco
+REGISTRY  ?= luberserker
 GIT_TAG   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo latest)
 
 .PHONY: docker-build docker-tag docker-push docker-clean docker-version
