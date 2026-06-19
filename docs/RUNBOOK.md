@@ -16,6 +16,8 @@ npm run build && npm start
 
 ### Docker 部署
 
+Container 內 AO 固定監聽 **8080**，外部 port 透過 `-p HOST:8080` 對映：
+
 ```bash
 docker build -t agent-orchestrator .
 docker run -d --name aor \
@@ -24,6 +26,12 @@ docker run -d --name aor \
   -e AGENTORCHESTRATOR_SERVER_APIKEY=your-secret-key \
   agent-orchestrator
 ```
+
+若 AO 在容器內、同時 OpenCode runtime 也使用 `docker` 模式（管理 Docker OpenCode 實例）：
+
+- **bridge 模式（預設）**：`instanceHost` 需設為 Docker 主機 IP（可存取容器外 OpenCode 實例的位址）
+- **host 網路模式**：`--network host` 時 AO 直接使用主機網路，OpenCode `instanceHost` 設為 `127.0.0.1` 即可
+- 容器內預設 port 8080 可透過 env var `AGENTORCHESTRATOR_SERVER_PORT` 覆寫
 
 ### 優雅關機
 
