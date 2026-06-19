@@ -84,7 +84,7 @@ aor [options]
 # Build
 docker build -t agent-orchestrator .
 
-# Run（container 內固定監聽 8080，外部 port 由 -p 控制）
+# Run（container 內綁定 0.0.0.0:8080，外部 port 由 -p 控制）
 docker run -d --name aor \
   -p 8080:8080 \
   -v /path/to/config:/app/config \

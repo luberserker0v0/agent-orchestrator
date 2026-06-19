@@ -16,7 +16,7 @@ npm run build && npm start
 
 ### Docker 部署
 
-Container 內 AO 固定監聽 **8080**，外部 port 透過 `-p HOST:8080` 對映：
+容器內部 AO 綁定 **`0.0.0.0:8080`**（所有網路介面），讓 Docker `-p HOST:8080` 能正確轉發流量：
 
 ```bash
 docker build -t agent-orchestrator .
