@@ -22,8 +22,18 @@ describe('HTTP API Server', () => {
 
   beforeEach(() => {
     mockRuntimeRegistry = {
-      get: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
-      getOrThrow: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+      get: vi.fn().mockReturnValue({
+        type: 'direct',
+        capabilities: { sessions: false, streaming: false, files: false, tools: false, config: false, agents: false, skills: false },
+        start: vi.fn(),
+        stop: vi.fn(),
+      }),
+      getOrThrow: vi.fn().mockReturnValue({
+        type: 'direct',
+        capabilities: { sessions: false, streaming: false, files: false, tools: false, config: false, agents: false, skills: false },
+        start: vi.fn(),
+        stop: vi.fn(),
+      }),
       list: vi.fn().mockReturnValue(['opencode']),
       has: vi.fn().mockReturnValue(true),
     };
@@ -177,6 +187,51 @@ describe('HTTP API Server', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.uptime).toBeGreaterThan(0);
+  });
+
+  it('GET /api/runtimes returns registered runtimes', async () => {
+    const res = await request(server).get('/api/runtimes');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { id: 'opencode', type: 'direct', capabilities: expect.any(Object) },
+    ]);
+  });
+
+  it('GET /api/runtimes returns empty list when no runtimes', async () => {
+    mockRuntimeRegistry.list.mockReturnValue([]);
+    const res = await request(server).get('/api/runtimes');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('GET /api/runtimes requires auth when apiKey is set', async () => {
+    const secureServer = createHttpServer(
+      { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000, apiKey: 'my-secret-key' },
+      { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
+      mockInstanceManager,
+      mockWorkspaceFactory,
+      mockConversationState,
+      mockConfigService,
+      mockAgentService,
+      mockSkillService,
+      mockRuntimeRegistry,
+      mockConversationService,
+      mockFileService,
+      mockSessionService,
+      mockMessageService
+    );
+
+    try {
+      const res = await request(secureServer.server).get('/api/runtimes');
+      expect(res.status).toBe(401);
+
+      const authedRes = await request(secureServer.server)
+        .get('/api/runtimes')
+        .set('Authorization', 'Bearer my-secret-key');
+      expect(authedRes.status).toBe(200);
+    } finally {
+      secureServer.server.close();
+    }
   });
 
   it('GET /api-docs/ serves Swagger UI', async () => {

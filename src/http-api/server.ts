@@ -144,6 +144,16 @@ export function createHttpServer(
     res.end(await metricsRegistry.metrics());
   });
 
+  // ─── Runtimes ─────────────────────────────────────────────
+
+  app.get('/api/runtimes', (_req: Request, res: Response) => {
+    const runtimes = runtimeRegistry.list().map((id) => {
+      const rt = runtimeRegistry.get(id)!;
+      return { id, type: rt.type, capabilities: rt.capabilities };
+    });
+    res.json(runtimes);
+  });
+
   // ─── Conversation Lifecycle ──────────────────────────────
 
   // Create conversation (prepare workspace, do NOT start agent instance)
