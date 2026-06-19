@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- fix(docker): hardcode container port 8080 in CMD and HEALTHCHECK, add Docker execution docs (#76)
+
 ### Added
 
 - feat(http-api): add GET /api/runtimes endpoint exposing registered runtimes
