@@ -289,4 +289,4 @@ readinessProbe:
 
 Mount `config/agentorchestrator.json` as a k8s ConfigMap, override via environment variables in the Pod template.
 
-> **Note**: Runtime-specific settings (`runtimeConfig.docker.*`, `instanceHost`) are only relevant when the orchestrator is configured to manage OpenCode instances on a Docker host (whether same-node or remote). The orchestrator itself does not require Docker to run.
+> **Note**: Runtime-specific settings (`runtimes[].config.docker.*`, `instanceHost`) are only relevant when the orchestrator is configured to manage OpenCode instances on a Docker host (whether same-node or remote). The orchestrator itself does not require Docker to run.

@@ -169,8 +169,8 @@ src/
   config-loader.ts           # Configuration loading with env overrides
   index.ts                   # Application entry point
   agent-runtime/
-    types.ts                 # AgentRuntime interface, SpawnResult type
-    registry.ts              # RuntimeRegistry — runtime lookup by agentType
+    types.ts                 # AgentRuntime interface, AgentEndpoint type
+    registry.ts              # RuntimeRegistry — runtime lookup by id
     runtime-manager.ts       # RuntimeManager — manages instance map, lifecycle, policy queries (LRU candidate, idle detection)
     runtimes/
       direct.ts              # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill. Accepts DirectRuntimeConfig ({ binary })
@@ -250,7 +250,7 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `defaultAgentType` | string | 'opencode' | Default agent type — must match the `id` of one runtime entry in `runtimes[]` |
 | `runtimes` | array | `[{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct` or `docker`), and `config` |
 | `runtimes[].config.binary` | string | `opencode` | OpenCode CLI command or absolute path |
-| `runtimes[].config.instanceHost` | string | `'127.0.0.1'` | Hostname used to reach spawned OpenCode instances (per-runtime, useful for remote Docker hosts) |
+| `runtimes[].config.instanceHost` | string | `'127.0.0.1'` | Hostname used to reach started OpenCode instances (per-runtime, useful for remote Docker hosts) |
 | `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) |
 | `runtimes[].config.docker.containerPort` | integer | (required for docker) | Container port that OpenCode listens on |
 | `runtimes[].config.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
