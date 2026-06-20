@@ -100,7 +100,7 @@ export class WorkspaceFactory {
       id: wsId,
       path: wsPath,
       opencodeDir,
-      runtimeAccess: { type: 'local', cwd: wsPath },
+      runtimeAccess: this.storage.getRuntimeAccess(wsId),
     };
   }
 
