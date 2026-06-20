@@ -34,6 +34,16 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
+      - name: Extract OPENCODE_VERSION from config
+        id: opencode-version
+        run: |
+          VERSION=$(node -p "try{var j=require('./config/agentorchestrator.json');var r=j.orchestrator.runtimes.find(function(r){return r.type==='direct'});r?r.config.version||'':''}catch(e){''}")
+          echo "OPENCODE_VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted OPENCODE_VERSION: $VERSION"
+
+      - name: Render Dockerfile from template
+        run: node scripts/render-dockerfile.js
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -41,6 +51,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: OPENCODE_VERSION=${{ steps.opencode-version.outputs.OPENCODE_VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

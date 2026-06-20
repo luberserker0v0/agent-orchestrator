@@ -1,11 +1,15 @@
 IMAGE_NAME ?= agent-orchestrator
 REGISTRY  ?= luberserker
 GIT_TAG   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo latest)
+OPENCODE_VERSION ?= $(shell node -p "try{var j=require('./config/agentorchestrator.json');var r=j.orchestrator.runtimes.find(function(r){return r.type==='direct'});r?r.config.version||'':''}catch(e){''}")
 
-.PHONY: docker-build docker-tag docker-push docker-clean docker-version
+.PHONY: docker-build docker-tag docker-push docker-clean docker-version render-dockerfile
 
-docker-build:           ## Build the image
-	docker build -t $(IMAGE_NAME):latest .
+render-dockerfile:       ## Render Dockerfile.template → Dockerfile
+	node scripts/render-dockerfile.js
+
+docker-build: render-dockerfile ## Render template, then build the image
+	docker build --build-arg OPENCODE_VERSION=$(OPENCODE_VERSION) -t $(IMAGE_NAME):latest .
 
 docker-tag:             ## Tag with git version
 	docker tag $(IMAGE_NAME):latest $(REGISTRY)/$(IMAGE_NAME):$(GIT_TAG)
