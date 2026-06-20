@@ -21,6 +21,7 @@ import { PortPool } from './orchestrator/port-pool.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
 import { parseCliArgs, printHelp } from './cli.js';
+import { isRunningInContainer } from './utils/is-container.js';
 
 export async function main(cliArgs?: string[]) {
   const cli = parseCliArgs(cliArgs ?? process.argv.slice(2));
@@ -48,6 +49,19 @@ export async function main(cliArgs?: string[]) {
   logger.info('AgentOrchestrator starting...');
 
   const config = loadConfig(cli.configPath);
+
+  // Validate container + runtime + storage compatibility
+  if (isRunningInContainer()) {
+    const hasNonDirectRuntime = config.orchestrator.runtimes.some(r => r.type !== 'direct');
+    if (hasNonDirectRuntime && config.workspace.storage.type === 'local') {
+      throw new Error(
+        'AO is running inside a container with a non-direct runtime (e.g., "docker") ' +
+        'but workspace.storage is "local". Container-based agent instances cannot access ' +
+        'the AO container\'s local filesystem. Set workspace.storage to a non-local type ' +
+        '(e.g., "docker-volume") that supports volume sharing between containers.'
+      );
+    }
+  }
   const canonicalConfig = loadCanonicalConfig(config.workspace.enforceCanonicalConfig);
   logger.info('Configuration loaded');
 
