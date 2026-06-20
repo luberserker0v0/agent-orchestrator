@@ -50,7 +50,7 @@ export class ConversationState {
   private listeners = new Map<string, Set<(event: ConversationEvent) => void>>();
   private readyTokens = new Map<string, ReadyCheckToken>();
 
-  create(id: string, agentType = 'opencode', wsUrl?: string): ConversationStateData {
+  create(id: string, agentType = 'opencode-direct', wsUrl?: string): ConversationStateData {
     const state: ConversationStateData = {
       id,
       agentType,
