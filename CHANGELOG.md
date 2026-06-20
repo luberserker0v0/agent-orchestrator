@@ -7,9 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- feat(cli): add `aor runtime list` and `aor runtime info <id>` subcommands
+- feat(config): add `version` field to DirectRuntimeConfig for version registry
+- feat(versions): add version registry helpers (`getRuntimeVersion`, `opencodeDownloadUrl`)
+- feat(runtime-info): add RuntimeInfoProvider for aggregated runtime data
+- feat(docker): Dockerfile.template with `{{OPENCODE_VERSION}}` placeholder and render script
+- feat(ci): add OPENCODE_VERSION build-arg extraction and Dockerfile rendering in CD workflow
+
+### Changed
+
+- refactor(docker): remove `containerPort` from DockerRuntimeConfig; use dynamic port only
+- refactor(http-api): enhance GET /api/runtimes with version, config, registered, capabilities
+- refactor(config): update example config with `opencode-direct` and `opencode-docker` runtime entries
+- refactor(cli): add subcommand parser supporting `aor runtime list|info`
+- refactor(makefile): add `render-dockerfile` target and OPENCODE_VERSION build-arg
+- build: add `.gitignore` entry for generated Dockerfile
+
 ### Fixed
 
-- fix(docker): hardcode container port 8080 in CMD and HEALTHCHECK, add Docker execution docs (#76)
+- fix(docker): use dynamic port for container listen (`--port port`) and port mapping (`instanceHost:port:port`)
+- fix(docker): baseUrl now uses dynamic port for both bridge and host network modes
 
 ### Added
 
