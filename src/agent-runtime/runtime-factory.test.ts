@@ -78,13 +78,11 @@ describe('RuntimeFactory', () => {
       const errs: string[] = [];
       const cfg = config as Record<string, unknown>;
       if (!cfg?.image || typeof cfg.image !== 'string') errs.push('"image" is required');
-      if (!Number.isInteger(cfg?.containerPort)) errs.push('"containerPort" must be a positive integer');
       return errs;
     });
 
-    expect(factory.validateConfig('docker', {})).toEqual(['"image" is required', '"containerPort" must be a positive integer']);
-    expect(factory.validateConfig('docker', { image: 'img' })).toEqual(['"containerPort" must be a positive integer']);
-    expect(factory.validateConfig('docker', { image: 'img', containerPort: 3000 })).toEqual([]);
+    expect(factory.validateConfig('docker', {})).toEqual(['"image" is required']);
+    expect(factory.validateConfig('docker', { image: 'img' })).toEqual([]);
   });
 
   it('validateConfig returns empty for unregistered type', () => {

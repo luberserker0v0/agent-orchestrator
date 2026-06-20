@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OrchestratorConfig } from '../../src/config-loader.js';
+import type { OrchestratorConfig, AgentOrchestratorConfig } from '../../src/config-loader.js';
 import { createHttpServer, type HttpServer } from '../../src/http-api/server.js';
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
@@ -36,6 +36,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const workspaceConfig = {
     basePath: workspaceDir,
     enforceCanonicalConfig: false,
+    storage: { type: 'local' as const },
   };
 
   const host = process.env.AO_TEST_SERVER_HOST || '127.0.0.1';
@@ -85,6 +86,13 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const sessionService = new SessionService(instanceManager, conversationState);
   const messageService = new MessageService(instanceManager, conversationState);
 
+  const fullConfig: AgentOrchestratorConfig = {
+    server: serverConfig,
+    websocket: wsConfig,
+    orchestrator: orchestratorConfig,
+    workspace: workspaceConfig,
+  };
+
   const httpServer: HttpServer = createHttpServer(
     serverConfig,
     wsConfig,
@@ -99,6 +107,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     fileService,
     sessionService,
     messageService,
+    fullConfig,
   );
 
   await instanceManager.cleanupOrphanContainers();

@@ -90,7 +90,7 @@ export class DockerRuntime implements AgentRuntime {
       if (this.config.networkMode === 'host') {
         dockerArgs.push('--network', 'host');
       } else {
-        dockerArgs.push('-p', `${this.config.instanceHost}:${port}:${this.config.containerPort}`);
+        dockerArgs.push('-p', `${this.config.instanceHost}:${port}:${port}`);
         if (this.config.networkMode) {
           dockerArgs.push('--network', this.config.networkMode);
         }
@@ -101,7 +101,7 @@ export class DockerRuntime implements AgentRuntime {
         '-e', `OPENCODE_SERVER_USERNAME=${auth.username}`,
         '-e', `OPENCODE_SERVER_PASSWORD=${auth.password}`,
         this.config.image,
-        'serve', '--port', String(this.config.containerPort), '--hostname', '0.0.0.0',
+        'serve', '--port', String(port), '--hostname', '0.0.0.0',
       );
 
       logger.info(`Spawning OpenCode container ${containerName} on port ${port} (image: ${this.config.image})`);

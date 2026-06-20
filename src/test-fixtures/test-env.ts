@@ -13,9 +13,8 @@ export interface ProviderConfig {
   models: Array<{ name: string }>;
 }
 
-export function loadDockerConfig(): { image: string; containerPort: number } {
+export function loadDockerConfig(): { image: string } {
   return {
-    image: process.env.AO_TEST_DOCKER_IMAGE || 'ghcr.io/anomalyco/opencode:1.17.4',
-    containerPort: Number(process.env.AO_TEST_CONTAINER_PORT) || 3000,
+    image: process.env.AO_TEST_DOCKER_IMAGE || 'ghcr.io/anomalyco/opencode:latest',
   };
 }
