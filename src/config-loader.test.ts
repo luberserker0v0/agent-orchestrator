@@ -15,8 +15,8 @@ function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentO
       idleTimeoutMs: 600000,
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100 },
-      defaultAgentType: 'opencode',
-      runtimes: [{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }],
+      defaultAgentType: 'opencode-direct',
+      runtimes: [{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode' } }],
       healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
     workspace: { basePath: './workspace', enforceCanonicalConfig: true, maxSizeBytes: 52428800, storage: { type: 'local' } },
@@ -193,7 +193,7 @@ describe('validateConfig', () => {
       orchestrator: {
         ...createValidConfig().orchestrator,
         defaultAgentType: 'opencode-docker',
-        runtimes: [{ id: 'opencode-docker', type: 'docker', config: { image: 'opencode:latest', containerPort: 3000 } }],
+        runtimes: [{ id: 'opencode-docker', type: 'docker', config: { image: 'opencode:latest' } }],
       },
     });
     expect(() => validateConfig(config)).not.toThrow();
@@ -277,7 +277,7 @@ describe('validateConfig', () => {
       orchestrator: {
         ...createValidConfig().orchestrator,
         defaultAgentType: 'd',
-        runtimes: [{ id: 'd', type: 'docker', config: { image: 'img', containerPort: 3000, networkMode: 'host' } }],
+        runtimes: [{ id: 'd', type: 'docker', config: { image: 'img', networkMode: 'host' } }],
       },
     });
     expect(() => validateConfig(config)).not.toThrow();
@@ -290,7 +290,7 @@ describe('validateConfig', () => {
         defaultAgentType: 'direct-rt',
         runtimes: [
           { id: 'direct-rt', type: 'direct', config: { binary: 'opencode' } },
-          { id: 'docker-rt', type: 'docker', config: { image: 'img', containerPort: 3000 } },
+          { id: 'docker-rt', type: 'docker', config: { image: 'img' } },
         ],
       },
     });

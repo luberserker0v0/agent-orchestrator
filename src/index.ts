@@ -20,7 +20,7 @@ import { DockerRuntime } from './agent-runtime/runtimes/docker.js';
 import { PortPool } from './orchestrator/port-pool.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
-import { parseCliArgs, printHelp } from './cli.js';
+import { parseCliArgs, printHelp, handleSubcommand } from './cli.js';
 import { isRunningInContainer } from './utils/is-container.js';
 
 export async function main(cliArgs?: string[]) {
@@ -41,6 +41,8 @@ export async function main(cliArgs?: string[]) {
     console.log(`v${pkg.version}`);
     return;
   }
+
+  if (handleSubcommand(cli)) return;
 
   // Set env vars from CLI args so applyEnvOverrides picks them up
   if (cli.port !== undefined) process.env['AGENTORCHESTRATOR_SERVER_PORT'] = String(cli.port);
@@ -81,7 +83,6 @@ export async function main(cliArgs?: string[]) {
     const errs: string[] = [];
     const cfg = config as Record<string, unknown>;
     if (!cfg?.image || typeof cfg.image !== 'string') errs.push('"image" is required');
-    if (!Number.isInteger(cfg?.containerPort)) errs.push('"containerPort" must be a positive integer');
     if (cfg?.networkMode !== undefined && typeof cfg.networkMode !== 'string')
       errs.push('"networkMode" must be a string');
     return errs;
@@ -110,7 +111,7 @@ export async function main(cliArgs?: string[]) {
   await instanceManager.cleanupOrphanContainers();
   await workspaceFactory.cleanupOrphans();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService, config);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();

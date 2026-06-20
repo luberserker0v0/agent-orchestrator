@@ -24,15 +24,15 @@ export interface HealthCheckConfig {
 export interface DirectRuntimeConfig {
   /** Path or name of the `opencode` binary (default: `opencode`) */
   binary: string;
+  /** Version of the opencode binary (used by the version registry) */
+  version?: string;
   /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
   instanceHost?: string;
 }
 
 export interface DockerRuntimeConfig {
-  /** Docker image to pull and run (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) */
+  /** Docker image to pull and run (e.g. `ghcr.io/anomalyco/opencode:1.17.8`) */
   image: string;
-  /** Port inside the container that opencode serves on (default: 3000) */
-  containerPort: number;
   /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
   instanceHost?: string;
   /** Docker network mode (e.g. `host`, `bridge`, or a custom network name). When `host`, port mapping is skipped. */
@@ -306,8 +306,8 @@ export function defaultConfig(): AgentOrchestratorConfig {
       idleTimeoutMs: 600000,
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100, allowDynamicFallback: true },
-      defaultAgentType: 'opencode',
-      runtimes: [{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }],
+      defaultAgentType: 'opencode-direct',
+      runtimes: [{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode', version: '1.17.8' } }],
       healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
     workspace: {
