@@ -14,6 +14,10 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/bin ./bin
 COPY --from=builder /app/config ./config
+
+RUN mkdir -p /data/workspace && chown -R nodejs:nodejs /data/workspace
+ENV AGENTORCHESTRATOR_WORKSPACE_BASEPATH=/data/workspace
+
 USER nodejs
 EXPOSE 8080
 ENV NODE_ENV=production
