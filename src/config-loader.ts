@@ -106,20 +106,27 @@ function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHE
     let current: Record<string, unknown> = config;
     for (let i = 0; i < path.length - 1; i++) {
       const key = path[i];
-      if (!current[key] || typeof current[key] !== 'object') {
-        current[key] = {};
+      const matchedKey = Object.keys(current).find(
+        k => k.toLowerCase() === key.toLowerCase()
+      ) ?? key;
+      if (!current[matchedKey] || typeof current[matchedKey] !== 'object') {
+        current[matchedKey] = {};
       }
-      current = current[key] as Record<string, unknown>;
+      current = current[matchedKey] as Record<string, unknown>;
     }
 
     const leafKey = path[path.length - 1];
+    const matchedKey = Object.keys(current).find(
+      k => k.toLowerCase() === leafKey.toLowerCase()
+    );
+    const finalKey = matchedKey ?? leafKey;
     const trimmed = envValue?.trim() ?? '';
     const numValue = Number(trimmed);
     const isValidNumber =
       trimmed !== '' &&
       Number.isFinite(numValue) &&
       !Number.isNaN(numValue);
-    current[leafKey] = isValidNumber ? numValue : envValue;
+    current[finalKey] = isValidNumber ? numValue : envValue;
   }
 }
 
