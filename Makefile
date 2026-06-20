@@ -6,7 +6,7 @@ OPENCODE_VERSION ?= $(shell node -p "try{var j=require('./config/agentorchestrat
 .PHONY: docker-build docker-tag docker-push docker-clean docker-version render-dockerfile
 
 render-dockerfile:       ## Render Dockerfile.template → Dockerfile
-	node scripts/render-dockerfile.js
+	node scripts/render-dockerfile.cjs
 
 docker-build: render-dockerfile ## Render template, then build the image
 	docker build --build-arg OPENCODE_VERSION=$(OPENCODE_VERSION) -t $(IMAGE_NAME):latest .

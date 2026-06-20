@@ -42,7 +42,7 @@ jobs:
           echo "Extracted OPENCODE_VERSION: $VERSION"
 
       - name: Render Dockerfile from template
-        run: node scripts/render-dockerfile.js
+        run: node scripts/render-dockerfile.cjs
 
       - name: Build and push
         uses: docker/build-push-action@v6
