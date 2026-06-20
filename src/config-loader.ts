@@ -342,11 +342,16 @@ export function loadConfig(configPath?: string): AgentOrchestratorConfig {
       throw new Error(`Config file not found: ${configPath}`);
     }
     resolvedPath = configPath;
-  } else if (existsSync(CONFIG_PATH)) {
-    resolvedPath = CONFIG_PATH;
-  } else if (existsSync(EXAMPLE_PATH)) {
-    console.warn(`[config-loader] ${CONFIG_PATH} not found, falling back to ${EXAMPLE_PATH}. Copy it to use as your config.`);
-    resolvedPath = EXAMPLE_PATH;
+  } else {
+    const aoConfigPath = join(process.cwd(), 'ao.config.json');
+    if (existsSync(aoConfigPath)) {
+      resolvedPath = aoConfigPath;
+    } else if (existsSync(CONFIG_PATH)) {
+      resolvedPath = CONFIG_PATH;
+    } else if (existsSync(EXAMPLE_PATH)) {
+      console.warn(`[config-loader] ${CONFIG_PATH} not found, falling back to ${EXAMPLE_PATH}. Copy it to use as your config.`);
+      resolvedPath = EXAMPLE_PATH;
+    }
   }
 
   let config: AgentOrchestratorConfig;
