@@ -100,10 +100,11 @@ describe('InstanceManager', () => {
     };
 
     runtimeRegistry = new RuntimeRegistry();
-    runtimeRegistry.register('opencode', mockRuntime);
+    runtimeRegistry.register('opencode-direct', mockRuntime);
+    runtimeRegistry.register('opencode-docker', mockRuntime);
 
     portPool = new PortPool(defaultOrchestratorConfig.portRange.start, defaultOrchestratorConfig.portRange.end);
-    runtimeManager = new RuntimeManager(portPool, runtimeRegistry, 'opencode');
+    runtimeManager = new RuntimeManager(portPool, runtimeRegistry, 'opencode-direct');
     instanceManager = new InstanceManager(defaultOrchestratorConfig, workspaceFactory, runtimeManager);
   });
 
@@ -631,7 +632,7 @@ describe('InstanceManager', () => {
         maxInstances: 1,
         portRange: { start: 30000, end: 30001 },
       };
-      const strictRM = new RuntimeManager(portPool, runtimeRegistry, 'opencode');
+      const strictRM = new RuntimeManager(portPool, runtimeRegistry, 'opencode-direct');
       const strictManager = new InstanceManager(strictConfig, workspaceFactory, strictRM);
 
       const handleA = createMockHandle();

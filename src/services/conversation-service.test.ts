@@ -50,7 +50,7 @@ describe('ConversationService', () => {
 
     mockRuntimeManager = {
       hasAgentType: vi.fn(),
-      listAgentTypes: vi.fn().mockReturnValue(['opencode']),
+      listAgentTypes: vi.fn().mockReturnValue(['opencode-direct']),
     };
 
     mockServerConfig = {
@@ -64,7 +64,7 @@ describe('ConversationService', () => {
       mockWorkspaceFactory,
       mockRuntimeManager,
       mockServerConfig,
-      'opencode',
+      'opencode-direct',
     );
   });
 
@@ -74,7 +74,7 @@ describe('ConversationService', () => {
       mockRuntimeManager.hasAgentType.mockReturnValue(true);
       mockConversationState.create.mockReturnValue({
         id: 'gen-id',
-        agentType: 'opencode',
+        agentType: 'opencode-direct',
         status: 'prepared',
         ready: false,
         needsRestart: false,
@@ -129,7 +129,7 @@ describe('ConversationService', () => {
     it('should return conversation data', () => {
       mockConversationState.get.mockReturnValue({
         id: testId,
-        agentType: 'opencode',
+        agentType: 'opencode-direct',
         status: 'prepared',
         ready: false,
         needsRestart: false,
@@ -155,8 +155,8 @@ describe('ConversationService', () => {
   describe('list', () => {
     it('should return all conversations', () => {
       mockConversationState.list.mockReturnValue([
-        { id: 'a', agentType: 'opencode', status: 'prepared', ready: false, needsRestart: false, createdAt: 1, updatedAt: 1 },
-        { id: 'b', agentType: 'opencode', status: 'running', ready: true, needsRestart: false, createdAt: 2, updatedAt: 2 },
+        { id: 'a', agentType: 'opencode-direct', status: 'prepared', ready: false, needsRestart: false, createdAt: 1, updatedAt: 1 },
+        { id: 'b', agentType: 'opencode-direct', status: 'running', ready: true, needsRestart: false, createdAt: 2, updatedAt: 2 },
       ]);
 
       const result = service.list();
@@ -184,7 +184,7 @@ describe('ConversationService', () => {
   describe('start', () => {
     const mockState = {
       id: testId,
-      agentType: 'opencode',
+      agentType: 'opencode-direct',
       status: 'prepared',
       ready: false,
       wsUrl: 'ws://127.0.0.1:8080/ws/conv-1',
@@ -264,7 +264,7 @@ describe('ConversationService', () => {
   describe('restart', () => {
     const mockState = {
       id: testId,
-      agentType: 'opencode',
+      agentType: 'opencode-direct',
       status: 'stopped',
       ready: false,
       wsUrl: 'ws://127.0.0.1:8080/ws/conv-1',
@@ -310,7 +310,7 @@ describe('ConversationService', () => {
 
       expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId);
       expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith(testId);
-      expect(mockInstanceManager.createInstance).toHaveBeenCalledWith(testId, 'opencode');
+      expect(mockInstanceManager.createInstance).toHaveBeenCalledWith(testId, 'opencode-direct');
     });
 
     it('should use restartInstance when supported', async () => {
