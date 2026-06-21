@@ -413,6 +413,32 @@ describe('InstanceManager', () => {
       await dockerManager.destroyInstance('conv-restart-health');
       dockerManager.destroy();
     });
+
+    it('registers onExit on new handle after restart; process exit triggers cleanup', async () => {
+      const manager = new InstanceManager(dockerOrchestratorConfig, workspaceFactory, runtimeManager);
+
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
+
+      await manager.createInstance('conv-restart-exit');
+      expect(manager.listInstances()).toHaveLength(1);
+
+      const restartHandle = createMockHandle();
+      (mockRuntime.restart as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        client: mockClient, port: 0, handle: restartHandle,
+      });
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await manager.restartInstance('conv-restart-exit');
+      expect(manager.listInstances()).toHaveLength(1);
+
+      restartHandle._fireExit(0);
+      await new Promise((r) => setTimeout(r, 10));
+      expect(manager.listInstances()).toHaveLength(0);
+
+      manager.destroy();
+    });
   });
 
   describe('getInstance', () => {

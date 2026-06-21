@@ -340,6 +340,23 @@ describe('ConversationService', () => {
       await expect(service.restart(testId)).rejects.toThrow();
       expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'error', { error: 'no ports' });
     });
+
+    it('should restart from error state using createInstance', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState, status: 'error' });
+      mockInstanceManager.createInstance.mockResolvedValue({
+        port: 41005,
+        process: {},
+        client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_5' }) },
+      });
+
+      const result = await service.restart(testId);
+
+      expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'restarting');
+      expect(mockInstanceManager.getInstance).toHaveBeenCalledWith(testId);
+      expect(mockInstanceManager.restartInstance).not.toHaveBeenCalled();
+      expect(mockInstanceManager.createInstance).toHaveBeenCalledWith(testId, 'opencode-direct');
+      expect(result.status).toBe('running');
+    });
   });
 
   describe('delete', () => {

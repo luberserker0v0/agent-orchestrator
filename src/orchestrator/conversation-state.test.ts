@@ -152,6 +152,24 @@ describe('ConversationState', () => {
       state.transition('conv-same', 'starting');
       expect(state.get('conv-same')?.status).toBe('starting');
     });
+
+    it('should allow stopped to restarting transition', () => {
+      const state = new ConversationState();
+      state.create('conv-stop-restart');
+      state.transition('conv-stop-restart', 'starting');
+      state.transition('conv-stop-restart', 'stopped');
+      state.transition('conv-stop-restart', 'restarting');
+      expect(state.get('conv-stop-restart')?.status).toBe('restarting');
+    });
+
+    it('should allow error to restarting transition', () => {
+      const state = new ConversationState();
+      state.create('conv-err-restart');
+      state.transition('conv-err-restart', 'starting');
+      state.transition('conv-err-restart', 'error');
+      state.transition('conv-err-restart', 'restarting');
+      expect(state.get('conv-err-restart')?.status).toBe('restarting');
+    });
   });
 
   describe('markNeedsRestart / clearNeedsRestart', () => {
