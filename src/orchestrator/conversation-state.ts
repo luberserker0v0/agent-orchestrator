@@ -93,7 +93,7 @@ export class ConversationState {
       starting: ['running', 'error', 'stopped'],
       running: ['restarting', 'stopped', 'error', 'destroyed'],
       restarting: ['running', 'error', 'stopped'],
-      stopped: ['starting', 'destroyed'],
+      stopped: ['starting', 'restarting', 'destroyed'],
       destroyed: [],
       error: ['starting', 'restarting', 'destroyed'],
     };
