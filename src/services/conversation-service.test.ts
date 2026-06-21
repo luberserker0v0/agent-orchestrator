@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../utils/logger.js', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 import { ConversationService } from './conversation-service.js';
@@ -51,6 +51,7 @@ describe('ConversationService', () => {
     mockRuntimeManager = {
       hasAgentType: vi.fn(),
       listAgentTypes: vi.fn().mockReturnValue(['opencode-direct']),
+      getRuntimeValidity: vi.fn().mockReturnValue({ isValid: true }),
     };
 
     mockServerConfig = {
@@ -78,7 +79,6 @@ describe('ConversationService', () => {
         status: 'prepared',
         ready: false,
         needsRestart: false,
-        wsUrl: 'ws://127.0.0.1:8080/ws/gen-id',
         createdAt: 100,
         updatedAt: 100,
       });
@@ -99,7 +99,6 @@ describe('ConversationService', () => {
         status: 'prepared',
         ready: false,
         needsRestart: false,
-        wsUrl: 'ws://127.0.0.1:8080/ws/conv-1',
         createdAt: 100,
         updatedAt: 100,
       });
@@ -123,6 +122,15 @@ describe('ConversationService', () => {
 
       await expect(service.create(testId, 'unknown')).rejects.toThrow(AppError);
     });
+
+    it('should throw 400 when runtime is invalid', async () => {
+      mockConversationState.has.mockReturnValue(false);
+      mockRuntimeManager.hasAgentType.mockReturnValue(true);
+      mockRuntimeManager.getRuntimeValidity.mockReturnValue({ isValid: false, error: 'Config validation failed' });
+
+      await expect(service.create(testId, 'broken-rt')).rejects.toThrow(AppError);
+      await expect(service.create(testId, 'broken-rt')).rejects.toThrow(/not available/);
+    });
   });
 
   describe('get', () => {
@@ -133,7 +141,6 @@ describe('ConversationService', () => {
         status: 'prepared',
         ready: false,
         needsRestart: false,
-        wsUrl: 'ws://127.0.0.1:8080/ws/conv-1',
         createdAt: 100,
         updatedAt: 100,
       });
@@ -187,7 +194,6 @@ describe('ConversationService', () => {
       agentType: 'opencode-direct',
       status: 'prepared',
       ready: false,
-      wsUrl: 'ws://127.0.0.1:8080/ws/conv-1',
     };
 
     it('should start a prepared conversation', async () => {
@@ -267,7 +273,6 @@ describe('ConversationService', () => {
       agentType: 'opencode-direct',
       status: 'stopped',
       ready: false,
-      wsUrl: 'ws://127.0.0.1:8080/ws/conv-1',
     };
 
     it('should restart a stopped conversation', async () => {
@@ -298,6 +303,7 @@ describe('ConversationService', () => {
 
     it('should stop then create new instance when restart fails', async () => {
       mockConversationState.get.mockReturnValue({ ...mockState, status: 'running' });
+      mockInstanceManager.getInstance.mockReturnValue({ port: 41002, client: {} });
       mockInstanceManager.restartInstance.mockRejectedValue(new Error('restart failed'));
       mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
       mockInstanceManager.createInstance.mockResolvedValue({
