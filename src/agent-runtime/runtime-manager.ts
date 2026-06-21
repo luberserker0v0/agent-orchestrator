@@ -20,6 +20,7 @@ export class RuntimeManager {
   private portPool: PortPool;
   private runtimes: RuntimeRegistry;
   private defaultAgentType: string;
+  private onDestroyed?: (id: string) => void;
 
   constructor(portPool: PortPool, runtimes: RuntimeRegistry, defaultAgentType: string) {
     this.portPool = portPool;
@@ -96,13 +97,23 @@ export class RuntimeManager {
       port: result.port,
       lastUsedAt: Date.now(),
     };
-    if (result.handle) updated.handle = result.handle;
+    if (result.handle) {
+      updated.handle = result.handle;
+      result.handle.onExit((_code: number | null) => {
+        logger.warn(`[${id}] process exited`);
+        this.cleanupInstance(id);
+      });
+    }
     this.instances.set(id, updated);
   }
 
   async cleanupOrphanContainers(): Promise<void> {
     const runtimes = this.runtimes.getAll();
     await Promise.all(runtimes.map((r) => r.cleanupOrphans?.()));
+  }
+
+  setOnDestroyed(cb: (id: string) => void): void {
+    this.onDestroyed = cb;
   }
 
   // ── Queries ─────────────────────────────────────────────
@@ -117,6 +128,10 @@ export class RuntimeManager {
 
   hasAgentType(type: string): boolean {
     return this.runtimes.has(type);
+  }
+
+  getRuntimeValidity(id: string): { isValid: boolean; error?: string } | undefined {
+    return this.runtimes.getValidity(id);
   }
 
   listAgentTypes(): string[] {
@@ -193,16 +208,16 @@ export class RuntimeManager {
         exited = inst.handle.exitCode !== null;
       }
       if (!exited) {
-        logger.warn(`[${id}] sending SIGKILL`);
+        logger.debug(`[${id}] sending SIGKILL`);
         await this.safeKill(inst.handle, 'SIGKILL');
         await inst.handle.waitForExit(5000);
       }
       if (pid !== undefined) {
-        logger.info(`[${id}] kill complete, exitCode=${inst.handle.exitCode}`);
+        logger.debug(`[${id}] kill complete, exitCode=${inst.handle.exitCode}`);
         // Verify process is actually dead at OS level (Windows: tasklist check)
         exec(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, (_err, stdout) => {
           const alive = stdout.includes(String(pid));
-          logger.info(`[${id}] OS-level PID ${pid} alive=${alive}${alive ? ' (SURVIVED!)' : ''}`);
+          logger.debug(`[${id}] OS-level PID ${pid} alive=${alive}${alive ? ' (SURVIVED!)' : ''}`);
           if (alive) {
             logger.warn(`[${id}] PID ${pid} survived kill! Checking children...`);
             exec(`wmic process where "ParentProcessId=${pid}" get ProcessId /FORMAT:CSV`, (_err2, stdout2) => {
@@ -218,7 +233,8 @@ export class RuntimeManager {
       this.portPool.release(inst.port);
     }
     instancesActive.dec();
-    logger.info(`Instance ${id} destroyed`);
+    logger.debug(`Instance ${id} destroyed`);
+    this.onDestroyed?.(id);
   }
 
   private async safeKill(handle: InstanceHandle, signal?: string): Promise<void> {
