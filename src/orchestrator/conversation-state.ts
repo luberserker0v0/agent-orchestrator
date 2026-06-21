@@ -25,7 +25,6 @@ export interface ConversationStateData {
   needsRestart: boolean;
   port?: number;
   sessionId?: string;
-  wsUrl?: string;
   lastError?: string;
   events: ConversationEvent[];
   createdAt: number;
@@ -50,14 +49,13 @@ export class ConversationState {
   private listeners = new Map<string, Set<(event: ConversationEvent) => void>>();
   private readyTokens = new Map<string, ReadyCheckToken>();
 
-  create(id: string, agentType = 'opencode-direct', wsUrl?: string): ConversationStateData {
+  create(id: string, agentType = 'opencode-direct'): ConversationStateData {
     const state: ConversationStateData = {
       id,
       agentType,
       status: 'prepared',
       ready: false,
       needsRestart: false,
-      wsUrl,
       events: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -97,7 +95,7 @@ export class ConversationState {
       restarting: ['running', 'error', 'stopped'],
       stopped: ['starting', 'destroyed'],
       destroyed: [],
-      error: ['starting', 'destroyed'],
+      error: ['starting', 'restarting', 'destroyed'],
     };
 
     if (!validTransitions[state.status]?.includes(status)) {
@@ -197,12 +195,11 @@ export class ConversationState {
     });
   }
 
-  setInstanceInfo(id: string, info: { port?: number; sessionId?: string; wsUrl?: string }): void {
+  setInstanceInfo(id: string, info: { port?: number; sessionId?: string }): void {
     const state = this.states.get(id);
     if (!state) return;
     if (info.port !== undefined) state.port = info.port;
     if (info.sessionId !== undefined) state.sessionId = info.sessionId;
-    if (info.wsUrl !== undefined) state.wsUrl = info.wsUrl;
     state.updatedAt = Date.now();
   }
 
