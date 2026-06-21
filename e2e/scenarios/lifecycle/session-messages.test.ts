@@ -32,7 +32,6 @@ describe('Session Messages Query (E2E)', () => {
   }
 
   let sessionId: string;
-  let wsUrl: string;
   let messageId: string;
 
   it('sets up conversation and sends a message', async () => {
@@ -42,8 +41,6 @@ describe('Session Messages Query (E2E)', () => {
       body: JSON.stringify({ id: 'e2e-ses-msg' }),
     });
     expect(createRes.status).toBe(201);
-    const conv = await createRes.json() as { wsUrl: string };
-    wsUrl = conv.wsUrl;
 
     await uploadOpencodeConfig(server.baseUrl, 'e2e-ses-msg', OPENCODE_CONFIG);
 
@@ -79,7 +76,7 @@ describe('Session Messages Query (E2E)', () => {
   });
 
   it('retrieves session messages via WS message.history', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-ses-msg`);
     try {
       const response = await ws.request('message.history', { limit: 5 });
       expect(response.result).toBeDefined();
@@ -92,7 +89,7 @@ describe('Session Messages Query (E2E)', () => {
   });
 
   it('retrieves messages with explicit sessionId via WS', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-ses-msg`);
     try {
       const response = await ws.request('message.history', { sessionId, limit: 5 });
       expect(response.result).toBeDefined();
@@ -120,7 +117,7 @@ describe('Session Messages Query (E2E)', () => {
     const childMsgsBody = await childMsgs.json() as Array<unknown>;
     expect(Array.isArray(childMsgsBody)).toBe(true);
 
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-ses-msg`);
     try {
       const response = await ws.request('message.history', { sessionId: childId, limit: 5 });
       expect(response.result).toBeDefined();

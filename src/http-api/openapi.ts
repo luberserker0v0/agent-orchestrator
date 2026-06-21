@@ -535,7 +535,6 @@ export const openapiSpec: Record<string, unknown> = {
         properties: {
           id: { type: 'string' },
           status: { type: 'string', enum: ['prepared'] },
-          wsUrl: { type: 'string' },
         },
       },
       ConversationInfo: {
@@ -547,7 +546,6 @@ export const openapiSpec: Record<string, unknown> = {
           needsRestart: { type: 'boolean' },
           port: { type: 'integer' },
           sessionId: { type: 'string' },
-          wsUrl: { type: 'string' },
           createdAt: { type: 'integer' },
           updatedAt: { type: 'integer' },
         },
@@ -559,7 +557,6 @@ export const openapiSpec: Record<string, unknown> = {
           status: { type: 'string' },
           ready: { type: 'boolean' },
           port: { type: 'integer' },
-          wsUrl: { type: 'string' },
           sessionId: { type: 'string' },
         },
       },

@@ -4,7 +4,7 @@ export function getRuntimeVersion(config: AgentOrchestratorConfig, runtimeId: st
   const entry = config.orchestrator.runtimes.find(r => r.id === runtimeId);
   if (!entry) return undefined;
   if (entry.type === 'direct') return entry.config.version;
-  if (entry.type === 'docker') return entry.config.image.split(':')[1] ?? undefined;
+  if (entry.type === 'docker') return entry.config.image?.split(':')[1] ?? undefined;
   return undefined;
 }
 

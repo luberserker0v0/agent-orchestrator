@@ -9,6 +9,8 @@ export interface RuntimeInfoEntry {
   version?: string;
   config: Record<string, unknown>;
   registered: boolean;
+  isValid: boolean;
+  error?: string;
   instanceCount: number;
   capabilities?: string[];
 }
@@ -31,7 +33,8 @@ export class RuntimeInfoProvider {
   }
 
   private buildInfo(entry: RuntimeEntry): RuntimeInfoEntry {
-    const rt = this.registry.get(entry.id);
+    const validity = this.registry.getValidity(entry.id);
+    const rt = validity?.isValid ? this.registry.get(entry.id) : undefined;
 
     return {
       id: entry.id,
@@ -39,6 +42,8 @@ export class RuntimeInfoProvider {
       version: getRuntimeVersion(this.config, entry.id),
       config: entry.config as unknown as Record<string, unknown>,
       registered: this.registry.has(entry.id),
+      isValid: validity?.isValid ?? false,
+      error: validity?.isValid ? undefined : validity?.error,
       instanceCount: this.manager.listInstances().length,
       capabilities: rt?.capabilities ? (Object.keys(rt.capabilities) as (keyof typeof rt.capabilities)[]).filter(k => rt.capabilities[k]) : undefined,
     };

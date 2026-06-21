@@ -38,7 +38,6 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-msg-ws' }),
     });
-    const conv = await createRes.json() as { wsUrl: string };
     expect(createRes.status).toBe(201);
 
     await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws', OPENCODE_CONFIG);
@@ -51,7 +50,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
 
     await waitForReady(server.baseUrl, 'e2e-msg-ws');
 
-    const ws = await createWSClient(conv.wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-msg-ws`);
     try {
       const response = await ws.request('message.send', {
         text: 'Say hello in one word',
@@ -81,9 +80,8 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-msg-ws-notready' }),
     });
-    const conv = await createRes.json() as { wsUrl: string };
 
-    const ws = await createWSClient(conv.wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-msg-ws-notready`);
     try {
       await expect(ws.request('message.send', { text: 'hello' })).rejects.toThrow('Conversation is not running');
     } finally {
@@ -97,7 +95,6 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-msg-ws-notext' }),
     });
-    const conv = await createRes.json() as { wsUrl: string };
 
     await uploadOpencodeConfig(server.baseUrl, 'e2e-msg-ws-notext', OPENCODE_CONFIG);
 
@@ -109,7 +106,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
 
     await waitForReady(server.baseUrl, 'e2e-msg-ws-notext');
 
-    const ws = await createWSClient(conv.wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-msg-ws-notext`);
     try {
       await expect(ws.request('message.send', {})).rejects.toThrow('Missing text');
     } finally {

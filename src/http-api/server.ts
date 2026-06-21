@@ -149,12 +149,13 @@ export function createHttpServer(
 
   app.get('/api/runtimes', (_req: Request, res: Response) => {
     const runtimes = config.orchestrator.runtimes.map((entry) => {
-      const rt = runtimeRegistry.get(entry.id);
+      const validity = runtimeRegistry.getValidity(entry.id);
+      const rt = validity?.isValid ? runtimeRegistry.get(entry.id) : undefined;
       let version: string | undefined;
       if (entry.type === 'direct') {
         version = entry.config.version;
       } else if (entry.type === 'docker') {
-        version = entry.config.image.split(':')[1] ?? undefined;
+        version = entry.config.image?.split(':')[1] ?? undefined;
       }
       return {
         id: entry.id,
@@ -162,6 +163,8 @@ export function createHttpServer(
         version,
         config: entry.config,
         registered: runtimeRegistry.has(entry.id),
+        isValid: validity?.isValid ?? false,
+        error: validity?.isValid ? undefined : validity?.error,
         capabilities: rt?.capabilities ?? null,
       };
     });

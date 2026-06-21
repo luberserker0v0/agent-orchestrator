@@ -150,6 +150,5 @@ export class WSConnection {
   dispose(): void {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    logger.info(`[WS ${this.conversationId}] connection closed`);
   }
 }

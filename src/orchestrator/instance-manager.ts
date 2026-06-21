@@ -33,12 +33,13 @@ export class InstanceManager {
       await this.evictLRU();
     }
 
+    const resolvedAgentType = agentType ?? this.config.defaultAgentType;
     let workspace;
     try {
       if (await this.workspaceFactory.hasWorkspace(id)) {
         workspace = await this.workspaceFactory.ensure(id);
       } else {
-        workspace = await this.workspaceFactory.create(id);
+        workspace = await this.workspaceFactory.create(id, resolvedAgentType);
       }
     } catch (err) {
       throw new Error(`Failed to create workspace: ${(err as Error).message}`, { cause: err });
@@ -51,7 +52,7 @@ export class InstanceManager {
       workspace.path,
       { username: 'opencode', password },
       this.config.healthCheck,
-      agentType ?? this.config.defaultAgentType,
+      resolvedAgentType,
       workspace.runtimeAccess,
     );
   }

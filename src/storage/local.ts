@@ -67,7 +67,6 @@ export class LocalStorage implements StorageBackend {
     if (existsSync(p)) {
       try {
         await retryRm(p);
-        logger.info(`Workspace destroyed: ${p}`);
       } catch (err) {
         logger.warn(`Failed to destroy workspace: ${p}`, err);
       }

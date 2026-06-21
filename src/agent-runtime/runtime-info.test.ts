@@ -104,4 +104,23 @@ describe('RuntimeInfoProvider', () => {
     const provider = new RuntimeInfoProvider(config, registry, manager);
     expect(provider.getRuntimeInfoList()).toEqual([]);
   });
+
+  it('includes isValid and error for invalid runtime', () => {
+    const config = makeConfig([
+      { id: 'bad-rt', type: 'docker', config: {} },
+    ]);
+    const portPool = new PortPool(40000, 40100, false);
+    const registry = new RuntimeRegistry();
+    registry.registerInvalid('bad-rt', 'Config validation failed: "image" is required');
+    const manager = new RuntimeManager(portPool, registry, 'bad-rt');
+
+    const provider = new RuntimeInfoProvider(config, registry, manager);
+    const list = provider.getRuntimeInfoList();
+
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe('bad-rt');
+    expect(list[0].isValid).toBe(false);
+    expect(list[0].error).toBe('Config validation failed: "image" is required');
+    expect(list[0].capabilities).toBeUndefined();
+  });
 });

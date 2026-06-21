@@ -53,11 +53,11 @@ describe('Ready State (E2E)', () => {
   });
 
   it('sends message via WebSocket after ready', async () => {
-    const conv = await (await fetch(`${server.baseUrl}/api/conversations`, {
+    await fetch(`${server.baseUrl}/api/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-ready-ws' }),
-    })).json();
+    });
 
     await uploadOpencodeConfig(server.baseUrl, 'e2e-ready-ws', OPENCODE_CONFIG);
 
@@ -69,7 +69,7 @@ describe('Ready State (E2E)', () => {
 
     await waitForReady(server.baseUrl, 'e2e-ready-ws');
 
-    const ws = await createWSClient(conv.wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-ready-ws`);
     try {
       const response = await ws.request('message.send', {
         text: 'Say hello in one word',

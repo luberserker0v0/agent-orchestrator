@@ -87,7 +87,7 @@ export class WorkspaceFactory {
     ];
   }
 
-  async create(id?: string): Promise<WorkspaceInfo> {
+  async create(id?: string, agentType?: string): Promise<WorkspaceInfo> {
     const wsId = id ? sanitizeId(id) : randomUUID();
     const wsPath = join(this.basePath, wsId);
     const opencodeDir = join(wsPath, '.opencode');
@@ -95,7 +95,7 @@ export class WorkspaceFactory {
     await this.storage.createWorkspaceDir(wsId);
     await this.storage.ensureDir(wsId, '.opencode');
 
-    logger.info(`Workspace created: ${wsPath}`);
+    logger.info(`Workspace created: ${wsPath}${agentType ? ` (agent: ${agentType})` : ''}`);
     return {
       id: wsId,
       path: wsPath,

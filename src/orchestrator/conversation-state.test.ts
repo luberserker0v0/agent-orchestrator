@@ -4,11 +4,10 @@ import { ConversationState } from './conversation-state.js';
 describe('ConversationState', () => {
   it('should create a prepared conversation', () => {
     const state = new ConversationState();
-    const data = state.create('conv-001', 'opencode-direct', 'ws://localhost:8080/ws/conv-001');
+    const data = state.create('conv-001', 'opencode-direct');
 
     expect(data.id).toBe('conv-001');
     expect(data.status).toBe('prepared');
-    expect(data.wsUrl).toBe('ws://localhost:8080/ws/conv-001');
     expect(data.needsRestart).toBe(false);
     expect(data.events).toHaveLength(1);
     expect(data.events[0].type).toBe('conversation.prepared');

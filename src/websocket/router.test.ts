@@ -11,6 +11,7 @@ vi.mock('../utils/logger.js', () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
@@ -1666,7 +1667,7 @@ describe('WSRouter', () => {
   it('handles conversation.status', async () => {
     const mockWs = createMockWebSocket();
     mockConversationService.get.mockReturnValue({
-      id: 'conv-001', status: 'running', ready: true, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://host/ws/conv-001',
+      id: 'conv-001', status: 'running', ready: true, port: 30000, sessionId: 'ses_1',
     });
     mockConversationState.get.mockReturnValue({ lastError: undefined });
 
@@ -1804,7 +1805,7 @@ describe('WSRouter', () => {
   it('handles conversation.restart in docker runtime', async () => {
     const dockerMockWss = createMockWSS();
     const dockerWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'running', ready: true, wsUrl: 'ws://host/ws/conv-001' });
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: true });
     mockConversationService.restart.mockResolvedValue({ id: 'conv-001', status: 'running', port: 30000 });
 
     const dockerRouter = new WSRouter(

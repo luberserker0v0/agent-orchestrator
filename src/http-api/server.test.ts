@@ -54,6 +54,8 @@ describe('HTTP API Server', () => {
       }),
       list: vi.fn().mockReturnValue(['opencode-direct']),
       has: vi.fn().mockReturnValue(true),
+      getValidity: vi.fn().mockReturnValue({ isValid: true }),
+      isValid: vi.fn().mockReturnValue(true),
     };
 
     mockInstanceManager = {
@@ -84,7 +86,7 @@ describe('HTTP API Server', () => {
     };
 
     mockConversationState = {
-      create: vi.fn().mockImplementation((id: string) => ({ id, status: 'prepared', wsUrl: `ws://localhost/ws/${id}`, ready: false })),
+      create: vi.fn().mockImplementation((id: string) => ({ id, status: 'prepared', ready: false })),
       get: vi.fn().mockReturnValue({ id: 'test-id', status: 'prepared', ready: false }),
       has: vi.fn().mockReturnValue(true),
       list: vi.fn().mockReturnValue([]),
@@ -139,7 +141,6 @@ describe('HTTP API Server', () => {
           needsRestart: false,
           port: undefined,
           sessionId: undefined,
-          wsUrl: `ws://127.0.0.1:8080/ws/${convId}`,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -148,7 +149,7 @@ describe('HTTP API Server', () => {
       stop: vi.fn().mockResolvedValue(undefined),
       restart: vi.fn().mockResolvedValue({ id: 'conv-001', agentType: 'opencode-direct', status: 'running', ready: false, port: 30000, sessionId: undefined }),
       delete: vi.fn().mockResolvedValue(undefined),
-      get: vi.fn().mockReturnValue({ id: 'conv-001', status: 'ready', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://localhost/ws/conv-001', createdAt: 100, updatedAt: 200 }),
+      get: vi.fn().mockReturnValue({ id: 'conv-001', status: 'ready', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', createdAt: 100, updatedAt: 200 }),
       list: vi.fn().mockReturnValue([]),
       getEvents: vi.fn().mockReturnValue([]),
     };
@@ -212,7 +213,7 @@ describe('HTTP API Server', () => {
     const res = await request(server).get('/api/runtimes');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([
-      { id: 'opencode-direct', type: 'direct', version: undefined, config: { binary: 'opencode' }, registered: true, capabilities: expect.any(Object) },
+      { id: 'opencode-direct', type: 'direct', version: undefined, config: { binary: 'opencode' }, registered: true, isValid: true, error: undefined, capabilities: expect.any(Object) },
     ]);
   });
 
@@ -352,7 +353,7 @@ describe('HTTP API Server', () => {
   it('POST /api/conversations prepares workspace', async () => {
     mockConversationService.create.mockReturnValue({
       id: 'conv-001', agentType: 'opencode-direct', status: 'prepared', ready: false,
-      wsUrl: 'ws://127.0.0.1:8080/ws/conv-001', createdAt: Date.now(), updatedAt: Date.now(),
+      createdAt: Date.now(), updatedAt: Date.now(),
     });
 
     const res = await request(server)
@@ -362,7 +363,6 @@ describe('HTTP API Server', () => {
     expect(res.status).toBe(201);
     expect(res.body.id).toBe('conv-001');
     expect(res.body.status).toBe('prepared');
-    expect(res.body.wsUrl).toContain('/ws/conv-001');
   });
 
   it('POST /api/conversations returns 500 on workspace failure', async () => {
@@ -396,7 +396,7 @@ describe('HTTP API Server', () => {
 
   it('GET /api/conversations lists conversations', async () => {
     mockConversationService.list.mockReturnValue([
-      { id: 'conv-001', agentType: 'opencode-direct', status: 'prepared', ready: false, needsRestart: false, port: undefined, sessionId: undefined, wsUrl: 'ws://localhost:8080/ws/conv-001', createdAt: Date.now(), updatedAt: Date.now() },
+      { id: 'conv-001', agentType: 'opencode-direct', status: 'prepared', ready: false, needsRestart: false, port: undefined, sessionId: undefined, createdAt: Date.now(), updatedAt: Date.now() },
     ]);
 
     const res = await request(server).get('/api/conversations');
@@ -1056,7 +1056,7 @@ describe('HTTP API Server', () => {
   // ─── Single conversation GET ───────────────────────────
 
   it('GET /api/conversations/:id returns conversation', async () => {
-    mockConversationService.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://localhost/ws/conv-001', createdAt: 100, updatedAt: 200 });
+    mockConversationService.get.mockReturnValue({ id: 'conv-001', status: 'running', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', createdAt: 100, updatedAt: 200 });
 
     const res = await request(server).get('/api/conversations/conv-001');
 
