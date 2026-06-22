@@ -27,7 +27,7 @@ export async function waitForHealthy(
         return;
       }
     } catch (err) {
-      logger.warn(`[OpenCode ${id}] health check attempt ${i + 1} failed: ${(err as Error).message}`);
+      logger.debug(`[OpenCode ${id}] health check attempt ${i + 1} failed: ${(err as Error).message}`);
     }
   }
   throw new Error(`OpenCode instance failed health check after ${config.retries} retries`);

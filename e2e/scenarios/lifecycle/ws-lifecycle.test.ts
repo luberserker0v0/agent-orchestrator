@@ -4,9 +4,6 @@ import { createWSClient } from '../../helpers/ws.js';
 
 describe('WS Lifecycle (E2E)', () => {
   let server: E2EServer;
-  let wsUrl: string;
-  let wsUrl2: string;
-  let wsUrl3: string;
 
   beforeAll(async () => {
     server = await startServer();
@@ -24,6 +21,10 @@ describe('WS Lifecycle (E2E)', () => {
     await server.cleanup();
   }, 15_000);
 
+  function wsUrlFor(id: string): string {
+    return `${server.baseUrl.replace(/^http/, 'ws')}/ws/${id}`;
+  }
+
   it('returns correct status via WS for prepared conversation', async () => {
     const createRes = await fetch(`${server.baseUrl}/api/conversations`, {
       method: 'POST',
@@ -31,10 +32,8 @@ describe('WS Lifecycle (E2E)', () => {
       body: JSON.stringify({ id: 'e2e-ws-lifecycle' }),
     });
     expect(createRes.status).toBe(201);
-    const conv = await createRes.json() as { wsUrl: string };
-    wsUrl = conv.wsUrl;
 
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-lifecycle'));
     try {
       const response = await ws.request('conversation.status', {});
       const result = response.result as { status: string; ready: boolean };
@@ -47,7 +46,7 @@ describe('WS Lifecycle (E2E)', () => {
   });
 
   it('starts conversation via WS and returns running status', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-lifecycle'));
     try {
       const response = await ws.request('conversation.start', {});
       const result = response.result as { status: string };
@@ -58,7 +57,7 @@ describe('WS Lifecycle (E2E)', () => {
   });
 
   it('rejects duplicate start via WS', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-lifecycle'));
     try {
       await expect(ws.request('conversation.start', {}))
         .rejects.toThrow('already starting or running');
@@ -68,7 +67,7 @@ describe('WS Lifecycle (E2E)', () => {
   });
 
   it('returns running status via WS after start', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-lifecycle'));
     try {
       const response = await ws.request('conversation.status', {});
       const result = response.result as { status: string };
@@ -79,7 +78,7 @@ describe('WS Lifecycle (E2E)', () => {
   });
 
   it('stops conversation via WS and returns stopped status', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-lifecycle'));
     try {
       const response = await ws.request('conversation.stop', {});
       const result = response.result as { status: string };
@@ -90,7 +89,7 @@ describe('WS Lifecycle (E2E)', () => {
   });
 
   it('returns stopped status via WS after stop', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-lifecycle'));
     try {
       const response = await ws.request('conversation.status', {});
       const result = response.result as { status: string };
@@ -101,7 +100,7 @@ describe('WS Lifecycle (E2E)', () => {
   });
 
   it('starts again after stop via WS', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-lifecycle'));
     try {
       const response = await ws.request('conversation.start', {});
       const result = response.result as { status: string };
@@ -112,7 +111,7 @@ describe('WS Lifecycle (E2E)', () => {
   });
 
   it('restarts running conversation via WS', async () => {
-    const ws = await createWSClient(wsUrl);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-lifecycle'));
     try {
       const response = await ws.request('conversation.restart', {});
       const result = response.result as { status: string };
@@ -129,10 +128,8 @@ describe('WS Lifecycle (E2E)', () => {
       body: JSON.stringify({ id: 'e2e-ws-stop-prepared' }),
     });
     expect(createRes.status).toBe(201);
-    const conv = await createRes.json() as { wsUrl: string };
-    wsUrl2 = conv.wsUrl;
 
-    const ws = await createWSClient(wsUrl2);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-stop-prepared'));
     try {
       await expect(ws.request('conversation.stop', {}))
         .rejects.toThrow('Cannot stop conversation');
@@ -148,10 +145,8 @@ describe('WS Lifecycle (E2E)', () => {
       body: JSON.stringify({ id: 'e2e-ws-restart-prepared' }),
     });
     expect(createRes.status).toBe(201);
-    const conv = await createRes.json() as { wsUrl: string };
-    wsUrl3 = conv.wsUrl;
 
-    const ws = await createWSClient(wsUrl3);
+    const ws = await createWSClient(wsUrlFor('e2e-ws-restart-prepared'));
     try {
       await expect(ws.request('conversation.restart', {}))
         .rejects.toThrow('Cannot restart conversation');

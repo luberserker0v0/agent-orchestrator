@@ -11,6 +11,7 @@ vi.mock('../utils/logger.js', () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
@@ -1666,7 +1667,7 @@ describe('WSRouter', () => {
   it('handles conversation.status', async () => {
     const mockWs = createMockWebSocket();
     mockConversationService.get.mockReturnValue({
-      id: 'conv-001', status: 'running', ready: true, port: 30000, sessionId: 'ses_1', wsUrl: 'ws://host/ws/conv-001',
+      id: 'conv-001', status: 'running', ready: true, port: 30000, sessionId: 'ses_1',
     });
     mockConversationState.get.mockReturnValue({ lastError: undefined });
 
@@ -1804,7 +1805,7 @@ describe('WSRouter', () => {
   it('handles conversation.restart in docker runtime', async () => {
     const dockerMockWss = createMockWSS();
     const dockerWs = createMockWebSocket();
-    mockConversationState.get.mockReturnValue({ status: 'running', ready: true, wsUrl: 'ws://host/ws/conv-001' });
+    mockConversationState.get.mockReturnValue({ status: 'running', ready: true });
     mockConversationService.restart.mockResolvedValue({ id: 'conv-001', status: 'running', port: 30000 });
 
     const dockerRouter = new WSRouter(
@@ -1844,6 +1845,93 @@ describe('WSRouter', () => {
   });
 
   // ─── Skills import success path ────────────────────────
+
+  it('handles conversation.delete', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationService.delete.mockResolvedValue(undefined);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 110, method: 'conversation.delete',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockConversationService.delete).toHaveBeenCalledWith('conv-001');
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 110 && p.result?.deleted === true; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+  });
+
+  it('rejects conversation.delete when not found', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationService.delete.mockRejectedValue(new Error('Conversation not found'));
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 111, method: 'conversation.delete',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 111 && p.error?.message?.includes('Conversation not found'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('rejects conversation.restart when not allowed', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationService.restart.mockRejectedValue(new Error('Cannot restart conversation'));
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 112, method: 'conversation.restart',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const errorCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 112 && p.error?.message?.includes('Cannot restart conversation'); } catch { return false; }
+    });
+    expect(errorCall).toBeDefined();
+  });
+
+  it('handles conversation.status with lastError', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationService.get.mockReturnValue({
+      id: 'conv-001', status: 'error', ready: false, port: undefined, sessionId: undefined,
+    });
+    mockConversationState.get.mockReturnValue({ lastError: 'port allocation failed' });
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    mockWs.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 113, method: 'conversation.status',
+    })));
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const resultCall = sendCalls.find(c => {
+      try { const p = JSON.parse(c[0]); return p.id === 113 && p.result?.status === 'error'; } catch { return false; }
+    });
+    expect(resultCall).toBeDefined();
+    const parsed = JSON.parse(resultCall![0]);
+    expect(parsed.result.lastError).toBe('port allocation failed');
+  });
 
   it('handles skills.import success', async () => {
     const mockWs = createMockWebSocket();

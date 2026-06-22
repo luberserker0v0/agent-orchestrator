@@ -20,7 +20,8 @@ import { DockerRuntime } from './agent-runtime/runtimes/docker.js';
 import { PortPool } from './orchestrator/port-pool.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
-import { parseCliArgs, printHelp } from './cli.js';
+import { parseCliArgs, printHelp, handleSubcommand } from './cli.js';
+import { isRunningInContainer } from './utils/is-container.js';
 
 export async function main(cliArgs?: string[]) {
   const cli = parseCliArgs(cliArgs ?? process.argv.slice(2));
@@ -41,6 +42,8 @@ export async function main(cliArgs?: string[]) {
     return;
   }
 
+  if (handleSubcommand(cli)) return;
+
   // Set env vars from CLI args so applyEnvOverrides picks them up
   if (cli.port !== undefined) process.env['AGENTORCHESTRATOR_SERVER_PORT'] = String(cli.port);
   if (cli.host !== undefined) process.env['AGENTORCHESTRATOR_SERVER_HOST'] = cli.host;
@@ -48,6 +51,21 @@ export async function main(cliArgs?: string[]) {
   logger.info('AgentOrchestrator starting...');
 
   const config = loadConfig(cli.configPath);
+
+  // Validate container + runtime + storage compatibility
+  if (isRunningInContainer()) {
+    const defaultEntry = config.orchestrator.runtimes.find(
+      r => r.id === config.orchestrator.defaultAgentType
+    );
+    if (defaultEntry && defaultEntry.type !== 'direct' && config.workspace.storage.type === 'local') {
+      throw new Error(
+        'AO is running inside a container with default runtime type "' + defaultEntry.type + '" ' +
+        'but workspace.storage is "local". Container-based agent instances cannot access ' +
+        'the AO container\'s local filesystem. Set workspace.storage to a non-local type ' +
+        '(e.g., "docker-volume") that supports volume sharing between containers.'
+      );
+    }
+  }
   const canonicalConfig = loadCanonicalConfig(config.workspace.enforceCanonicalConfig);
   logger.info('Configuration loaded');
 
@@ -67,7 +85,6 @@ export async function main(cliArgs?: string[]) {
     const errs: string[] = [];
     const cfg = config as Record<string, unknown>;
     if (!cfg?.image || typeof cfg.image !== 'string') errs.push('"image" is required');
-    if (!Number.isInteger(cfg?.containerPort)) errs.push('"containerPort" must be a positive integer');
     if (cfg?.networkMode !== undefined && typeof cfg.networkMode !== 'string')
       errs.push('"networkMode" must be a string');
     return errs;
@@ -76,12 +93,39 @@ export async function main(cliArgs?: string[]) {
   const runtimeRegistry = new RuntimeRegistry();
   const portPool = new PortPool(config.orchestrator.portRange.start, config.orchestrator.portRange.end, config.orchestrator.portRange.allowDynamicFallback);
   for (const entry of config.orchestrator.runtimes) {
-    const runtime = runtimeFactory.create(entry.type, portPool, entry.config);
-    runtimeRegistry.register(entry.id, runtime);
+    const configErrors = runtimeFactory.validateConfig(entry.type, entry.config);
+    if (configErrors.length > 0) {
+      const msg = `Config validation failed: ${configErrors.join('; ')}`;
+      logger.warn(`Runtime "${entry.id}" (type: ${entry.type}) is invalid: ${msg}`);
+      runtimeRegistry.registerInvalid(entry.id, msg);
+      continue;
+    }
+    if (!runtimeFactory.hasType(entry.type)) {
+      const msg = `Unknown runtime type: "${entry.type}"`;
+      logger.warn(`Runtime "${entry.id}" is invalid: ${msg}`);
+      runtimeRegistry.registerInvalid(entry.id, msg);
+      continue;
+    }
+    try {
+      const runtime = runtimeFactory.create(entry.type, portPool, entry.config);
+      runtimeRegistry.register(entry.id, runtime);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Runtime "${entry.id}" (type: ${entry.type}) is invalid: ${msg}`);
+      runtimeRegistry.registerInvalid(entry.id, msg);
+    }
   }
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);
 
   const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, config.orchestrator.defaultAgentType);
+  runtimeManager.setOnDestroyed((id: string) => {
+    const state = conversationState.get(id);
+    if (!state) return;
+    if (state.status === 'stopped' || state.status === 'destroyed' || state.status === 'restarting') return;
+    conversationState.cancelReadyCheck(id);
+    conversationState.transition(id, 'stopped');
+    conversationState.removeRunningInstance(id);
+  });
   const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeManager);
   const conversationState = new ConversationState();
   const configService = new ConfigService(workspaceFactory, conversationState);
@@ -96,7 +140,7 @@ export async function main(cliArgs?: string[]) {
   await instanceManager.cleanupOrphanContainers();
   await workspaceFactory.cleanupOrphans();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService, config);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();

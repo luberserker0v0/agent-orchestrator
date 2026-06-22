@@ -30,6 +30,9 @@ src/test-fixtures/opencode.provider.template.json
 # Test coverage
 coverage/
 
+# Generated Dockerfile (rendered from Dockerfile.template)
+/Dockerfile
+
 # User runtime config (copy from agentorchestrator.example.json)
 config/agentorchestrator.json
 config/canonical-opencode.json

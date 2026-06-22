@@ -81,4 +81,56 @@ describe('RuntimeRegistry', () => {
     expect(registry.get('rt1')).toBe(rt1);
     expect(registry.get('rt2')).toBe(rt2);
   });
+
+  it('registerInvalid marks runtime as invalid with error', () => {
+    const registry = new RuntimeRegistry();
+    registry.registerInvalid('broken-rt', 'Missing required config: image');
+    expect(registry.has('broken-rt')).toBe(true);
+    expect(registry.isValid('broken-rt')).toBe(false);
+    const validity = registry.getValidity('broken-rt');
+    expect(validity).toEqual({ isValid: false, error: 'Missing required config: image' });
+    expect(registry.get('broken-rt')).toBeUndefined();
+  });
+
+  it('getOrThrow throws for invalid runtime with the error message', () => {
+    const registry = new RuntimeRegistry();
+    registry.registerInvalid('broken-rt', 'Config validation failed: "image" is required');
+    expect(() => registry.getOrThrow('broken-rt')).toThrow(
+      'Runtime "broken-rt" is not available: Config validation failed: "image" is required',
+    );
+  });
+
+  it('registerInvalid throws on duplicate id', () => {
+    const registry = new RuntimeRegistry();
+    registry.register('rt', mockRuntime);
+    expect(() => registry.registerInvalid('rt', 'error')).toThrow(
+      'Runtime already registered: rt',
+    );
+  });
+
+  it('getAll only returns valid runtimes', () => {
+    const registry = new RuntimeRegistry();
+    registry.register('valid-rt', mockRuntime);
+    registry.registerInvalid('invalid-rt', 'bad config');
+    const all = registry.getAll();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toBe(mockRuntime);
+  });
+
+  it('list returns all ids including invalid ones', () => {
+    const registry = new RuntimeRegistry();
+    registry.register('valid-rt', mockRuntime);
+    registry.registerInvalid('invalid-rt', 'bad config');
+    expect(registry.list()).toEqual(['valid-rt', 'invalid-rt']);
+  });
+
+  it('isValid returns false for unknown id', () => {
+    const registry = new RuntimeRegistry();
+    expect(registry.isValid('nonexistent')).toBe(false);
+  });
+
+  it('getValidity returns undefined for unknown id', () => {
+    const registry = new RuntimeRegistry();
+    expect(registry.getValidity('nonexistent')).toBeUndefined();
+  });
 });

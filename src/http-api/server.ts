@@ -2,7 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { createServer, type Server } from 'node:http';
 import { WebSocketServer } from 'ws';
 import swaggerUi from 'swagger-ui-express';
-import type { ServerConfig, WebSocketConfig } from '../config-loader.js';
+import type { AgentOrchestratorConfig, ServerConfig, WebSocketConfig } from '../config-loader.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
@@ -39,7 +39,8 @@ export function createHttpServer(
   conversationService: ConversationService,
   fileService: FileService,
   sessionService: SessionService,
-  messageService: MessageService
+  messageService: MessageService,
+  config: AgentOrchestratorConfig
 ): HttpServer {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
@@ -147,9 +148,25 @@ export function createHttpServer(
   // ─── Runtimes ─────────────────────────────────────────────
 
   app.get('/api/runtimes', (_req: Request, res: Response) => {
-    const runtimes = runtimeRegistry.list().map((id) => {
-      const rt = runtimeRegistry.get(id)!;
-      return { id, type: rt.type, capabilities: rt.capabilities };
+    const runtimes = config.orchestrator.runtimes.map((entry) => {
+      const validity = runtimeRegistry.getValidity(entry.id);
+      const rt = validity?.isValid ? runtimeRegistry.get(entry.id) : undefined;
+      let version: string | undefined;
+      if (entry.type === 'direct') {
+        version = entry.config.version;
+      } else if (entry.type === 'docker') {
+        version = entry.config.image?.split(':')[1] ?? undefined;
+      }
+      return {
+        id: entry.id,
+        type: entry.type,
+        version,
+        config: entry.config,
+        registered: runtimeRegistry.has(entry.id),
+        isValid: validity?.isValid ?? false,
+        error: validity?.isValid ? undefined : validity?.error,
+        capabilities: rt?.capabilities ?? null,
+      };
     });
     res.json(runtimes);
   });

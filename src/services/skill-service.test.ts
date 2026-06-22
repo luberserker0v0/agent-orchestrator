@@ -29,7 +29,7 @@ vi.mock('adm-zip', () => ({
 }));
 
 vi.mock('../utils/logger.js', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 import AdmZip from 'adm-zip';

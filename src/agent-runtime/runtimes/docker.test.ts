@@ -82,14 +82,13 @@ describe('DockerRuntime', () => {
   });
 
   describe('constructor', () => {
-    it('stores image and containerPort', () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'test-image', containerPort: 3100 });
+    it('stores image', () => {
+      const rt = new DockerRuntime(createPortPool(), { image: 'test-image' });
       expect((rt as any).config.image).toBe('test-image');
-      expect((rt as any).config.containerPort).toBe(3100);
     });
 
     it('exposes type and capabilities', () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img' });
       expect(rt.type).toBe('opencode');
       expect(rt.capabilities).toEqual({
         sessions: true, streaming: true, files: true,
@@ -100,7 +99,7 @@ describe('DockerRuntime', () => {
 
   describe('start', () => {
     it('calls docker run with correct args', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'test-image', containerPort: 3100 });
+      const rt = new DockerRuntime(createPortPool(), { image: 'test-image' });
       const mockProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
@@ -118,7 +117,7 @@ describe('DockerRuntime', () => {
       );
       expect(spawn).toHaveBeenCalledWith(
         'docker',
-        expect.arrayContaining(['-p', expect.stringContaining(':3100')]),
+        expect.arrayContaining(['-p', expect.stringContaining(`:${result.port}`)]),
         expect.anything(),
       );
       expect(result.port).toBeGreaterThanOrEqual(40000);
@@ -127,7 +126,7 @@ describe('DockerRuntime', () => {
     });
 
     it('uses instanceHost in baseUrl', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100, instanceHost: '10.0.0.1' });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', instanceHost: '10.0.0.1' });
       const mockProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
@@ -139,11 +138,10 @@ describe('DockerRuntime', () => {
       );
 
       expect(result.client).toBeDefined();
-      // internal client baseUrl should use the configured host
     });
 
     it('skips port mapping when networkMode is host', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100, networkMode: 'host' });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', networkMode: 'host' });
       const mockProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
@@ -164,7 +162,7 @@ describe('DockerRuntime', () => {
     });
 
     it('adds --network flag for custom network mode', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100, networkMode: 'my-net' });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img', networkMode: 'my-net' });
       const mockProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
@@ -181,12 +179,12 @@ describe('DockerRuntime', () => {
         expect.anything(),
       );
       const dockerArgs = (spawn as any).mock.calls[0][1] as string[];
-      expect(dockerArgs).toContain('-p'); // should still have port mapping for non-host
+      expect(dockerArgs).toContain('-p');
     });
 
     it('releases port when health check fails', async () => {
       const pool = createPortPool(30000, 30000);
-      const rt = new DockerRuntime(pool, { image: 'img', containerPort: 3100 });
+      const rt = new DockerRuntime(pool, { image: 'img' });
       const mockProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(mockProc);
       mockFetch.mockRejectedValue(new Error('timeout'));
@@ -204,7 +202,7 @@ describe('DockerRuntime', () => {
 
   describe('stop', () => {
     it('calls docker rm -f via handle', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img' });
       const runProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(runProc);
       mockFetch.mockResolvedValue(makeHealthyFetch());
@@ -229,14 +227,14 @@ describe('DockerRuntime', () => {
     });
 
     it('noop when handle is undefined', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img' });
       await expect(rt.stop(undefined)).resolves.toBeUndefined();
     });
   });
 
   describe('cleanupOrphans', () => {
     it('lists and removes orphan containers', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img' });
 
       const psProc = createMockProc({ exitCode: null });
       const rmProc1 = createMockProc({ exitCode: null });
@@ -277,10 +275,10 @@ describe('DockerRuntime', () => {
     });
 
     it('restarts container and waits for health check', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
-      (rt as any).instanceAuth.set('conv-restart', { baseUrl: 'http://127.0.0.1:3100', auth: { username: 'test', password: 'test' } });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img' });
+      (rt as any).instanceAuth.set('conv-restart', { baseUrl: 'http://127.0.0.1:40000', auth: { username: 'test', password: 'test' } });
       (rt as any).clients.set('conv-restart', {});
-      (rt as any).ports.set('conv-restart', 3100);
+      (rt as any).ports.set('conv-restart', 40000);
       const restartProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(restartProc);
       mockFetch.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ healthy: true, version: '1.0.0' }) });
@@ -293,12 +291,12 @@ describe('DockerRuntime', () => {
         expect.anything(),
       );
       expect(result).toHaveProperty('client');
-      expect(result).toHaveProperty('port', 3100);
+      expect(result).toHaveProperty('port', 40000);
       expect(result).toHaveProperty('handle');
     });
 
     it('throws when docker restart command fails', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img' });
       const restartProc = createMockProc({ exitCode: 1 });
       (spawn as any).mockReturnValue(restartProc);
 
@@ -308,8 +306,8 @@ describe('DockerRuntime', () => {
     });
 
     it('throws when health check fails after restart', async () => {
-      const rt = new DockerRuntime(createPortPool(), { image: 'img', containerPort: 3100 });
-      (rt as any).instanceAuth.set('conv-health-fail', { baseUrl: 'http://127.0.0.1:3100', auth: { username: 'test', password: 'test' } });
+      const rt = new DockerRuntime(createPortPool(), { image: 'img' });
+      (rt as any).instanceAuth.set('conv-health-fail', { baseUrl: 'http://127.0.0.1:40000', auth: { username: 'test', password: 'test' } });
       const restartProc = createMockProc({ exitCode: 0 });
       (spawn as any).mockReturnValue(restartProc);
       mockFetch.mockRejectedValue(new Error('connection refused'));

@@ -15,7 +15,6 @@ export interface ConversationData {
   needsRestart: boolean;
   port?: number;
   sessionId?: string;
-  wsUrl?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -26,7 +25,6 @@ export interface StartResult {
   status: string;
   ready: boolean;
   port?: number;
-  wsUrl?: string;
   sessionId?: string;
 }
 
@@ -51,11 +49,14 @@ export class ConversationService {
     if (!this.runtimeManager.hasAgentType(resolvedType)) {
       throw new AppError(400, ErrorCodes.UNKNOWN_AGENT_TYPE, `Unknown agent type: ${resolvedType}. Available: ${this.runtimeManager.listAgentTypes().join(', ')}`);
     }
+    const validity = this.runtimeManager.getRuntimeValidity(resolvedType);
+    if (validity && !validity.isValid) {
+      throw new AppError(400, ErrorCodes.RUNTIME_NOT_AVAILABLE, `Runtime "${resolvedType}" is not available: ${validity.error}`);
+    }
 
-    await this.workspaceFactory.create(conversationId);
+    await this.workspaceFactory.create(conversationId, resolvedType);
 
-    const wsUrl = `ws://${this.serverConfig.host}:${this.serverConfig.port}/ws/${conversationId}`;
-    const state = this.conversationState.create(conversationId, resolvedType, wsUrl);
+    const state = this.conversationState.create(conversationId, resolvedType);
 
     return this.toConversationData(state);
   }
@@ -85,7 +86,7 @@ export class ConversationService {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
     }
 
-    if (state.status === 'running' || state.status === 'starting') {
+    if (state.status === 'running' || state.status === 'starting' || state.status === 'restarting' || state.status === 'destroyed') {
       throw new AppError(409, ErrorCodes.CONVERSATION_ALREADY_RUNNING, 'Conversation is already starting or running');
     }
 
@@ -109,7 +110,6 @@ export class ConversationService {
         status: 'running',
         ready: false,
         port: instance.port,
-        wsUrl: state.wsUrl,
         sessionId: state.sessionId,
       };
     } catch (err) {
@@ -129,6 +129,7 @@ export class ConversationService {
     }
 
     try {
+      this.conversationState.cancelReadyCheck(id);
       await this.instanceManager.destroyInstance(id);
       this.conversationState.removeRunningInstance(id);
       this.conversationState.transition(id, 'stopped');
@@ -151,7 +152,7 @@ export class ConversationService {
     this.conversationState.transition(id, 'restarting');
 
     try {
-      const hadInstance = previousStatus === 'running' || previousStatus === 'error';
+      const hadInstance = this.instanceManager.getInstance(id) !== undefined;
 
       let instance: InstanceInfo;
       if (hadInstance) {
@@ -165,6 +166,7 @@ export class ConversationService {
           instance = await this.instanceManager.createInstance(id, state.agentType);
         }
       } else {
+        this.conversationState.cancelReadyCheck(id);
         instance = await this.instanceManager.createInstance(id, state.agentType);
       }
 
@@ -182,7 +184,6 @@ export class ConversationService {
         status: 'running',
         ready: false,
         port: instance.port,
-        wsUrl: state.wsUrl,
         sessionId: state.sessionId,
       };
     } catch (err) {
@@ -199,7 +200,7 @@ export class ConversationService {
     const hasInstance = this.instanceManager.getInstance(id) !== undefined;
     logger.info(`[${id}] delete: instance exists in manager=${hasInstance}`);
     await this.instanceManager.destroyInstance(id).catch(() => {});
-    logger.info(`[${id}] delete: destroyInstance returned, attempting workspace cleanup`);
+    logger.debug(`[${id}] delete: destroyInstance returned, attempting workspace cleanup`);
     try {
       await this.workspaceFactory.destroy(id);
       logger.info(`[${id}] delete: workspace cleanup completed`);
@@ -219,7 +220,6 @@ export class ConversationService {
       needsRestart: state.needsRestart,
       port: state.port,
       sessionId: state.sessionId,
-      wsUrl: state.wsUrl,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
     };

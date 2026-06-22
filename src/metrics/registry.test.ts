@@ -26,7 +26,13 @@ describe('Metrics', () => {
       {} as any,
       {} as any,
       {} as any,
-      {} as any
+      {} as any,
+      {
+        server: {},
+        websocket: {},
+        orchestrator: { runtimes: [] },
+        workspace: {},
+      } as any
     );
 
     const res = await request(server).get('/metrics');

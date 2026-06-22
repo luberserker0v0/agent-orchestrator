@@ -51,7 +51,6 @@ describe('WebSocket event reception from HTTP and WS message sends (E2E)', () =>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-ws-event-http' }),
     });
-    const conv = await createRes.json() as { wsUrl: string };
     expect(createRes.status).toBe(201);
 
     await uploadOpencodeConfig(server.baseUrl, 'e2e-ws-event-http', OPENCODE_CONFIG);
@@ -64,7 +63,7 @@ describe('WebSocket event reception from HTTP and WS message sends (E2E)', () =>
 
     await waitForReady(server.baseUrl, 'e2e-ws-event-http');
 
-    const ws = await createWSClient(conv.wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-ws-event-http`);
     try {
       const receivedEvents: JSONRPCEvent[] = [];
       ws.onEvent((event) => { receivedEvents.push(event); });
@@ -93,7 +92,6 @@ describe('WebSocket event reception from HTTP and WS message sends (E2E)', () =>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-ws-event-ws' }),
     });
-    const conv = await createRes.json() as { wsUrl: string };
     expect(createRes.status).toBe(201);
 
     await uploadOpencodeConfig(server.baseUrl, 'e2e-ws-event-ws', OPENCODE_CONFIG);
@@ -106,7 +104,7 @@ describe('WebSocket event reception from HTTP and WS message sends (E2E)', () =>
 
     await waitForReady(server.baseUrl, 'e2e-ws-event-ws');
 
-    const ws = await createWSClient(conv.wsUrl);
+    const ws = await createWSClient(`${server.baseUrl.replace(/^http/, 'ws')}/ws/e2e-ws-event-ws`);
     try {
       const events: JSONRPCEvent[] = [];
       ws.onEvent((event) => { events.push(event); });

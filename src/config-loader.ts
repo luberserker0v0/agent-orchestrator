@@ -24,15 +24,15 @@ export interface HealthCheckConfig {
 export interface DirectRuntimeConfig {
   /** Path or name of the `opencode` binary (default: `opencode`) */
   binary: string;
+  /** Version of the opencode binary (used by the version registry) */
+  version?: string;
   /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
   instanceHost?: string;
 }
 
 export interface DockerRuntimeConfig {
-  /** Docker image to pull and run (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) */
+  /** Docker image to pull and run (e.g. `ghcr.io/anomalyco/opencode:1.17.8`) */
   image: string;
-  /** Port inside the container that opencode serves on (default: 3000) */
-  containerPort: number;
   /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
   instanceHost?: string;
   /** Docker network mode (e.g. `host`, `bridge`, or a custom network name). When `host`, port mapping is skipped. */
@@ -106,20 +106,27 @@ function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHE
     let current: Record<string, unknown> = config;
     for (let i = 0; i < path.length - 1; i++) {
       const key = path[i];
-      if (!current[key] || typeof current[key] !== 'object') {
-        current[key] = {};
+      const matchedKey = Object.keys(current).find(
+        k => k.toLowerCase() === key.toLowerCase()
+      ) ?? key;
+      if (!current[matchedKey] || typeof current[matchedKey] !== 'object') {
+        current[matchedKey] = {};
       }
-      current = current[key] as Record<string, unknown>;
+      current = current[matchedKey] as Record<string, unknown>;
     }
 
     const leafKey = path[path.length - 1];
+    const matchedKey = Object.keys(current).find(
+      k => k.toLowerCase() === leafKey.toLowerCase()
+    );
+    const finalKey = matchedKey ?? leafKey;
     const trimmed = envValue?.trim() ?? '';
     const numValue = Number(trimmed);
     const isValidNumber =
       trimmed !== '' &&
       Number.isFinite(numValue) &&
       !Number.isNaN(numValue);
-    current[leafKey] = isValidNumber ? numValue : envValue;
+    current[finalKey] = isValidNumber ? numValue : envValue;
   }
 }
 
@@ -299,8 +306,8 @@ export function defaultConfig(): AgentOrchestratorConfig {
       idleTimeoutMs: 600000,
       idleSweepIntervalMs: 60000,
       portRange: { start: 30000, end: 30100, allowDynamicFallback: true },
-      defaultAgentType: 'opencode',
-      runtimes: [{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }],
+      defaultAgentType: 'opencode-direct',
+      runtimes: [{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode', version: '1.17.8' } }],
       healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
     workspace: {
@@ -342,11 +349,16 @@ export function loadConfig(configPath?: string): AgentOrchestratorConfig {
       throw new Error(`Config file not found: ${configPath}`);
     }
     resolvedPath = configPath;
-  } else if (existsSync(CONFIG_PATH)) {
-    resolvedPath = CONFIG_PATH;
-  } else if (existsSync(EXAMPLE_PATH)) {
-    console.warn(`[config-loader] ${CONFIG_PATH} not found, falling back to ${EXAMPLE_PATH}. Copy it to use as your config.`);
-    resolvedPath = EXAMPLE_PATH;
+  } else {
+    const aoConfigPath = join(process.cwd(), 'ao.config.json');
+    if (existsSync(aoConfigPath)) {
+      resolvedPath = aoConfigPath;
+    } else if (existsSync(CONFIG_PATH)) {
+      resolvedPath = CONFIG_PATH;
+    } else if (existsSync(EXAMPLE_PATH)) {
+      console.warn(`[config-loader] ${CONFIG_PATH} not found, falling back to ${EXAMPLE_PATH}. Copy it to use as your config.`);
+      resolvedPath = EXAMPLE_PATH;
+    }
   }
 
   let config: AgentOrchestratorConfig;

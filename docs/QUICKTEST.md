@@ -15,7 +15,7 @@ AgentOrchestrator follows a **three-tier testing strategy**:
 | **E2E tests** | `e2e/**/*.test.ts` | 60-120s per run | Full stack with real OpenCode instances |
 
 **Key principles:**
-- Unit tests mock all external I/O (filesystem, network, subprocesses) — currently **576 unit tests** covering all service, domain, and transport layers
+- Unit tests mock all external I/O (filesystem, network, subprocesses) — currently **755 unit tests** covering all service, domain, and transport layers
 - E2E tests are **runtime-agnostic** — same scenarios run against both `direct` and `docker` runtimes
 - Every runtime config addition (e.g. `instanceHost`, `networkMode`) includes unit tests for config validation + runtime behavior
 - Shared utilities (e.g. `waitForHealthy`) have focused unit tests for retry logic, timeout, and edge cases
@@ -39,9 +39,11 @@ e2e/                    End-to-end tests (real OpenCode instances)
   scenarios/
     lifecycle/          conversation lifecycle, message send, ready-state
     workspace/          agent CRUD, file CRUD
+    orchestrator/       process crash, idle timeout, LRU eviction
   helpers/
     server.ts           Spins up a real AgentOrchestrator server per test file
     ws.ts               WebSocket JSON-RPC 2.0 client helper
+    process.ts          Platform-aware process find/kill utilities
 ```
 
 ---

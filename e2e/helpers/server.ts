@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OrchestratorConfig } from '../../src/config-loader.js';
+import type { OrchestratorConfig, AgentOrchestratorConfig } from '../../src/config-loader.js';
 import { createHttpServer, type HttpServer } from '../../src/http-api/server.js';
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
@@ -20,6 +20,7 @@ import { RuntimeFactory } from '../../src/agent-runtime/runtime-factory.js';
 import { DirectRuntime } from '../../src/agent-runtime/runtimes/direct.js';
 import { DockerRuntime } from '../../src/agent-runtime/runtimes/docker.js';
 import { PortPool } from '../../src/orchestrator/port-pool.js';
+import { LocalStorage } from '../../src/storage/local.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE } from '../../src/test-fixtures/ao-configs.js';
 
 export interface E2EServer {
@@ -36,6 +37,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const workspaceConfig = {
     basePath: workspaceDir,
     enforceCanonicalConfig: false,
+    storage: { type: 'local' as const },
   };
 
   const host = process.env.AO_TEST_SERVER_HOST || '127.0.0.1';
@@ -61,7 +63,8 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     ...orchestratorOverrides,
   };
 
-  const workspaceFactory = new WorkspaceFactory(workspaceConfig);
+  const storage = new LocalStorage(workspaceConfig.basePath);
+  const workspaceFactory = new WorkspaceFactory(workspaceConfig, storage);
 
   const runtimeFactory = new RuntimeFactory();
   runtimeFactory.register('direct', DirectRuntime);
@@ -77,6 +80,14 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, orchestratorConfig.defaultAgentType);
   const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory, runtimeManager);
   const conversationState = new ConversationState();
+  runtimeManager.setOnDestroyed((id: string) => {
+    const state = conversationState.get(id);
+    if (!state) return;
+    if (state.status === 'stopped' || state.status === 'destroyed' || state.status === 'restarting') return;
+    conversationState.cancelReadyCheck(id);
+    conversationState.transition(id, 'stopped');
+    conversationState.removeRunningInstance(id);
+  });
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
@@ -84,6 +95,13 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const fileService = new FileService(workspaceFactory, conversationState);
   const sessionService = new SessionService(instanceManager, conversationState);
   const messageService = new MessageService(instanceManager, conversationState);
+
+  const fullConfig: AgentOrchestratorConfig = {
+    server: serverConfig,
+    websocket: wsConfig,
+    orchestrator: orchestratorConfig,
+    workspace: workspaceConfig,
+  };
 
   const httpServer: HttpServer = createHttpServer(
     serverConfig,
@@ -99,6 +117,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     fileService,
     sessionService,
     messageService,
+    fullConfig,
   );
 
   await instanceManager.cleanupOrphanContainers();

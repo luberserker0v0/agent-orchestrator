@@ -194,25 +194,48 @@ AgentOrchestrator HTTP Server → ConversationService.delete(id)
                                                    │  failed)     │
                                                    └──────────────┘
       │                                                     │
-      │ POST /stop                                           │ POST /restart
-      ▼                                                     ▼
-┌───────────┐                                          ┌───────────┐
-│ Stopped   │                                          │ Restarting│
-│(process   │                                          │(stop old  │
-│ killed,   │                                          │ process,  │
-│ workspace │                                          │ keep ws,  │
-│ kept)     │                                          │ respawn)  │
-└─────┬─────┘                                          └─────┬─────┘
-      │                                                     │
-      └────────────────────────┬────────────────────────────┘
-                                │
-                                │ DELETE /{id} 或 LRU Eviction
-                                ▼
-                         ┌─────────────┐
-                         │  Destroyed   │
-                         │(treeKill +   │
-                         │ rm workspace)│
-                         └─────────────┘
+      │ POST /stop (或 process crash / idle timeout / LRU eviction)
+      ▼
+┌───────────┐
+│ Stopped   │
+│(process   │
+│ killed,   │
+│ workspace │
+│ kept)     │
+└─────┬─────┘
+      │
+      │ POST /start
+      ▼
+┌───────────┐
+│ Starting  │──── via onDestroyed ────▶┐
+└───────────┘                          │
+                                      │
+┌───────────┐                          │
+│ Running   │──── via onDestroyed ────▶│
+│(process   │                          │
+│ crash)    │                          │
+└───────────┘                          │
+                                      │
+┌───────────┐                          │
+│Restarting │──── via onDestroyed ────▶┤
+│(process   │                          │
+│ killed    │                          │
+│ during    │                          │
+│ restart)  │                          │
+└───────────┘                          │
+                                      ▼
+                               ┌─────────────┐
+                               │  Stopped     │
+                               │(onDestroyed) │
+                               └─────────────┘
+                                      │
+                                      │ POST /start 或 DELETE
+                                      ▼
+                               ┌─────────────┐
+                               │  Destroyed   │
+                               │(treeKill +   │
+                               │ rm workspace)│
+                               └─────────────┘
 ```
 
 ---
@@ -344,8 +367,12 @@ Prometheus 指標註冊中心，整合 `prom-client`。
 | `getRecentEvents(id, limit?)` | 取得最近事件（預設 50 條，最多 100，供 REST `GET /events` 與重連時回放） |
 | `emitEvent(id, type, payload?)` | 內部發射事件並寫入歷史 |
 | `startReadyCheck(id)` | 啟動 `isReady` 輪詢：透過 `GET /session/{id}` 確認 OpenCode 已就緒；成功後 emit `conversation.ready`，後續 keepalive 失敗時 emit `conversation.readyLost` |
+| `cancelReadyCheck(id)` | 取消 `isReady` 輪詢（在 destroy/stop/restart 路徑前呼叫，避免暫停後完成輪詢導致狀態錯亂） |
 
 **`ConversationStatus`**：`prepared` → `starting` → `running` → `stopped` / `restarting` → `destroyed`
+- `starting`、`running`、`restarting` 皆可經由 `onDestroyed` callback 轉至 `stopped`（process crash / idle timeout / LRU eviction）
+- `starting` 可直接轉至 `destroyed`（start 過程中出現不可恢復錯誤時直接清理）
+- `restarting` 可直接轉至 `destroyed`（restart 過程中 destroy）
 
 **額外欄位**：`ready`（boolean）－表示 OpenCode 實例是否已通過就緒檢查。`message.send` 需要 `ready === true` 才能執行。
 
@@ -383,6 +410,8 @@ interface InstanceHandle {
 **`src/agent-runtime/registry.ts`** — `RuntimeRegistry`：依 `id` 字串註冊與查詢對應的 Runtime 實作。
 
 **`src/agent-runtime/runtime-manager.ts`** — `RuntimeManager`：管理所有活躍實例的狀態映射（`Map<string, InstanceInfo>`），提供實例註冊/查詢/銷毀，以及政策查詢方法（LRU 淘汰候選、閒置偵測），委派 `RuntimeRegistry` 進行實際 spawn/kill/restart 操作。
+
+**Generation counter 機制**：`onExit` callback 使用遞增 generation 計數器（`Map<id, gen>`）。每次 `start()` / `restart()` 前 bump generation，讓舊 handle 的 stale callback 被安全忽略，防止 restart 後舊進程退出觸發誤清理。
 
 **`src/agent-runtime/health.ts`** — 共享健康檢查工具：
 

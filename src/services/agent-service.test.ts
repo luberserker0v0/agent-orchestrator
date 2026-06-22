@@ -17,7 +17,7 @@ vi.mock('../orchestrator/workspace-factory.js', () => ({
 }));
 
 vi.mock('../utils/logger.js', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 import { AgentService } from './agent-service.js';

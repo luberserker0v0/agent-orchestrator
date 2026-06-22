@@ -26,7 +26,6 @@ describe('Conversation Lifecycle (E2E)', () => {
     const body = await res.json();
     expect(body.id).toBe('e2e-lifecycle');
     expect(body.status).toBe('prepared');
-    expect(body.wsUrl).toContain('/ws/e2e-lifecycle');
   });
 
   it('lists conversations', async () => {
@@ -69,7 +68,6 @@ describe('Conversation Lifecycle (E2E)', () => {
     expect(body.ready).toBe(false);
     expect(typeof body.port).toBe('number');
     expect(body.sessionId).toBeUndefined();
-    expect(body.wsUrl).toContain('/ws/e2e-lifecycle');
   });
 
   it('rejects start when already running', async () => {
