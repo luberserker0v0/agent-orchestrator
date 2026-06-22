@@ -682,6 +682,24 @@ describe('InstanceManager', () => {
     });
   });
 
+  describe('createInstance with agentType', () => {
+    it('passes agentType to runtime start', async () => {
+      const handle = createMockHandle();
+      const port = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
+
+      await instanceManager.createInstance('conv-agent', 'opencode-docker');
+
+      expect(mockSpawnFn).toHaveBeenCalledWith(
+        'conv-agent',
+        expect.any(String),
+        expect.any(Object),
+        expect.any(Object),
+        expect.objectContaining({ type: 'local' }),
+      );
+    });
+  });
+
   describe('idle timeout sweep', () => {
     it('does not start sweep when idleTimeoutMs is 0', async () => {
       const handle = createMockHandle();
@@ -726,6 +744,108 @@ describe('InstanceManager', () => {
 
       expect(idleManager.listInstances()).toHaveLength(0);
       idleManager.destroy();
+    });
+
+    it('skips recently used instance during idle sweep', async () => {
+      vi.useFakeTimers();
+
+      const idleConfig: OrchestratorConfig = {
+        ...defaultOrchestratorConfig,
+        maxInstances: 2,
+        idleTimeoutMs: 5000,
+        idleSweepIntervalMs: 100,
+      };
+      const idleManager = new InstanceManager(idleConfig, workspaceFactory, runtimeManager);
+
+      const handleA = createMockHandle();
+      const portA = allocPorts(1)[0];
+      const handleB = createMockHandle();
+      const portB = allocPorts(1)[0];
+
+      mockSpawnFn
+        .mockResolvedValueOnce({ client: mockClient, port: portA, handle: handleA })
+        .mockResolvedValueOnce({ client: mockClient, port: portB, handle: handleB });
+
+      await idleManager.createInstance('conv-recent-1');
+      await idleManager.createInstance('conv-recent-2');
+
+      // Advance time so untouched instance ages
+      await vi.advanceTimersByTimeAsync(2000);
+
+      // Touch conv-recent-1 to refresh its lastUsedAt
+      idleManager.getInstance('conv-recent-1');
+
+      // Advance past idleTimeoutMs for untouched instance
+      await vi.advanceTimersByTimeAsync(4000);
+
+      const remaining = idleManager.listInstances().map((i) => i.id);
+      expect(remaining).toContain('conv-recent-1');
+      expect(remaining).not.toContain('conv-recent-2');
+
+      idleManager.destroy();
+      vi.useRealTimers();
+    });
+  });
+
+  describe('restart port change', () => {
+    it('updates port when restart returns new port', async () => {
+      const handle = createMockHandle();
+      const port1 = allocPorts(1)[0];
+      mockSpawnFn.mockResolvedValue({ client: mockClient, port: port1, handle });
+
+      await instanceManager.createInstance('conv-portchange');
+
+      const newHandle = createMockHandle();
+      const port2 = allocPorts(1)[0];
+      (mockRuntime.restart as ReturnType<typeof vi.fn>).mockResolvedValue({
+        client: mockClient, port: port2, handle: newHandle,
+      });
+      mockHealth.mockResolvedValue({ healthy: true, version: '1.0.0' });
+
+      await instanceManager.restartInstance('conv-portchange');
+
+      const inst = instanceManager.getInstance('conv-portchange');
+      expect(inst!.port).toBe(port2);
+    });
+  });
+
+  describe('LRU eviction multi-instance', () => {
+    it('evicts the oldest instance when maxInstances is exceeded', async () => {
+      const strictConfig: OrchestratorConfig = {
+        ...defaultOrchestratorConfig,
+        maxInstances: 2,
+        portRange: { start: 30000, end: 30010 },
+      };
+      const pool = new PortPool(30000, 30010);
+      const rm = new RuntimeManager(pool, runtimeRegistry, 'opencode-direct');
+      const strictManager = new InstanceManager(strictConfig, workspaceFactory, rm);
+
+      const handleA = createMockHandle();
+      const handleB = createMockHandle();
+      const handleC = createMockHandle();
+      const portA = allocPorts(1)[0];
+      const portB = allocPorts(1)[0];
+      const portC = allocPorts(1)[0];
+
+      mockSpawnFn
+        .mockResolvedValueOnce({ client: mockClient, port: portA, handle: handleA })
+        .mockResolvedValueOnce({ client: mockClient, port: portB, handle: handleB })
+        .mockResolvedValueOnce({ client: mockClient, port: portC, handle: handleC });
+
+      await strictManager.createInstance('conv-old');
+      await strictManager.createInstance('conv-mid');
+
+      // Access conv-mid so conv-old becomes LRU
+      strictManager.getInstance('conv-mid');
+
+      await strictManager.createInstance('conv-new');
+
+      const list = strictManager.listInstances();
+      expect(list).toHaveLength(2);
+      expect(list.find((i) => i.id === 'conv-old')).toBeUndefined();
+      expect(list.find((i) => i.id === 'conv-mid')).toBeDefined();
+      expect(list.find((i) => i.id === 'conv-new')).toBeDefined();
+      strictManager.destroy();
     });
   });
 

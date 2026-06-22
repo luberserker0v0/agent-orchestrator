@@ -122,6 +122,7 @@ export async function main(cliArgs?: string[]) {
     const state = conversationState.get(id);
     if (!state) return;
     if (state.status === 'stopped' || state.status === 'destroyed' || state.status === 'restarting') return;
+    conversationState.cancelReadyCheck(id);
     conversationState.transition(id, 'stopped');
     conversationState.removeRunningInstance(id);
   });

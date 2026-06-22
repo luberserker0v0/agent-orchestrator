@@ -35,6 +35,70 @@ describe('ConversationState', () => {
     expect(state.get('conv-003')?.status).toBe('running');
   });
 
+  describe('onDestroyed transition: * → stopped', () => {
+    it('running → stopped is valid', () => {
+      const state = new ConversationState();
+      state.create('conv-on-destroyed');
+      state.transition('conv-on-destroyed', 'starting');
+      state.transition('conv-on-destroyed', 'running');
+      state.transition('conv-on-destroyed', 'stopped');
+      expect(state.get('conv-on-destroyed')?.status).toBe('stopped');
+    });
+
+    it('starting → stopped is valid', () => {
+      const state = new ConversationState();
+      state.create('conv-starting-stop');
+      state.transition('conv-starting-stop', 'starting');
+      state.transition('conv-starting-stop', 'stopped');
+      expect(state.get('conv-starting-stop')?.status).toBe('stopped');
+    });
+
+    it('restarting → stopped is valid', () => {
+      const state = new ConversationState();
+      state.create('conv-restarting-stop');
+      state.transition('conv-restarting-stop', 'starting');
+      state.transition('conv-restarting-stop', 'running');
+      state.transition('conv-restarting-stop', 'restarting');
+      state.transition('conv-restarting-stop', 'stopped');
+      expect(state.get('conv-restarting-stop')?.status).toBe('stopped');
+    });
+
+    it('error → stopped is silently ignored (not a valid transition)', () => {
+      const state = new ConversationState();
+      state.create('conv-error-stop');
+      state.transition('conv-error-stop', 'error');
+      state.transition('conv-error-stop', 'stopped');
+      expect(state.get('conv-error-stop')?.status).toBe('error');
+    });
+
+    it('prepared → stopped is silently ignored', () => {
+      const state = new ConversationState();
+      state.create('conv-prepared-stop');
+      state.transition('conv-prepared-stop', 'stopped');
+      expect(state.get('conv-prepared-stop')?.status).toBe('prepared');
+    });
+
+    it('destroyed → stopped is silently ignored', () => {
+      const state = new ConversationState();
+      state.create('conv-destroyed-stop');
+      state.transition('conv-destroyed-stop', 'starting');
+      state.transition('conv-destroyed-stop', 'running');
+      state.transition('conv-destroyed-stop', 'destroyed');
+      state.transition('conv-destroyed-stop', 'stopped');
+      expect(state.get('conv-destroyed-stop')?.status).toBe('destroyed');
+    });
+
+    it('stopped → stopped (same status) is allowed', () => {
+      const state = new ConversationState();
+      state.create('conv-stopped-stop');
+      state.transition('conv-stopped-stop', 'starting');
+      state.transition('conv-stopped-stop', 'running');
+      state.transition('conv-stopped-stop', 'stopped');
+      state.transition('conv-stopped-stop', 'stopped');
+      expect(state.get('conv-stopped-stop')?.status).toBe('stopped');
+    });
+  });
+
   it('should mark needsRestart', () => {
     const state = new ConversationState();
     state.create('conv-004');
@@ -169,6 +233,115 @@ describe('ConversationState', () => {
       state.transition('conv-err-restart', 'error');
       state.transition('conv-err-restart', 'restarting');
       expect(state.get('conv-err-restart')?.status).toBe('restarting');
+    });
+
+    it('should reject destroyed to starting', () => {
+      const state = new ConversationState();
+      state.create('conv-d2s');
+      state.transition('conv-d2s', 'destroyed');
+      state.transition('conv-d2s', 'starting');
+      expect(state.get('conv-d2s')?.status).toBe('destroyed');
+    });
+
+    it('should reject destroyed to running', () => {
+      const state = new ConversationState();
+      state.create('conv-d2r');
+      state.transition('conv-d2r', 'destroyed');
+      state.transition('conv-d2r', 'running');
+      expect(state.get('conv-d2r')?.status).toBe('destroyed');
+    });
+
+    it('should reject destroyed to stopped', () => {
+      const state = new ConversationState();
+      state.create('conv-d2st');
+      state.transition('conv-d2st', 'destroyed');
+      state.transition('conv-d2st', 'stopped');
+      expect(state.get('conv-d2st')?.status).toBe('destroyed');
+    });
+
+    it('should reject destroyed to restarting', () => {
+      const state = new ConversationState();
+      state.create('conv-d2rs');
+      state.transition('conv-d2rs', 'destroyed');
+      state.transition('conv-d2rs', 'restarting');
+      expect(state.get('conv-d2rs')?.status).toBe('destroyed');
+    });
+
+    it('should allow destroyed to error (last resort)', () => {
+      const state = new ConversationState();
+      state.create('conv-d2e');
+      state.transition('conv-d2e', 'destroyed');
+      state.transition('conv-d2e', 'error', { error: 'after destroyed' });
+      expect(state.get('conv-d2e')?.status).toBe('error');
+      expect(state.get('conv-d2e')?.lastError).toBe('after destroyed');
+    });
+
+    it('should allow prepared to destroyed transition', () => {
+      const state = new ConversationState();
+      state.create('conv-p2d');
+      state.transition('conv-p2d', 'destroyed');
+      expect(state.get('conv-p2d')?.status).toBe('destroyed');
+    });
+
+    it('should allow running to destroyed transition', () => {
+      const state = new ConversationState();
+      state.create('conv-run2d');
+      state.transition('conv-run2d', 'starting');
+      state.transition('conv-run2d', 'running');
+      state.transition('conv-run2d', 'destroyed');
+      expect(state.get('conv-run2d')?.status).toBe('destroyed');
+    });
+
+    it('should allow stopped to destroyed transition', () => {
+      const state = new ConversationState();
+      state.create('conv-st2d');
+      state.transition('conv-st2d', 'starting');
+      state.transition('conv-st2d', 'running');
+      state.transition('conv-st2d', 'stopped');
+      state.transition('conv-st2d', 'destroyed');
+      expect(state.get('conv-st2d')?.status).toBe('destroyed');
+    });
+
+    it('should allow error to destroyed transition', () => {
+      const state = new ConversationState();
+      state.create('conv-e2d');
+      state.transition('conv-e2d', 'starting');
+      state.transition('conv-e2d', 'error');
+      state.transition('conv-e2d', 'destroyed');
+      expect(state.get('conv-e2d')?.status).toBe('destroyed');
+    });
+
+    it('should allow error to starting transition (restart from error)', () => {
+      const state = new ConversationState();
+      state.create('conv-e2s');
+      state.transition('conv-e2s', 'starting');
+      state.transition('conv-e2s', 'error');
+      state.transition('conv-e2s', 'starting');
+      expect(state.get('conv-e2s')?.status).toBe('starting');
+    });
+
+    it('duplicate create overwrites existing state', () => {
+      const state = new ConversationState();
+      state.create('conv-dup', 'opencode-direct');
+      state.transition('conv-dup', 'starting');
+      state.create('conv-dup', 'docker');
+      const data = state.get('conv-dup');
+      expect(data?.status).toBe('prepared');
+      expect(data?.agentType).toBe('docker');
+    });
+
+    it('full lifecycle rapid transitions', () => {
+      const state = new ConversationState();
+      state.create('conv-full');
+      state.transition('conv-full', 'starting');
+      state.transition('conv-full', 'running');
+      state.transition('conv-full', 'restarting');
+      state.transition('conv-full', 'running');
+      state.transition('conv-full', 'stopped');
+      state.transition('conv-full', 'starting');
+      state.transition('conv-full', 'error');
+      state.transition('conv-full', 'destroyed');
+      expect(state.get('conv-full')?.status).toBe('destroyed');
     });
   });
 
@@ -428,6 +601,83 @@ describe('ConversationState', () => {
 
       await vi.advanceTimersByTimeAsync(10000);
       expect(mockClient.getSession).toHaveBeenCalledTimes(0);
+    });
+
+    it('should stop polling after cancelReadyCheck following poll failure', async () => {
+      const state = new ConversationState();
+      state.create('conv-stop-after-fail');
+      const mockClient = { getSession: vi.fn().mockRejectedValue(new Error('Not ready')) };
+      state.setRunningInstance('conv-stop-after-fail', { client: mockClient as any });
+      state.setInstanceInfo('conv-stop-after-fail', { sessionId: 'ses_stop_fail' });
+
+      state.startReadyCheck('conv-stop-after-fail');
+
+      // First poll fires at 500ms, getSession fails -> ready=false
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mockClient.getSession).toHaveBeenCalledTimes(1);
+      expect(state.get('conv-stop-after-fail')?.ready).toBe(false);
+
+      // Cancel before the next scheduled poll (at 5500ms)
+      state.cancelReadyCheck('conv-stop-after-fail');
+
+      // Advance well past the second poll time — client should not be called again
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(mockClient.getSession).toHaveBeenCalledTimes(1);
+      expect(state.get('conv-stop-after-fail')?.ready).toBe(false);
+    });
+
+    it('should stop polling after cancelReadyCheck following poll success', async () => {
+      const state = new ConversationState();
+      state.create('conv-stop-after-ok');
+      const mockClient = { getSession: vi.fn().mockResolvedValue(undefined) };
+      state.setRunningInstance('conv-stop-after-ok', { client: mockClient as any });
+      state.setInstanceInfo('conv-stop-after-ok', { sessionId: 'ses_stop_ok' });
+
+      state.startReadyCheck('conv-stop-after-ok');
+
+      // First poll at 500ms succeeds -> ready=true
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mockClient.getSession).toHaveBeenCalledTimes(1);
+      expect(state.get('conv-stop-after-ok')?.ready).toBe(true);
+
+      // Cancel before next keepalive at 5500ms
+      state.cancelReadyCheck('conv-stop-after-ok');
+
+      // Advance past the keepalive time — client should not be called again, ready stays true
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(mockClient.getSession).toHaveBeenCalledTimes(1);
+      expect(state.get('conv-stop-after-ok')?.ready).toBe(true);
+    });
+
+    it('should use fresh client when startReadyCheck called after cancelReadyCheck', async () => {
+      const state = new ConversationState();
+      state.create('conv-client-isolation');
+      const mockClientOld = { getSession: vi.fn().mockRejectedValue(new Error('dead')) };
+      const mockClientNew = { getSession: vi.fn().mockResolvedValue(undefined) };
+
+      // Start with old (failing) client
+      state.setRunningInstance('conv-client-isolation', { client: mockClientOld as any });
+      state.setInstanceInfo('conv-client-isolation', { sessionId: 'ses_old' });
+      state.startReadyCheck('conv-client-isolation');
+
+      // First poll fails with old client -> ready=false
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mockClientOld.getSession).toHaveBeenCalledTimes(1);
+      expect(state.get('conv-client-isolation')?.ready).toBe(false);
+
+      // Cancel and swap to new client
+      state.cancelReadyCheck('conv-client-isolation');
+      state.setRunningInstance('conv-client-isolation', { client: mockClientNew as any });
+      state.setInstanceInfo('conv-client-isolation', { sessionId: 'ses_new' });
+      state.startReadyCheck('conv-client-isolation');
+
+      // New client's first poll at 500ms (from re-start)
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mockClientNew.getSession).toHaveBeenCalledWith('ses_new');
+      expect(state.get('conv-client-isolation')?.ready).toBe(true);
+
+      // Old client should not have been called again
+      expect(mockClientOld.getSession).toHaveBeenCalledTimes(1);
     });
   });
 });

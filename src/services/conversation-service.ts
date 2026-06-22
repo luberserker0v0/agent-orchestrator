@@ -86,7 +86,7 @@ export class ConversationService {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
     }
 
-    if (state.status === 'running' || state.status === 'starting') {
+    if (state.status === 'running' || state.status === 'starting' || state.status === 'restarting' || state.status === 'destroyed') {
       throw new AppError(409, ErrorCodes.CONVERSATION_ALREADY_RUNNING, 'Conversation is already starting or running');
     }
 
@@ -129,6 +129,7 @@ export class ConversationService {
     }
 
     try {
+      this.conversationState.cancelReadyCheck(id);
       await this.instanceManager.destroyInstance(id);
       this.conversationState.removeRunningInstance(id);
       this.conversationState.transition(id, 'stopped');
@@ -165,6 +166,7 @@ export class ConversationService {
           instance = await this.instanceManager.createInstance(id, state.agentType);
         }
       } else {
+        this.conversationState.cancelReadyCheck(id);
         instance = await this.instanceManager.createInstance(id, state.agentType);
       }
 

@@ -21,6 +21,10 @@ export class RuntimeManager {
   private runtimes: RuntimeRegistry;
   private defaultAgentType: string;
   private onDestroyed?: (id: string) => void;
+  // Generation counter for onExit callbacks — each start/restart bumps the counter
+  // so stale closures from old handles are safely ignored.
+  private instanceGen = new Map<string, number>();
+  private nextGen = 0;
 
   constructor(portPool: PortPool, runtimes: RuntimeRegistry, defaultAgentType: string) {
     this.portPool = portPool;
@@ -52,7 +56,10 @@ export class RuntimeManager {
     }
 
     if (handle) {
+      const gen = this.nextGen++;
+      this.instanceGen.set(id, gen);
       handle.onExit((_code: number | null) => {
+        if (this.instanceGen.get(id) !== gen) return;
         logger.warn(`[${id}] process exited`);
         this.cleanupInstance(id);
       });
@@ -85,26 +92,42 @@ export class RuntimeManager {
     const runtime = this.runtimes.get(agentType ?? this.defaultAgentType);
     if (!runtime) throw new Error(`Runtime not found: ${agentType ?? this.defaultAgentType}`);
 
-    const result = await runtime.restart(id, healthCheckConfig ?? { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 });
+    // Bump generation so stale onExit from the about-to-be-killed process is ignored
+    const newGen = this.nextGen++;
+    this.instanceGen.set(id, newGen);
 
-    if (result.port !== inst.port && result.port !== undefined && inst.port !== undefined) {
-      this.portPool.release(inst.port);
+    // Remove from map before restart so stale onExit won't find the instance
+    this.instances.delete(id);
+
+    try {
+      const result = await runtime.restart(id, healthCheckConfig ?? { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 });
+
+      if (result.port !== inst.port && result.port !== undefined && inst.port !== undefined) {
+        this.portPool.release(inst.port);
+      }
+
+      const updated: InstanceInfo = {
+        ...inst,
+        client: result.client,
+        port: result.port,
+        lastUsedAt: Date.now(),
+      };
+      if (result.handle) {
+        updated.handle = result.handle;
+        result.handle.onExit((_code: number | null) => {
+          if (this.instanceGen.get(id) !== newGen) return;
+          logger.warn(`[${id}] process exited`);
+          this.cleanupInstance(id);
+        });
+      }
+      this.instances.set(id, updated);
+    } catch (err) {
+      // Re-add old instance so caller can clean up via destroyInstance
+      if (!this.instances.has(id)) {
+        this.instances.set(id, inst);
+      }
+      throw err;
     }
-    // Re-add to map in case onExit cleanup removed it during kill
-    const updated: InstanceInfo = {
-      ...inst,
-      client: result.client,
-      port: result.port,
-      lastUsedAt: Date.now(),
-    };
-    if (result.handle) {
-      updated.handle = result.handle;
-      result.handle.onExit((_code: number | null) => {
-        logger.warn(`[${id}] process exited`);
-        this.cleanupInstance(id);
-      });
-    }
-    this.instances.set(id, updated);
   }
 
   async cleanupOrphanContainers(): Promise<void> {

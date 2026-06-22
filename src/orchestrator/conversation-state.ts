@@ -90,9 +90,9 @@ export class ConversationState {
 
     const validTransitions: Record<ConversationStatus, ConversationStatus[]> = {
       prepared: ['starting', 'destroyed'],
-      starting: ['running', 'error', 'stopped'],
+      starting: ['running', 'error', 'stopped', 'destroyed'],
       running: ['restarting', 'stopped', 'error', 'destroyed'],
-      restarting: ['running', 'error', 'stopped'],
+      restarting: ['running', 'error', 'stopped', 'destroyed'],
       stopped: ['starting', 'restarting', 'destroyed'],
       destroyed: [],
       error: ['starting', 'restarting', 'destroyed'],
