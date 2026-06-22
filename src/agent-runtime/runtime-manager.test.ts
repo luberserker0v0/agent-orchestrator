@@ -56,7 +56,7 @@ describe('RuntimeManager', () => {
     registry = new RuntimeRegistry();
     registry.register('opencode-direct', mockRuntime);
 
-    portPool = new PortPool(40000, 40050);
+    portPool = new PortPool(41000, 41050);
     runtimeManager = new RuntimeManager(portPool, registry, 'opencode-direct');
   });
 
