@@ -28,7 +28,8 @@ export class FileService {
   private toAppError(err: unknown): AppError {
     if (err instanceof AppError) return err;
     const message = (err as Error).message;
-    if (message.startsWith('File not found') || message.startsWith('Directory not found')) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || message.startsWith('File not found') || message.startsWith('Directory not found')) {
       return new AppError(404, ErrorCodes.FILE_NOT_FOUND, message);
     }
     return new AppError(500, ErrorCodes.INTERNAL_ERROR, message);

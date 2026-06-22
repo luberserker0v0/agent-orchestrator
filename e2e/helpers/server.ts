@@ -29,6 +29,7 @@ export interface E2EServer {
   workspaceDir: string;
   cleanup: () => Promise<void>;
   orchestratorConfig: OrchestratorConfig;
+  crashInstance: (id: string) => Promise<void>;
 }
 
 export async function startServer(orchestratorOverrides?: Partial<OrchestratorConfig>): Promise<E2EServer> {
@@ -122,6 +123,14 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
 
   await instanceManager.cleanupOrphanContainers();
 
+  const crashInstance = async (id: string): Promise<void> => {
+    const inst = runtimeManager.getInstance(id);
+    if (!inst?.handle) {
+      throw new Error(`Instance ${id} not found or has no handle`);
+    }
+    await inst.handle.kill('SIGKILL');
+  };
+
   const cleanup = async () => {
     instanceManager.destroy();
     httpServer.closeWebSockets();
@@ -141,7 +150,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
       }
       const port = addr.port;
       serverConfig.port = port;
-      resolve({ port, baseUrl: `http://${host}:${port}`, workspaceDir, cleanup, orchestratorConfig });
+      resolve({ port, baseUrl: `http://${host}:${port}`, workspaceDir, cleanup, orchestratorConfig, crashInstance });
     });
     httpServer.server.on('error', (err) => {
       reject(err);
