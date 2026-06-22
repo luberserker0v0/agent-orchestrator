@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { startServer, type E2EServer } from '../../helpers/server.js';
-import { killProcessByPort } from '../../helpers/process.js';
+
 import { OPENCODE_CONFIG } from '../../../src/test-fixtures/user-configs.js';
 import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
 
@@ -80,13 +80,7 @@ describe('Process crash → onDestroyed → recovery (E2E)', () => {
   });
 
   it('kills opencode process → state becomes stopped via onDestroyed', async () => {
-    const res = await fetch(`${server.baseUrl}/api/conversations/${convId}`);
-    const body = await res.json() as { port: number };
-    expect(typeof body.port).toBe('number');
-
-    const killed = killProcessByPort(body.port);
-    expect(killed).toBe(true);
-
+    await server.crashInstance(convId);
     await waitForStatus('stopped');
   });
 

@@ -8,6 +8,11 @@ import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, Ag
 import type { DockerRuntimeConfig } from '../../config-loader.js';
 
 class DockerHandle implements InstanceHandle {
+  private _exitCode: number | null = null;
+  private resolved = false;
+  private exitPromise: Promise<void> | null = null;
+  private resolveExit: (() => void) | null = null;
+
   constructor(
     private containerName: string,
   ) {}
@@ -17,7 +22,7 @@ class DockerHandle implements InstanceHandle {
   }
 
   get exitCode(): number | null {
-    return null;
+    return this._exitCode;
   }
 
   async kill(): Promise<void> {
@@ -33,12 +38,47 @@ class DockerHandle implements InstanceHandle {
     });
   }
 
-  async waitForExit(_timeoutMs: number): Promise<void> {
-    // Docker container has no associated child process; treat as always alive
+  async waitForExit(timeoutMs: number): Promise<void> {
+    if (this.resolved) return;
+    if (!this.exitPromise) return;
+    await Promise.race([
+      this.exitPromise,
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
   }
 
-  onExit(_callback: (code: number | null) => void): void {
-    // No child process to monitor for Docker
+  onExit(callback: (code: number | null) => void): void {
+    if (this.resolved) return;
+
+    this.exitPromise = new Promise((resolve) => {
+      this.resolveExit = resolve;
+    });
+
+    const proc = spawn('docker', ['wait', this.containerName], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+
+    const finish = () => {
+      if (this.resolved) return;
+      this.resolved = true;
+      const trimmed = output.trim();
+      if (!trimmed) {
+        this._exitCode = null;
+      } else {
+        const n = Number(trimmed);
+        this._exitCode = isNaN(n) ? null : n;
+      }
+      this.resolveExit?.();
+      callback(this._exitCode);
+    };
+
+    proc.on('exit', finish);
+    proc.on('error', finish);
   }
 }
 
