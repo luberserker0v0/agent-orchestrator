@@ -15,23 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(runtime-info): add RuntimeInfoProvider for aggregated runtime data
 - feat(docker): Dockerfile.template with `{{OPENCODE_VERSION}}` placeholder and render script
 - feat(ci): add OPENCODE_VERSION build-arg extraction and Dockerfile rendering in CD workflow
-
-### Changed
-
-- refactor(docker): remove `containerPort` from DockerRuntimeConfig; use dynamic port only
-- refactor(http-api): enhance GET /api/runtimes with version, config, registered, capabilities
-- refactor(config): update example config with `opencode-direct` and `opencode-docker` runtime entries
-- refactor(cli): add subcommand parser supporting `aor runtime list|info`
-- refactor(makefile): add `render-dockerfile` target and OPENCODE_VERSION build-arg
-- build: add `.gitignore` entry for generated Dockerfile
-
-### Fixed
-
-- fix(docker): use dynamic port for container listen (`--port port`) and port mapping (`instanceHost:port:port`)
-- fix(docker): baseUrl now uses dynamic port for both bridge and host network modes
-
-### Added
-
 - feat(http-api): add GET /api/runtimes endpoint exposing registered runtimes
 - feat(config): add Makefile for Docker builds
 - feat(config): validate deprecated orchestrator fields (runtime, runtimeConfig, agentType)
@@ -45,9 +28,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: update README.md with new config fields (apiKey, instanceHost, maxSizeBytes), security features, observability, and multi-runtime support
 - docs: update ARCHITECTURE.md for DirectRuntime/DockerRuntime split, InstanceHandle, health.ts, Logger.child, metrics registry, security layer
 - docs: update API.md metrics table with 4 new metrics, add auth header note
+- test(runtime-manager): add ~34 unit tests covering lifecycle, restart, LRU, idle sweep, edge cases
+- test(conversation-state): add 12 tests for cancelReadyCheck coverage
+- test(conversation-service): add 14 tests for destroyed guard, stop/restart cancelReadyCheck assertions
+- test(instance-manager): add 5 tests for edge cases
+- test(router): add 4 tests for race conditions
+- test(e2e): add process crash e2e test — kill opencode by port → verify onDestroyed → stopped → recover
+- test(e2e): add idle timeout e2e test — auto-destroy → stopped → recover → full lifecycle
+- test(e2e): add LRU eviction e2e test — maxInstances exceeded → LRU evict → stopped → recover
+- test(conversation-state): add *→stopped transition tests for onDestroyed paths
+- test(conversation-service): add onDestroyed simulation tests (restart/stop/delete after crash)
+
+### Fixed
+
+- fix(e2e): add StorageBackend to WorkspaceFactory in e2e server helper (pre-existing crash)
+- fix(e2e): add setOnDestroyed callback to e2e server helper (pre-existing — state never transitioned to stopped on eviction/crash/timeout)
 
 ### Changed
 
+- refactor(docker): remove `containerPort` from DockerRuntimeConfig; use dynamic port only
+- refactor(http-api): enhance GET /api/runtimes with version, config, registered, capabilities
+- refactor(config): update example config with `opencode-direct` and `opencode-docker` runtime entries
+- refactor(cli): add subcommand parser supporting `aor runtime list|info`
+- refactor(makefile): add `render-dockerfile` target and OPENCODE_VERSION build-arg
+- build: add `.gitignore` entry for generated Dockerfile
 - chore(deps): bump express from 4.22.2 to 5.2.1 and @types/express from 4 to 5 (#70)
 - chore(deps): bump the dev-dependencies group (eslint 10.4.1→10.5.0, prettier 3.8.3→3.8.4, typescript 5.9.3→6.0.3, typescript-eslint 8.60.1→8.61.1, vitest 4.1.8→4.1.9, @types/node 20.19.41→25.9.3) (#68)
 - chore(deps): bump @vitest/coverage-v8 from 4.1.8 to 4.1.9 (#69)
@@ -63,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- fix(orchestrator): add `cancelReadyCheck(id)` to `onDestroyed` callback to prevent stale `pollKeepalive` closure from flipping `ready=false` after idle sweep kills an instance
+- fix(orchestrator): add `cancelReadyCheck(id)` to `conversation-service.stop()` and `restart()` to stop stale polling after manual stop/restart
+- fix(runtime-manager): use generation counter in `restartInstance()` to prevent stale `onExit` closure from destroying newly spawned instance
+- fix(conversation-service): add `destroyed` guard to `start()` to prevent orphaned RuntimeManager instances when `start()` races with `delete()`
+- fix(docker): use dynamic port for container listen (`--port port`) and port mapping (`instanceHost:port:port`)
+- fix(docker): baseUrl now uses dynamic port for both bridge and host network modes
 - fix(http-api): add type assertions for Express 5 `req.params` compatibility (`string | string[]` → `string`) (#70)
 - fix(config-loader): deep-merge parsed config with defaults to prevent missing fields (`agentType` was undefined → kill logic skipped → workspace folder never released)
 

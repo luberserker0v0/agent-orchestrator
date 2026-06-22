@@ -20,6 +20,7 @@ import { RuntimeFactory } from '../../src/agent-runtime/runtime-factory.js';
 import { DirectRuntime } from '../../src/agent-runtime/runtimes/direct.js';
 import { DockerRuntime } from '../../src/agent-runtime/runtimes/docker.js';
 import { PortPool } from '../../src/orchestrator/port-pool.js';
+import { LocalStorage } from '../../src/storage/local.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE } from '../../src/test-fixtures/ao-configs.js';
 
 export interface E2EServer {
@@ -62,7 +63,8 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     ...orchestratorOverrides,
   };
 
-  const workspaceFactory = new WorkspaceFactory(workspaceConfig);
+  const storage = new LocalStorage(workspaceConfig.basePath);
+  const workspaceFactory = new WorkspaceFactory(workspaceConfig, storage);
 
   const runtimeFactory = new RuntimeFactory();
   runtimeFactory.register('direct', DirectRuntime);
@@ -78,6 +80,14 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, orchestratorConfig.defaultAgentType);
   const instanceManager = new InstanceManager(orchestratorConfig, workspaceFactory, runtimeManager);
   const conversationState = new ConversationState();
+  runtimeManager.setOnDestroyed((id: string) => {
+    const state = conversationState.get(id);
+    if (!state) return;
+    if (state.status === 'stopped' || state.status === 'destroyed' || state.status === 'restarting') return;
+    conversationState.cancelReadyCheck(id);
+    conversationState.transition(id, 'stopped');
+    conversationState.removeRunningInstance(id);
+  });
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
