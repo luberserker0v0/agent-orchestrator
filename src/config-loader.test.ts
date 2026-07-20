@@ -360,6 +360,18 @@ describe('loadConfig with env overrides', () => {
     expect(config.server.port).toBe(7070);
     expect(config.server.host).toBe('0.0.0.0');
   });
+
+  it('overrides workspace.maxSizeBytes via env var', () => {
+    process.env.AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES = '104857600';
+    const config = loadConfig();
+    expect(config.workspace.maxSizeBytes).toBe(104857600);
+  });
+
+  it('allows maxSizeBytes=0 via env var for unlimited', () => {
+    process.env.AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES = '0';
+    const config = loadConfig();
+    expect(config.workspace.maxSizeBytes).toBe(0);
+  });
 });
 
 describe('loadConfig fallback paths', () => {
