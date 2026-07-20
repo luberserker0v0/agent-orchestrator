@@ -206,11 +206,18 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
   });
 
-  it('rejects non-positive workspace.maxSizeBytes', () => {
+  it('accepts workspace.maxSizeBytes of 0 as unlimited', () => {
     const config = createValidConfig({
       workspace: { basePath: './ws', enforceCanonicalConfig: true, maxSizeBytes: 0, storage: { type: 'local' } },
     });
-    expect(() => validateConfig(config)).toThrow('workspace.maxSizeBytes must be a positive integer');
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('rejects negative workspace.maxSizeBytes', () => {
+    const config = createValidConfig({
+      workspace: { basePath: './ws', enforceCanonicalConfig: true, maxSizeBytes: -1, storage: { type: 'local' } },
+    });
+    expect(() => validateConfig(config)).toThrow('workspace.maxSizeBytes must be a non-negative integer');
   });
 
   // ── Runtime entry validation ──

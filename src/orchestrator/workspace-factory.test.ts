@@ -386,5 +386,23 @@ describe('WorkspaceFactory', () => {
 
       expect(await factory.getWorkspaceSize('conv-size')).toBeGreaterThan(0);
     });
+
+    it('should return configured maxSizeBytes via getMaxSizeBytes', () => {
+      const factory = createFactory({ maxSizeBytes: 100 * 1024 * 1024 });
+      expect(factory.getMaxSizeBytes()).toBe(100 * 1024 * 1024);
+    });
+
+    it('should return default 50MB when maxSizeBytes is not configured', () => {
+      const factory = createFactory();
+      expect(factory.getMaxSizeBytes()).toBe(50 * 1024 * 1024);
+    });
+
+    it('should skip quota check when maxSizeBytes is 0 (unlimited)', async () => {
+      const factory = createFactory({ maxSizeBytes: 0 });
+      await factory.create('conv-unlimited');
+
+      const bigContent = 'x'.repeat(51 * 1024 * 1024);
+      await expect(factory.writeFile('conv-unlimited', 'big.txt', bigContent)).resolves.not.toThrow();
+    });
   });
 });

@@ -131,6 +131,8 @@ export class AgentService {
   }
 
   private assertQuota(wsPath: string, additionalBytes: number, excludingFile?: string): void {
+    const maxSize = this.workspaceFactory.getMaxSizeBytes();
+    if (maxSize === 0) return;
     const currentSize = getDirSize(wsPath);
     let excluding = 0;
     if (excludingFile && existsSync(excludingFile)) {
@@ -140,10 +142,9 @@ export class AgentService {
         // ignore
       }
     }
-    const MAX_WORKSPACE_SIZE = 50 * 1024 * 1024;
-    if (currentSize - excluding + additionalBytes > MAX_WORKSPACE_SIZE) {
+    if (currentSize - excluding + additionalBytes > maxSize) {
       throw new Error(
-        `Workspace quota exceeded. Current: ${currentSize} bytes, Adding: ${additionalBytes} bytes, Limit: ${MAX_WORKSPACE_SIZE} bytes`
+        `Workspace quota exceeded. Current: ${currentSize} bytes, Adding: ${additionalBytes} bytes, Limit: ${maxSize} bytes`
       );
     }
   }

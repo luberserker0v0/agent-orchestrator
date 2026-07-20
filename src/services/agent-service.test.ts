@@ -12,7 +12,9 @@ vi.mock('node:fs', () => ({
 }));
 
 vi.mock('../orchestrator/workspace-factory.js', () => ({
-  WorkspaceFactory: class {},
+  WorkspaceFactory: class {
+    getMaxSizeBytes() { return 50 * 1024 * 1024; }
+  },
   getDirSize: vi.fn().mockReturnValue(0),
 }));
 
@@ -38,6 +40,7 @@ describe('AgentService', () => {
 
     mockWorkspaceFactory = {
       resolveWorkspacePath: vi.fn().mockReturnValue(mockWsPath),
+      getMaxSizeBytes: vi.fn().mockReturnValue(50 * 1024 * 1024),
     };
 
     mockConversationState = {
