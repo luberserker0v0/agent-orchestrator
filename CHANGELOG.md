@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(opencode-sse): integrate OpenCode SSE `/global/event` endpoint for real-time event forwarding to WebSocket clients
+- feat(opencode-sse): add OpenCodeSSEClient with reconnection and exponential backoff
+- feat(opencode-sse): add SSEBridge to map OpenCode events to AgentOrchestrator events and filter heartbeats
+- feat(opencode-sse): add `sse` config section (enabled, reconnectMaxAttempts, reconnectBaseMs, filterHeartbeat)
+- feat(opencode-sse): wire SSEBridge into ConversationService lifecycle (start on create, stop on destroy/stop/restart)
+- feat(opencode-sse): propagate baseUrl/username/password in InstanceInfo for SSE connections
 - feat(cli): add `aor runtime list` and `aor runtime info <id>` subcommands
 - feat(config): add `version` field to DirectRuntimeConfig for version registry
 - feat(versions): add version registry helpers (`getRuntimeVersion`, `opencodeDownloadUrl`)

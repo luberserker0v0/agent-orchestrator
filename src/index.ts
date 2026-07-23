@@ -18,6 +18,7 @@ import { RuntimeFactory } from './agent-runtime/runtime-factory.js';
 import { DirectRuntime } from './agent-runtime/runtimes/direct.js';
 import { DockerRuntime } from './agent-runtime/runtimes/docker.js';
 import { PortPool } from './orchestrator/port-pool.js';
+import { SSEBridge } from './orchestrator/sse-bridge.js';
 import { createHttpServer } from './http-api/server.js';
 import { logger } from './utils/logger.js';
 import { parseCliArgs, printHelp, handleSubcommand } from './cli.js';
@@ -118,20 +119,22 @@ export async function main(cliArgs?: string[]) {
   logger.info(`Agent runtimes registered: ${runtimeRegistry.list().join(', ')}`);
 
   const runtimeManager = new RuntimeManager(portPool, runtimeRegistry, config.orchestrator.defaultAgentType);
+  const conversationState = new ConversationState();
+  const sseBridge = new SSEBridge(conversationState, config.orchestrator.sse);
   runtimeManager.setOnDestroyed((id: string) => {
     const state = conversationState.get(id);
     if (!state) return;
     if (state.status === 'stopped' || state.status === 'destroyed' || state.status === 'restarting') return;
+    sseBridge.stop(id);
     conversationState.cancelReadyCheck(id);
     conversationState.transition(id, 'stopped');
     conversationState.removeRunningInstance(id);
   });
   const instanceManager = new InstanceManager(config.orchestrator, workspaceFactory, runtimeManager);
-  const conversationState = new ConversationState();
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
-  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeManager, config.server, config.orchestrator.defaultAgentType);
+  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeManager, config.server, config.orchestrator.defaultAgentType, sseBridge);
   const fileService = new FileService(workspaceFactory, conversationState);
   const sessionService = new SessionService(instanceManager, conversationState);
   const messageService = new MessageService(instanceManager, conversationState);

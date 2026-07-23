@@ -17,6 +17,7 @@ function makeConfig(runtimes: Array<{ id: string; type: string; config: Record<s
       defaultAgentType: 'opencode-direct',
       runtimes: runtimes as any,
       healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
+      sse: { enabled: true, reconnectMaxAttempts: 10, reconnectBaseMs: 1000, filterHeartbeat: true },
     },
     workspace: { basePath: '/tmp/ws', enforceCanonicalConfig: true, storage: { type: 'local' } },
   };

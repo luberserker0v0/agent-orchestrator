@@ -13,6 +13,9 @@ export interface InstanceInfo {
   client: AgentClient;
   sessionId?: string;
   lastUsedAt: number;
+  baseUrl?: string;
+  username?: string;
+  password?: string;
 }
 
 export class RuntimeManager {
@@ -46,8 +49,9 @@ export class RuntimeManager {
     let client: AgentClient;
     let port: number | undefined;
     let handle: InstanceHandle | undefined;
+    let baseUrl: string | undefined;
     try {
-      ({ client, port, handle } = await runtime.start(id, workspacePath, auth, healthCheckConfig, runtimeAccess));
+      ({ client, port, handle, baseUrl } = await runtime.start(id, workspacePath, auth, healthCheckConfig, runtimeAccess));
     } catch (err) {
       instancesErrorsTotal.inc({ type: 'start' });
       throw err;
@@ -72,6 +76,9 @@ export class RuntimeManager {
       handle,
       client,
       lastUsedAt: Date.now(),
+      baseUrl,
+      username: auth.username,
+      password: auth.password,
     };
 
     this.instances.set(id, instance);
@@ -110,6 +117,7 @@ export class RuntimeManager {
         ...inst,
         client: result.client,
         port: result.port,
+        baseUrl: result.baseUrl,
         lastUsedAt: Date.now(),
       };
       if (result.handle) {

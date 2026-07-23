@@ -137,6 +137,7 @@ export interface AgentEndpoint {
   client: AgentClient;
   port?: number;
   handle?: InstanceHandle;
+  baseUrl?: string;
 }
 
 // ─── AgentRuntime ──────────────────────────────────────────────────────

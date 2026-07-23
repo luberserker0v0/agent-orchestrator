@@ -164,7 +164,7 @@ export class DockerRuntime implements AgentRuntime {
       this.clients.set(id, client);
       this.ports.set(id, port);
       const handle = new DockerHandle(containerName);
-      return { client, port, handle };
+      return { client, port, handle, baseUrl };
     } catch (err) {
       this.portPool.release(port);
       throw err;
@@ -199,7 +199,7 @@ export class DockerRuntime implements AgentRuntime {
       throw new Error(`No stored client info for instance ${id}`);
     }
     const handle = new DockerHandle(containerName);
-    return { client, port, handle };
+    return { client, port, handle, baseUrl: stored.baseUrl };
   }
 
   async cleanupOrphans(): Promise<void> {
