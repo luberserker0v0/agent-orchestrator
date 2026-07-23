@@ -25,10 +25,11 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:e2e:direct": "vitest run --config e2e/vitest.config.e2e.ts",
     "test:e2e:docker": "cross-env E2E_RUNTIME=docker vitest run --config e2e/vitest.config.e2e.ts",
-    "test:e2e": "npm run test:e2e:direct && npm run test:e2e:docker",
-    "test:e2e:watch": "vitest --config e2e/vitest.config.e2e.ts",
+    "test:e2e:direct": "vitest run --config e2e/vitest.config.e2e.ts",
+    "test:e2e:runtime": "cross-env E2E_RUNTIME=docker vitest run --config e2e/vitest.config.runtime.ts",
+    "test:e2e": "npm run test:e2e:docker",
+    "test:e2e:watch": "cross-env E2E_RUNTIME=docker vitest --config e2e/vitest.config.e2e.ts",
     "preflight": "npm run lint && npm run test && npm run build"
   },
   "keywords": [
