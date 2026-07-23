@@ -87,7 +87,7 @@ fix(websocket): resolve heartbeat timeout handling
 
 2. Create a Pull Request using the template in `.github/pull_request_template.md`
 
-3. Wait for GitHub Actions CI to pass (lint + test + build on Node 20.x and 22.x)
+3. Wait for GitHub Actions CI to pass (lint + test + build on Node.js 24.x)
 
 4. Review the PR description checklist. All items must be checked.
 
@@ -204,7 +204,7 @@ src/
 
 ## Technology Stack
 
-- **Runtime**: Node.js >= 20.0.0
+- **Runtime**: Node.js >= 24.0.0
 - **Language**: TypeScript 5.4 (strict mode)
 - **Framework**: Express 4.x
 - **WebSocket**: ws 8.x
@@ -317,13 +317,35 @@ scrape_configs:
 npm run dev           # Development mode (tsx watch)
 npm run build         # Compile TypeScript to dist/
 npm start             # Run compiled production build
-npm run test          # Run all tests once
+npm run test          # Run all unit tests once
 npm run test:watch    # Run tests in watch mode
 npm run lint          # Check code style
 npm run lint:fix      # Auto-fix lint issues
 npm run preflight     # Run lint + test + build in sequence
 node scripts/setup-hooks.js  # Install Git hooks
 ```
+
+### E2E Tests
+
+E2E tests are split by runtime to reduce overlap. All orchestrator-layer tests (lifecycle, workspace, resource limits, idle timeout) run on Docker by default since they are runtime-agnostic.
+
+```bash
+npm run test:e2e            # Run orchestrator E2E tests (Docker runtime, default)
+npm run test:e2e:docker     # Explicit Docker runtime E2E tests
+npm run test:e2e:direct     # Direct runtime E2E tests (requires local opencode binary)
+npm run test:e2e:runtime    # Runtime-specific E2E tests (Docker: container lifecycle)
+npm run test:e2e:watch      # Watch mode for E2E tests
+```
+
+**Test categories:**
+
+| Directory | What it tests | Runtime | Skips when unavailable? |
+|-----------|--------------|---------|------------------------|
+| `e2e/scenarios/lifecycle/` | HTTP/WS conversation lifecycle, message send, ready state | Any (Docker default) | No |
+| `e2e/scenarios/orchestrator/` | LRU eviction, idle timeout, process crash recovery | Any (Docker default) | No |
+| `e2e/scenarios/workspace/` | File/agent CRUD, path traversal protection | Any (Docker default) | No |
+| `e2e/scenarios/runtime/direct-runtime.test.ts` | Process spawn, env vars, SIGTERM, CWD propagation | Direct only | Yes (`describe.skipIf`) |
+| `e2e/scenarios/runtime/docker-runtime.test.ts` | Container naming, port mapping, env vars, docker restart | Docker only | Yes (`describe.skipIf`) |
 
 ### Docker Build (for orchestrator container)
 ```bash
@@ -335,7 +357,7 @@ docker run -p 8080:8080 -v /path/to/config:/app/config agent-orchestrator
 
 ### GitHub Actions (`.github/workflows/ci.yml`)
 - Triggered on `push`/`PR` to `main`/`master`
-- **Matrix**: Node.js 20.x and 22.x
+- **Node.js**: 24.x
 - **Steps**: `npm ci` → `npm run preflight` (lint + test + build) → `npm run test:coverage` → upload coverage artifact
 
 - **Dependabot**: Weekly updates for npm (grouped dev dependencies) and GitHub Actions (`.github/dependabot.yml`)
