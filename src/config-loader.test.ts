@@ -206,11 +206,18 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('workspace.basePath must be a non-empty string');
   });
 
-  it('rejects non-positive workspace.maxSizeBytes', () => {
+  it('accepts workspace.maxSizeBytes of 0 as unlimited', () => {
     const config = createValidConfig({
       workspace: { basePath: './ws', enforceCanonicalConfig: true, maxSizeBytes: 0, storage: { type: 'local' } },
     });
-    expect(() => validateConfig(config)).toThrow('workspace.maxSizeBytes must be a positive integer');
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('rejects negative workspace.maxSizeBytes', () => {
+    const config = createValidConfig({
+      workspace: { basePath: './ws', enforceCanonicalConfig: true, maxSizeBytes: -1, storage: { type: 'local' } },
+    });
+    expect(() => validateConfig(config)).toThrow('workspace.maxSizeBytes must be a non-negative integer');
   });
 
   // ── Runtime entry validation ──
@@ -352,6 +359,18 @@ describe('loadConfig with env overrides', () => {
     const config = loadConfig();
     expect(config.server.port).toBe(7070);
     expect(config.server.host).toBe('0.0.0.0');
+  });
+
+  it('overrides workspace.maxSizeBytes via env var', () => {
+    process.env.AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES = '104857600';
+    const config = loadConfig();
+    expect(config.workspace.maxSizeBytes).toBe(104857600);
+  });
+
+  it('allows maxSizeBytes=0 via env var for unlimited', () => {
+    process.env.AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES = '0';
+    const config = loadConfig();
+    expect(config.workspace.maxSizeBytes).toBe(0);
   });
 });
 

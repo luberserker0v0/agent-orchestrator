@@ -258,8 +258,8 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     throw new Error(`Config validation failed: workspace.enforceCanonicalConfig must be a boolean, got ${config.workspace.enforceCanonicalConfig}`);
   }
   if (config.workspace.maxSizeBytes !== undefined) {
-    if (typeof config.workspace.maxSizeBytes !== 'number' || !Number.isInteger(config.workspace.maxSizeBytes) || config.workspace.maxSizeBytes <= 0) {
-      throw new Error(`Config validation failed: workspace.maxSizeBytes must be a positive integer, got ${config.workspace.maxSizeBytes}`);
+    if (typeof config.workspace.maxSizeBytes !== 'number' || !Number.isInteger(config.workspace.maxSizeBytes) || config.workspace.maxSizeBytes < 0) {
+      throw new Error(`Config validation failed: workspace.maxSizeBytes must be a non-negative integer, got ${config.workspace.maxSizeBytes}`);
     }
   }
   if (config.workspace.storage) {

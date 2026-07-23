@@ -238,6 +238,10 @@ export class WorkspaceFactory {
 
   // ─── Quota helpers ───────────────────────────────────────
 
+  getMaxSizeBytes(): number {
+    return this.maxSizeBytes;
+  }
+
   async hasWorkspace(id: string): Promise<boolean> {
     return this.storage.hasWorkspace(sanitizeId(id));
   }
@@ -251,6 +255,7 @@ export class WorkspaceFactory {
   }
 
   async assertQuota(wsId: string, additionalBytes: number): Promise<void> {
+    if (this.maxSizeBytes === 0) return;
     const currentSize = await this.storage.getWorkspaceSize(wsId);
     if (currentSize + additionalBytes > this.maxSizeBytes) {
       throw new Error(
