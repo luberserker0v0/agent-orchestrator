@@ -87,7 +87,7 @@ fix(websocket): resolve heartbeat timeout handling
 
 2. Create a Pull Request using the template in `.github/pull_request_template.md`
 
-3. Wait for GitHub Actions CI to pass (lint + test + build on Node 20.x and 22.x)
+3. Wait for GitHub Actions CI to pass (lint + test + build on Node.js 24.x)
 
 4. Review the PR description checklist. All items must be checked.
 
@@ -204,7 +204,7 @@ src/
 
 ## Technology Stack
 
-- **Runtime**: Node.js >= 20.0.0
+- **Runtime**: Node.js >= 24.0.0
 - **Language**: TypeScript 5.4 (strict mode)
 - **Framework**: Express 4.x
 - **WebSocket**: ws 8.x
@@ -357,7 +357,7 @@ docker run -p 8080:8080 -v /path/to/config:/app/config agent-orchestrator
 
 ### GitHub Actions (`.github/workflows/ci.yml`)
 - Triggered on `push`/`PR` to `main`/`master`
-- **Matrix**: Node.js 20.x and 22.x
+- **Node.js**: 24.x
 - **Steps**: `npm ci` → `npm run preflight` (lint + test + build) → `npm run test:coverage` → upload coverage artifact
 
 - **Dependabot**: Weekly updates for npm (grouped dev dependencies) and GitHub Actions (`.github/dependabot.yml`)
