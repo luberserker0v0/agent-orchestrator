@@ -117,7 +117,7 @@ export class DirectRuntime implements AgentRuntime {
 
       const handle = new ChildProcessHandle(proc);
       this.instanceState.set(id, { cwd, auth, handle });
-      return { client, port, handle };
+      return { client, port, handle, baseUrl };
     } catch (err) {
       this.portPool.release(port);
       throw err;
@@ -165,7 +165,7 @@ export class DirectRuntime implements AgentRuntime {
 
       const handle = new ChildProcessHandle(proc);
       this.instanceState.set(id, { ...state, handle });
-      return { client, port, handle };
+      return { client, port, handle, baseUrl };
     } catch (err) {
       this.portPool.release(port);
       throw err;

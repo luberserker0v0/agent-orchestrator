@@ -3,6 +3,7 @@ import { RuntimeManager, type InstanceInfo } from '../agent-runtime/runtime-mana
 import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { WorkspaceFactory } from '../orchestrator/workspace-factory.js';
 import { ConversationState, type ConversationEvent } from '../orchestrator/conversation-state.js';
+import { SSEBridge } from '../orchestrator/sse-bridge.js';
 import type { AgentClient } from '../agent-runtime/types.js';
 import { logger } from '../utils/logger.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
@@ -36,6 +37,7 @@ export class ConversationService {
     private runtimeManager: RuntimeManager,
     private serverConfig: ServerConfig,
     private defaultAgentType: string,
+    private sseBridge?: SSEBridge,
   ) {}
 
   async create(id?: string, agentType?: string): Promise<ConversationData> {
@@ -102,6 +104,10 @@ export class ConversationService {
       this.conversationState.transition(id, 'running');
       this.conversationState.startReadyCheck(id);
 
+      if (this.sseBridge && instance.baseUrl && instance.username && instance.password) {
+        this.sseBridge.start(id, instance.baseUrl, instance.username, instance.password);
+      }
+
       this.createSessionInBackground(id, instance.client);
 
       return {
@@ -130,6 +136,7 @@ export class ConversationService {
 
     try {
       this.conversationState.cancelReadyCheck(id);
+      this.sseBridge?.stop(id);
       await this.instanceManager.destroyInstance(id);
       this.conversationState.removeRunningInstance(id);
       this.conversationState.transition(id, 'stopped');
@@ -150,6 +157,8 @@ export class ConversationService {
     }
 
     this.conversationState.transition(id, 'restarting');
+
+    this.sseBridge?.stop(id);
 
     try {
       const hadInstance = this.instanceManager.getInstance(id) !== undefined;
@@ -176,6 +185,10 @@ export class ConversationService {
       this.conversationState.transition(id, 'running');
       this.conversationState.startReadyCheck(id);
 
+      if (this.sseBridge && instance.baseUrl && instance.username && instance.password) {
+        this.sseBridge.start(id, instance.baseUrl, instance.username, instance.password);
+      }
+
       this.createSessionInBackground(id, instance.client);
 
       return {
@@ -199,6 +212,7 @@ export class ConversationService {
 
     const hasInstance = this.instanceManager.getInstance(id) !== undefined;
     logger.info(`[${id}] delete: instance exists in manager=${hasInstance}`);
+    this.sseBridge?.stop(id);
     await this.instanceManager.destroyInstance(id).catch(() => {});
     logger.debug(`[${id}] delete: destroyInstance returned, attempting workspace cleanup`);
     try {

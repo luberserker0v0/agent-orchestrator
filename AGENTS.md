@@ -257,6 +257,10 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
 | `healthCheck.clientTimeoutMs` | integer | 5000 | HTTP client timeout per health check request |
+| `sse.enabled` | boolean | true | Enable SSE event forwarding from OpenCode instances to WebSocket clients |
+| `sse.reconnectMaxAttempts` | integer | 10 | Max reconnect attempts before giving up |
+| `sse.reconnectBaseMs` | integer | 1000 | Base delay in ms for exponential backoff |
+| `sse.filterHeartbeat` | boolean | true | Filter heartbeat events to reduce noise |
 
 **Validation rule:** `maxInstances` must not exceed the number of available ports (`portRange.end - portRange.start + 1`). The application will refuse to start if this constraint is violated.
 

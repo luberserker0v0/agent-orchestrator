@@ -12,10 +12,12 @@ export const defaultOrchestratorConfig: OrchestratorConfig = {
   defaultAgentType: 'opencode-direct',
   runtimes: [{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode' } }],
   healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
+  sse: { enabled: true, reconnectMaxAttempts: 10, reconnectBaseMs: 1000, filterHeartbeat: true },
 };
 
 export const dockerOrchestratorConfig: OrchestratorConfig = {
   ...defaultOrchestratorConfig,
   defaultAgentType: 'opencode-docker',
   runtimes: [{ id: 'opencode-docker', type: 'docker', config: { image: TEST_DOCKER_IMAGE } }],
+  sse: { enabled: true, reconnectMaxAttempts: 10, reconnectBaseMs: 1000, filterHeartbeat: true },
 };

@@ -53,6 +53,17 @@ export interface DockerRuntimeEntry {
 
 export type RuntimeEntry = DirectRuntimeEntry | DockerRuntimeEntry;
 
+export interface SSEConfig {
+  /** Enable SSE event forwarding from OpenCode instances */
+  enabled: boolean;
+  /** Max reconnect attempts before giving up (default: 10) */
+  reconnectMaxAttempts: number;
+  /** Base delay in ms for exponential backoff (default: 1000) */
+  reconnectBaseMs: number;
+  /** Filter heartbeat events to reduce noise (default: true) */
+  filterHeartbeat: boolean;
+}
+
 export interface OrchestratorConfig {
   maxInstances: number;
   idleTimeoutMs: number;
@@ -66,6 +77,7 @@ export interface OrchestratorConfig {
   defaultAgentType: string;
   runtimes: RuntimeEntry[];
   healthCheck: HealthCheckConfig;
+  sse: SSEConfig;
 }
 
 export interface StorageConfig {
@@ -250,6 +262,22 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     throw new Error(`Config validation failed: healthCheck.clientTimeoutMs must be a positive integer, got ${orchestrator.healthCheck.clientTimeoutMs}`);
   }
 
+  // SSE validation
+  if (orchestrator.sse) {
+    if (typeof orchestrator.sse.enabled !== 'boolean') {
+      throw new Error(`Config validation failed: sse.enabled must be a boolean, got ${typeof orchestrator.sse.enabled}`);
+    }
+    if (typeof orchestrator.sse.reconnectMaxAttempts !== 'number' || !Number.isInteger(orchestrator.sse.reconnectMaxAttempts) || orchestrator.sse.reconnectMaxAttempts <= 0) {
+      throw new Error(`Config validation failed: sse.reconnectMaxAttempts must be a positive integer, got ${orchestrator.sse.reconnectMaxAttempts}`);
+    }
+    if (typeof orchestrator.sse.reconnectBaseMs !== 'number' || orchestrator.sse.reconnectBaseMs <= 0) {
+      throw new Error(`Config validation failed: sse.reconnectBaseMs must be positive, got ${orchestrator.sse.reconnectBaseMs}`);
+    }
+    if (typeof orchestrator.sse.filterHeartbeat !== 'boolean') {
+      throw new Error(`Config validation failed: sse.filterHeartbeat must be a boolean, got ${typeof orchestrator.sse.filterHeartbeat}`);
+    }
+  }
+
   // Workspace validation
   if (!config.workspace.basePath || typeof config.workspace.basePath !== 'string') {
     throw new Error('Config validation failed: workspace.basePath must be a non-empty string');
@@ -309,6 +337,7 @@ export function defaultConfig(): AgentOrchestratorConfig {
       defaultAgentType: 'opencode-direct',
       runtimes: [{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode', version: '1.17.8' } }],
       healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
+      sse: { enabled: true, reconnectMaxAttempts: 10, reconnectBaseMs: 1000, filterHeartbeat: true },
     },
     workspace: {
       basePath: './workspace',
