@@ -1,8 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WorkspaceFactory } from './workspace-factory.js';
 import { LocalStorage } from '../storage/index.js';
+
+vi.mock('../metrics/registry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../metrics/registry.js')>();
+  return {
+    ...actual,
+    workspacesActive: { inc: vi.fn(), dec: vi.fn(), set: vi.fn() },
+    workspaceQuotaExceededTotal: { inc: vi.fn() },
+  };
+});
 
 const TEST_BASE_PATH = join(process.cwd(), 'test-workspace');
 

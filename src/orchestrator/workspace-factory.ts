@@ -6,6 +6,7 @@ import type { WorkspaceConfig } from '../config-loader.js';
 import type { OpencodeConfig } from '../opencode-http/types.js';
 import type { StorageBackend } from '../storage/index.js';
 import type { RuntimeAccess } from '../storage/types.js';
+import { workspacesActive, workspaceQuotaExceededTotal } from '../metrics/registry.js';
 
 export interface WorkspaceInfo {
   id: string;
@@ -106,6 +107,7 @@ export class WorkspaceFactory {
     await this.storage.ensureDir(wsId, '.opencode');
 
     logger.info(`Workspace created: ${wsPath}${agentType ? ` (agent: ${agentType})` : ''}`);
+    workspacesActive.inc();
     return {
       id: wsId,
       path: wsPath,
@@ -121,6 +123,7 @@ export class WorkspaceFactory {
     if (!await this.storage.hasWorkspace(wsId)) {
       await this.storage.createWorkspaceDir(wsId);
       await this.storage.ensureDir(wsId, '.opencode');
+      workspacesActive.inc();
     }
     return {
       id: wsId,
@@ -136,6 +139,7 @@ export class WorkspaceFactory {
     if (await this.storage.hasWorkspace(wsId)) {
       try {
         await this.storage.destroyWorkspace(wsId);
+        workspacesActive.dec();
         logger.info(`Workspace destroyed: ${wsPath}`);
       } catch (err) {
         logger.warn(`Failed to destroy workspace: ${wsPath}`, err);
@@ -268,6 +272,7 @@ export class WorkspaceFactory {
     if (this.maxSizeBytes === 0) return;
     const currentSize = await this.storage.getWorkspaceSize(wsId);
     if (currentSize + additionalBytes > this.maxSizeBytes) {
+      workspaceQuotaExceededTotal.inc();
       throw new Error(
         `Workspace quota exceeded. Current: ${currentSize} bytes, Adding: ${additionalBytes} bytes, Limit: ${this.maxSizeBytes} bytes`
       );

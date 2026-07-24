@@ -105,3 +105,27 @@ export const messageSendDurationSeconds = new Histogram({
   buckets: [0.1, 0.5, 1, 5, 10, 30, 60],
   registers: [metricsRegistry],
 });
+
+export const instanceEvictionsTotal = new Counter({
+  name: 'agentorchestrator_instance_evictions_total',
+  help: 'Total LRU instance evictions',
+  registers: [metricsRegistry],
+});
+
+export const instanceIdleTimeoutsTotal = new Counter({
+  name: 'agentorchestrator_instance_idle_timeouts_total',
+  help: 'Total idle timeout instance destructions',
+  registers: [metricsRegistry],
+});
+
+export const workspacesActive = new Gauge({
+  name: 'agentorchestrator_workspaces_active',
+  help: 'Currently active workspaces',
+  registers: [metricsRegistry],
+});
+
+export const workspaceQuotaExceededTotal = new Counter({
+  name: 'agentorchestrator_workspace_quota_exceeded_total',
+  help: 'Total workspace quota exceeded errors',
+  registers: [metricsRegistry],
+});

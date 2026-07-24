@@ -62,6 +62,10 @@ describe('Metrics', () => {
     expect(names).toContain('agentorchestrator_sse_reconnect_total');
     expect(names).toContain('agentorchestrator_messages_sent_total');
     expect(names).toContain('agentorchestrator_message_send_duration_seconds');
+    expect(names).toContain('agentorchestrator_instance_evictions_total');
+    expect(names).toContain('agentorchestrator_instance_idle_timeouts_total');
+    expect(names).toContain('agentorchestrator_workspaces_active');
+    expect(names).toContain('agentorchestrator_workspace_quota_exceeded_total');
   });
 
   it('updates gauge values correctly', async () => {

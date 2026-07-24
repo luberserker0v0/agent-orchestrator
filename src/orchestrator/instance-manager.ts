@@ -3,6 +3,7 @@ import { logger } from '../utils/logger.js';
 import type { OrchestratorConfig } from '../config-loader.js';
 import { WorkspaceFactory } from './workspace-factory.js';
 import { RuntimeManager, type InstanceInfo } from '../agent-runtime/runtime-manager.js';
+import { instanceEvictionsTotal, instanceIdleTimeoutsTotal } from '../metrics/registry.js';
 
 export type { InstanceInfo };
 
@@ -97,6 +98,7 @@ export class InstanceManager {
   private async evictLRU(): Promise<void> {
     const lruId = this.runtimeManager.getLRUCandidateId();
     if (lruId) {
+      instanceEvictionsTotal.inc();
       logger.warn(`LRU eviction: destroying instance ${lruId}`);
       await this.runtimeManager.destroyInstance(lruId);
     }
@@ -110,6 +112,7 @@ export class InstanceManager {
     this.idleSweepTimer = setInterval(() => {
       const ids = this.runtimeManager.findIdleInstanceIds(this.config.idleTimeoutMs);
       for (const id of ids) {
+        instanceIdleTimeoutsTotal.inc();
         logger.warn(`Idle timeout: destroying instance ${id}`);
         this.runtimeManager.destroyInstance(id).catch(() => {});
       }

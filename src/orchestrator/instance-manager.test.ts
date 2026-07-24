@@ -17,6 +17,15 @@ vi.mock('cross-spawn', async () => {
   return { spawn: vi.fn() };
 });
 
+vi.mock('../metrics/registry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../metrics/registry.js')>();
+  return {
+    ...actual,
+    instanceEvictionsTotal: { inc: vi.fn() },
+    instanceIdleTimeoutsTotal: { inc: vi.fn() },
+  };
+});
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 const TEST_BASE_PATH = join(process.cwd(), 'test-workspace-im');
