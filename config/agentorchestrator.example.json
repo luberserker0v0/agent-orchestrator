@@ -4,7 +4,11 @@
     "port": 0,                 // 0 = auto-assign; set to e.g. 8080 for a fixed port
     "host": "127.0.0.1",      // Bind address (use "0.0.0.0" for all interfaces)
     "shutdownTimeoutMs": 15000, // Max ms to wait for graceful shutdown before force exit
-    "apiKey": ""               // Optional: Bearer token for API auth (min 8 chars). Empty = no auth.
+    "apiKey": "",               // Optional (deprecated): single Bearer token. Use apiKeys instead.
+    "apiKeys": [                // Optional: role-based API keys. Takes precedence over apiKey.
+      { "key": "admin-secret-123456", "role": "admin", "name": "Admin" },
+      { "key": "observer-secret-123456", "role": "observer", "name": "Observer" }
+    ]
   },
 
   // ── WebSocket ─────────────────────────────────────────────────────

@@ -8,7 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-
+- feat(rbac): add role-based access control with `server.apiKeys` config array supporting `admin` and `observer` roles
+- feat(rbac): backward-compatible `server.apiKey` treated as admin role when `apiKeys` is not set
+- feat(rbac): `/api/auth/role` endpoint returns the role of the current API key
+- feat(rbac): observer role restricted to GET-only (read) operations; all mutating routes require admin
+- feat(rbac): WebSocket upgrade validates apiKey via query param or `x-api-key` header
+- feat(rbac): WebSocket write methods blocked for observer role
+- feat(dashboard): add built-in SPA dashboard at `/dashboard` for observing conversation events and messages
+- feat(dashboard): login page with API key authentication
+- feat(dashboard): conversation list with status, port, agent type, and age
+- feat(dashboard): conversation detail with event timeline and message history
+- feat(dashboard): real-time WebSocket event streaming in detail view
+- feat(dashboard): role-aware UI — admin sees controls, observer sees read-only view
 - feat(metrics): add LRU eviction metric (`instance_evictions_total`) for capacity pressure visibility
 - feat(metrics): add idle timeout metric (`instance_idle_timeouts_total`) for resource recycling visibility
 - feat(metrics): add active workspaces metric (`workspaces_active`) for workspace lifecycle tracking

@@ -2,7 +2,35 @@
 
 AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介面。
 
-> **認證說明**：若伺服器設定了 `server.apiKey`（設定檔或環境變數 `AGENTORCHESTRATOR_SERVER_APIKEY`），所有請求（除 `/health`、`/metrics`、`/api-docs*` 外）需要在 HTTP 標頭中包含 `Authorization: Bearer <apiKey>`。
+> **認證說明**：若伺服器設定了 `server.apiKeys`（設定檔），所有請求（除 `/health`、`/metrics`、`/api-docs*`、`/dashboard*` 外）需要在 HTTP 標頭中包含 `Authorization: Bearer <apiKey>`。
+>
+> **角色權限**：`apiKeys` 中每個 key 有 `role` 欄位（`admin` 或 `observer`）。Admin 擁有完整操作權限，Observer 只能進行 GET 讀取操作。向後兼容：若只設定 `server.apiKey`（字串），等同 admin 角色。
+>
+> **WebSocket 認證**：WS 連接需在 URL query string 中帶入 `apiKey` 參數（例如 `ws://host/ws/conv-001?apiKey=xxx`），或在 HTTP 升級請求中帶入 `x-api-key` 標頭。
+
+---
+
+## Dashboard
+
+內建 SPA 管理介面，提供對話觀察和即時事件監控。
+
+### `GET /dashboard`
+
+開啟 Dashboard 介面（不需要預先認證，SPA 內部處理登入流程）。
+
+- **登入**：輸入 API key，SPA 驗證後存入 sessionStorage
+- **對話列表**：顯示所有 conversation 的狀態、端口、Agent 類型、年齡
+- **對話詳情**：左側事件時間線 + 右側訊息歷史，WS 即時更新
+- **角色感知**：Observer 看不到操作按鈕，Admin 可停止/重啟/刪除
+
+### `GET /api/auth/role`
+
+回傳當前 API key 的角色資訊（供 Dashboard 使用）。
+
+**回應**：
+```json
+{ "role": "admin", "name": "Admin" }
+```
 
 ---
 
@@ -956,7 +984,9 @@ references/capabilities.md
 
 ## WebSocket API（JSON-RPC 2.0）
 
-連線 URL：`ws://<host>:<port>/ws/<conversationId>`
+連線 URL：`ws://<host>:<port>/ws/<conversationId>?apiKey=<key>`
+
+> **認證**：若伺服器設定了 `apiKeys`，WebSocket 升級時需帶入 `apiKey` query 參數或 `x-api-key` 標頭。Observer 角色的連線不能執行寫操作（`message.send`、`config.update` 等）。
 
 所有訊息採用 JSON-RPC 2.0 格式。
 

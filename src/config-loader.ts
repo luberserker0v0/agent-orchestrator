@@ -2,11 +2,21 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseJSONC } from 'jsonc-parser';
 
+export type ApiKeyRole = 'admin' | 'observer';
+
+export interface ApiKeyEntry {
+  key: string;
+  role: ApiKeyRole;
+  name?: string;
+}
+
 export interface ServerConfig {
   port: number;
   host: string;
   shutdownTimeoutMs: number;
+  /** @deprecated Use apiKeys instead. If set alone, treated as admin role. */
   apiKey?: string;
+  apiKeys?: ApiKeyEntry[];
 }
 
 export interface WebSocketConfig {
@@ -157,6 +167,27 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   }
   if (server.apiKey !== undefined && server.apiKey !== '' && (typeof server.apiKey !== 'string' || server.apiKey.length < 8)) {
     throw new Error(`Config validation failed: server.apiKey must be a string of at least 8 characters, got ${typeof server.apiKey === 'string' ? 'too short' : typeof server.apiKey}`);
+  }
+  if (server.apiKeys !== undefined) {
+    if (!Array.isArray(server.apiKeys)) {
+      throw new Error('Config validation failed: server.apiKeys must be an array');
+    }
+    const keys = new Set<string>();
+    for (const entry of server.apiKeys) {
+      if (typeof entry !== 'object' || entry === null) {
+        throw new Error('Config validation failed: each entry in server.apiKeys must be an object');
+      }
+      if (typeof entry.key !== 'string' || entry.key.length < 8) {
+        throw new Error('Config validation failed: each apiKeys entry must have a "key" string of at least 8 characters');
+      }
+      if (entry.role !== 'admin' && entry.role !== 'observer') {
+        throw new Error(`Config validation failed: apiKeys entry role must be "admin" or "observer", got "${entry.role}"`);
+      }
+      if (keys.has(entry.key)) {
+        throw new Error(`Config validation failed: duplicate apiKey "${entry.key.slice(0, 4)}..."`);
+      }
+      keys.add(entry.key);
+    }
   }
 
   // WebSocket validation
@@ -368,6 +399,22 @@ function mergeDefaults<T>(defaults: T, overrides: unknown): T {
     }
   }
   return result as T;
+}
+
+/**
+ * Normalize apiKeys from legacy apiKey or apiKeys array.
+ * - If apiKeys is set, use it directly.
+ * - If only apiKey is set, convert to [{ key, role: 'admin' }].
+ * - If neither is set, return undefined (no auth).
+ */
+export function normalizeApiKeys(serverConfig: ServerConfig): ApiKeyEntry[] | undefined {
+  if (serverConfig.apiKeys && serverConfig.apiKeys.length > 0) {
+    return serverConfig.apiKeys;
+  }
+  if (serverConfig.apiKey && serverConfig.apiKey.length >= 8) {
+    return [{ key: serverConfig.apiKey, role: 'admin' }];
+  }
+  return undefined;
 }
 
 export function loadConfig(configPath?: string): AgentOrchestratorConfig {
