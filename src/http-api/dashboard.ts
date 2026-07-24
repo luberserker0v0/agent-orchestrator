@@ -5,7 +5,7 @@ import express from 'express';
 import type { Application } from 'express';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DASHBOARD_DIR = join(__dirname, '../../dashboard');
+const DASHBOARD_DIR = join(__dirname, '../../../dashboard');
 
 export function mountDashboard(app: Application): void {
   if (!existsSync(DASHBOARD_DIR)) return;
