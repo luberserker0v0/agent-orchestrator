@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(metrics): add LRU eviction metric (`instance_evictions_total`) for capacity pressure visibility
+- feat(metrics): add idle timeout metric (`instance_idle_timeouts_total`) for resource recycling visibility
+- feat(metrics): add active workspaces metric (`workspaces_active`) for workspace lifecycle tracking
+- feat(metrics): add quota exceeded metric (`workspace_quota_exceeded_total`) for storage limit monitoring
 - feat(metrics): add OpenCode HTTP proxy metrics (`opencode_http_requests_total`, `opencode_http_request_duration_seconds`) with path normalization for bounded cardinality
 - feat(metrics): add SSE connection metrics (`sse_connections_active`, `sse_reconnect_total`) for real-time event channel health
 - feat(metrics): add message metrics (`messages_sent_total`, `message_send_duration_seconds`) for user-facing operation visibility
