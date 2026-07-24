@@ -43,7 +43,7 @@ export async function main(cliArgs?: string[]) {
     return;
   }
 
-  if (handleSubcommand(cli)) return;
+  if (await handleSubcommand(cli)) return;
 
   // Set env vars from CLI args so applyEnvOverrides picks them up
   if (cli.port !== undefined) process.env['AGENTORCHESTRATOR_SERVER_PORT'] = String(cli.port);
@@ -152,6 +152,7 @@ export async function main(cliArgs?: string[]) {
     }
     logger.info(`AgentOrchestrator listening on http://${config.server.host}:${config.server.port}`);
     logger.info(`WebSocket endpoint: ws://${config.server.host}:${config.server.port}/ws/{conversationId}`);
+    logger.info(`Dashboard: http://${config.server.host}:${config.server.port}/dashboard`);
     logger.info(`Max instances: ${config.orchestrator.maxInstances}`);
     logger.info(`Port range: ${config.orchestrator.portRange.start}-${config.orchestrator.portRange.end}`);
   });

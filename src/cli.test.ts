@@ -90,13 +90,13 @@ describe('handleSubcommand', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it('returns false when no subcommand', () => {
-    expect(handleSubcommand({})).toBe(false);
+  it('returns false when no subcommand', async () => {
+    expect(await handleSubcommand({})).toBe(false);
     expect(consoleLogSpy).not.toHaveBeenCalled();
   });
 
-  it('returns true for unknown subcommand', () => {
-    const result = handleSubcommand({ subcommand: 'unknown', subcommandArgs: [] });
+  it('returns true for unknown subcommand', async () => {
+    const result = await handleSubcommand({ subcommand: 'unknown', subcommandArgs: [] });
     expect(result).toBe(true);
     expect(consoleErrorSpy).toHaveBeenCalledWith('Unknown subcommand: unknown');
   });

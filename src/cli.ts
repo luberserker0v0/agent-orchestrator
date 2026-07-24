@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentOrchestratorConfig } from './config-loader.js';
+import { exec } from 'node:child_process';
+import { logger } from './utils/logger.js';
 
 export interface CliOptions {
   port?: number;
@@ -47,6 +49,11 @@ export function parseCliArgs(argv: string[] = process.argv.slice(2)): CliOptions
       options.host = argv[++i];
     } else if ((arg === '--config' || arg === '-c') && i + 1 < argv.length) {
       options.configPath = argv[++i];
+    } else if (!arg.startsWith('-')) {
+      // Found a non-flag argument after options - treat as subcommand
+      options.subcommand = arg;
+      options.subcommandArgs = argv.slice(i + 1);
+      break;
     }
   }
 
@@ -69,15 +76,23 @@ Options:
   -v, --version          Show version number
 
 Subcommands:
+  dashboard              Open dashboard in browser
   runtime list           List configured runtimes
   runtime info <id>      Show runtime info for a specific id
 `);
 }
 
-export function handleSubcommand(cli: CliOptions): boolean {
+export async function handleSubcommand(cli: CliOptions): Promise<boolean> {
   if (!cli.subcommand) return false;
 
   const args = cli.subcommandArgs ?? [];
+
+  if (cli.subcommand === 'dashboard') {
+    const port = cli.port ?? await getPortFromConfig(cli.configPath);
+    const host = cli.host ?? '127.0.0.1';
+    openDashboard(host, port);
+    return true;
+  }
 
   if (cli.subcommand === 'runtime') {
     if (args[0] === 'list') {
@@ -136,4 +151,34 @@ function printRuntimeInfo(id: string, loadConfig: (configPath?: string) => Agent
   } catch (err) {
     console.error('Failed to load config:', (err as Error).message);
   }
+}
+
+async function getPortFromConfig(configPath?: string): Promise<number> {
+  try {
+    const { loadConfig } = await import('./config-loader.js');
+    const config = loadConfig(configPath);
+    return config.server.port ?? 8080;
+  } catch {
+    return 8080;
+  }
+}
+
+function openDashboard(host: string, port: number): void {
+  const url = `http://${host === '0.0.0.0' ? 'localhost' : host}:${port}/dashboard`;
+  const platform = process.platform;
+  let cmd: string;
+  if (platform === 'win32') {
+    cmd = `start "" "${url}"`;
+  } else if (platform === 'darwin') {
+    cmd = `open "${url}"`;
+  } else {
+    cmd = `xdg-open "${url}"`;
+  }
+  logger.info(`Opening dashboard: ${url}`);
+  exec(cmd, (err) => {
+    if (err) {
+      logger.warn(`Failed to open browser: ${err.message}`);
+      logger.info(`Dashboard URL: ${url}`);
+    }
+  });
 }
