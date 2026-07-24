@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(metrics): add OpenCode HTTP proxy metrics (`opencode_http_requests_total`, `opencode_http_request_duration_seconds`) with path normalization for bounded cardinality
+- feat(metrics): add SSE connection metrics (`sse_connections_active`, `sse_reconnect_total`) for real-time event channel health
+- feat(metrics): add message metrics (`messages_sent_total`, `message_send_duration_seconds`) for user-facing operation visibility
 - feat(skills): add agent-scoped skill isolation — 6 new REST endpoints and optional `agent` param on WebSocket skill methods for skills at `.opencode/agents/<agentName>/skills/<skillName>/`
 - feat(skills): add `validateAgentName()` and `INVALID_AGENT_NAME` error code for agent name validation
 - feat(opencode-sse): integrate OpenCode SSE `/global/event` endpoint for real-time event forwarding to WebSocket clients

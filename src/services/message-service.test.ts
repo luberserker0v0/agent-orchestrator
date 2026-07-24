@@ -4,6 +4,16 @@ vi.mock('../utils/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+vi.mock('../metrics/registry.js', () => {
+  const inc = vi.fn();
+  const observe = vi.fn();
+  const labels = vi.fn().mockReturnValue({ inc });
+  return {
+    messagesSentTotal: { labels },
+    messageSendDurationSeconds: { observe },
+  };
+});
+
 import { MessageService } from './message-service.js';
 import { AppError } from '../utils/errors.js';
 
@@ -131,6 +141,33 @@ describe('MessageService', () => {
 
       const callArgs = mockClient.sendPrompt.mock.calls[0][1];
       expect(callArgs.agent).toBe('designer');
+    });
+
+    it('should increment messages_sent_total on success', async () => {
+      const { messagesSentTotal, messageSendDurationSeconds } = await import('../metrics/registry.js');
+      mockReady('ses_1');
+      mockClient.sendPrompt.mockResolvedValue({
+        info: { id: 'msg_1' },
+        parts: [{ type: 'text', text: 'ok' }],
+      });
+
+      await service.send(testId, 'Hi');
+
+      expect(messagesSentTotal.labels).toHaveBeenCalledWith('success');
+      expect(messagesSentTotal.labels('success').inc).toHaveBeenCalled();
+      expect(messageSendDurationSeconds.observe).toHaveBeenCalled();
+    });
+
+    it('should increment messages_sent_total on error', async () => {
+      const { messagesSentTotal, messageSendDurationSeconds } = await import('../metrics/registry.js');
+      mockReady('ses_1');
+      mockClient.sendPrompt.mockRejectedValue(new Error('send failed'));
+
+      await expect(service.send(testId, 'Hi')).rejects.toThrow('send failed');
+
+      expect(messagesSentTotal.labels).toHaveBeenCalledWith('error');
+      expect(messagesSentTotal.labels('error').inc).toHaveBeenCalled();
+      expect(messageSendDurationSeconds.observe).toHaveBeenCalled();
     });
   });
 

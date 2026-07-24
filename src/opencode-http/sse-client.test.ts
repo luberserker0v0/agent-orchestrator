@@ -2,6 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OpenCodeSSEClient } from './sse-client.js';
 import type { SSEEvent } from './sse-types.js';
 
+vi.mock('../metrics/registry.js', () => {
+  const inc = vi.fn();
+  const dec = vi.fn();
+  const set = vi.fn();
+  const gaugeLabels = vi.fn().mockReturnValue({ inc, dec });
+  const counterLabels = vi.fn().mockReturnValue({ inc });
+  return {
+    sseConnectionsActive: { inc: gaugeLabels, dec: gaugeLabels, set },
+    sseReconnectTotal: { labels: counterLabels },
+  };
+});
+
 function createMockReadableStream() {
   let controller: ReadableStreamDefaultController<Uint8Array>;
   const stream = new ReadableStream({
@@ -375,6 +387,75 @@ describe('OpenCodeSSEClient', () => {
       await subscribePromise;
 
       expect(client.getLastEventId()).toBe('99');
+    });
+  });
+
+  describe('metrics', () => {
+    it('increments sse_connections_active on successful connection', async () => {
+      const { sseConnectionsActive } = await import('../metrics/registry.js');
+      const events = ['event: test\ndata: {}\n\n'];
+      fetchFn = vi.fn().mockResolvedValue(createSSEResponse(events));
+      vi.stubGlobal('fetch', fetchFn);
+
+      const subscribePromise = client.subscribe(() => {
+        client.disconnect();
+      });
+      await vi.runAllTimersAsync();
+      await subscribePromise;
+
+      expect(sseConnectionsActive.inc).toHaveBeenCalled();
+    });
+
+    it('decrements sse_connections_active on disconnect', async () => {
+      const { sseConnectionsActive } = await import('../metrics/registry.js');
+      fetchFn = vi.fn().mockRejectedValue(new Error('Connection refused'));
+      vi.stubGlobal('fetch', fetchFn);
+
+      const logger = await import('../utils/logger.js');
+      vi.spyOn(logger.logger, 'error').mockImplementation(() => {});
+
+      client.subscribe(() => {});
+      await vi.advanceTimersByTimeAsync(0);
+
+      client.disconnect();
+
+      expect(sseConnectionsActive.set).toHaveBeenCalledWith(0);
+    });
+
+    it('increments sse_reconnect_total on reconnection attempt', async () => {
+      const { sseReconnectTotal } = await import('../metrics/registry.js');
+      let fetchCallCount = 0;
+      fetchFn = vi.fn().mockImplementation(() => {
+        fetchCallCount++;
+        if (fetchCallCount === 1) {
+          return Promise.resolve(createSSEResponse([]));
+        }
+        client.disconnect();
+        return Promise.resolve(createSSEResponse([]));
+      });
+      vi.stubGlobal('fetch', fetchFn);
+
+      await client.subscribe(() => {});
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      expect(sseReconnectTotal.labels).toHaveBeenCalledWith('attempt');
+    });
+
+    it('increments sse_reconnect_total with exhausted label after max attempts', async () => {
+      const { sseReconnectTotal } = await import('../metrics/registry.js');
+      fetchFn = vi.fn().mockRejectedValue(new Error('Connection refused'));
+      vi.stubGlobal('fetch', fetchFn);
+
+      const logger = await import('../utils/logger.js');
+      vi.spyOn(logger.logger, 'error').mockImplementation(() => {});
+      vi.spyOn(logger.logger, 'warn').mockImplementation(() => {});
+      vi.spyOn(logger.logger, 'info').mockImplementation(() => {});
+
+      client.subscribe(() => {});
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(sseReconnectTotal.labels).toHaveBeenCalledWith('exhausted');
     });
   });
 });

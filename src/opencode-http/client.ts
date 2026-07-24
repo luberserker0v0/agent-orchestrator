@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { opencodeHttpRequestsTotal, opencodeHttpRequestDurationSeconds } from '../metrics/registry.js';
 import type { AgentClient, SessionInfo, MessageEntry, SendPromptResult, AgentDefinition, ProviderListResult, AgentConfig, HealthInfo, SendPromptParams, CreateSessionParams } from '../agent-runtime/types.js';
 
 export class OpenCodeAgentClient implements AgentClient {
@@ -12,6 +13,11 @@ export class OpenCodeAgentClient implements AgentClient {
     if (username && password) {
       this.authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
     }
+  }
+
+  private normalizePath(path: string): string {
+    const segment = path.split('?')[0].split('/').filter(Boolean)[0];
+    return segment || 'unknown';
   }
 
   private async request<T>(
@@ -40,19 +46,32 @@ export class OpenCodeAgentClient implements AgentClient {
     }
 
     logger.debug(`[OpenCode HTTP] ${method} ${path}`);
+    const normalizedPath = this.normalizePath(path);
+    const start = performance.now();
     try {
       const res = await fetch(url, init);
+      const duration = (performance.now() - start) / 1000;
+      opencodeHttpRequestDurationSeconds.labels(method, normalizedPath).observe(duration);
 
       if (!res.ok) {
+        opencodeHttpRequestsTotal.labels(method, normalizedPath, String(res.status)).inc();
         const text = await res.text().catch(() => 'Unknown error');
         throw new Error(`OpenCode HTTP ${res.status}: ${text}`);
       }
 
+      opencodeHttpRequestsTotal.labels(method, normalizedPath, String(res.status)).inc();
       if (res.status === 204) {
         return undefined as unknown as T;
       }
 
       return (await res.json()) as T;
+    } catch (err) {
+      if (!(err as Error).message?.startsWith('OpenCode HTTP ')) {
+        const duration = (performance.now() - start) / 1000;
+        opencodeHttpRequestDurationSeconds.labels(method, normalizedPath).observe(duration);
+        opencodeHttpRequestsTotal.labels(method, normalizedPath, 'error').inc();
+      }
+      throw err;
     } finally {
       clearTimeout(timeoutId);
     }

@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OpenCodeAgentClient } from './client.js';
 
+vi.mock('../metrics/registry.js', () => {
+  const inc = vi.fn();
+  const observe = vi.fn();
+  const labels = vi.fn().mockReturnValue({ inc, observe });
+  return {
+    opencodeHttpRequestsTotal: { labels },
+    opencodeHttpRequestDurationSeconds: { labels },
+  };
+});
+
 function mockFetch(response?: Partial<Response>) {
   const defaultResponse: Partial<Response> = {
     ok: true,
@@ -203,6 +213,35 @@ describe('OpenCodeAgentClient', () => {
       fetchFn = mockFetch({ ok: true, status: 204, json: vi.fn() });
       const result = await client.deleteSession('ses_1');
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('metrics', () => {
+    it('increments request counter and records duration on success', async () => {
+      const { opencodeHttpRequestsTotal, opencodeHttpRequestDurationSeconds } = await import('../metrics/registry.js');
+      fetchFn = mockFetch({ json: vi.fn().mockResolvedValue({ healthy: true }) });
+      await client.health();
+      expect(opencodeHttpRequestsTotal.labels).toHaveBeenCalledWith('GET', 'global', '200');
+      expect(opencodeHttpRequestsTotal.labels('GET', 'global', '200').inc).toHaveBeenCalled();
+      expect(opencodeHttpRequestDurationSeconds.labels).toHaveBeenCalledWith('GET', 'global');
+      expect(opencodeHttpRequestDurationSeconds.labels('GET', 'global').observe).toHaveBeenCalled();
+    });
+
+    it('increments request counter on error response', async () => {
+      const { opencodeHttpRequestsTotal } = await import('../metrics/registry.js');
+      fetchFn = mockFetch({ ok: false, status: 404, text: vi.fn().mockResolvedValue('Not found') });
+      await expect(client.getSession('bad')).rejects.toThrow();
+      expect(opencodeHttpRequestsTotal.labels).toHaveBeenCalledWith('GET', 'session', '404');
+      expect(opencodeHttpRequestsTotal.labels('GET', 'session', '404').inc).toHaveBeenCalled();
+    });
+
+    it('increments request counter on network error', async () => {
+      const { opencodeHttpRequestsTotal } = await import('../metrics/registry.js');
+      fetchFn = vi.fn().mockRejectedValue(new Error('Network error'));
+      vi.stubGlobal('fetch', fetchFn);
+      await expect(client.health()).rejects.toThrow('Network error');
+      expect(opencodeHttpRequestsTotal.labels).toHaveBeenCalledWith('GET', 'global', 'error');
+      expect(opencodeHttpRequestsTotal.labels('GET', 'global', 'error').inc).toHaveBeenCalled();
     });
   });
 });
