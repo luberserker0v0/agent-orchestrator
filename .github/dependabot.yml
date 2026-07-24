@@ -10,6 +10,10 @@ updates:
       prefix-development: chore
     labels:
       - dependencies
+    ignore:
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     groups:
       dev-dependencies:
         patterns:
