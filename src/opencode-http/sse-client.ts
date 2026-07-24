@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { sseConnectionsActive, sseReconnectTotal } from '../metrics/registry.js';
 import type { SSEClientOptions, SSEEvent } from './sse-types.js';
 
 const DEFAULT_RECONNECT_MAX_ATTEMPTS = 10;
@@ -54,6 +55,7 @@ export class OpenCodeSSEClient {
       }
 
       this.reconnectAttempts = 0;
+      sseConnectionsActive.inc();
 
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No response body');
@@ -65,6 +67,7 @@ export class OpenCodeSSEClient {
         const { done, value } = await reader.read();
         if (done) {
           // Stream ended normally, reconnect for long-lived connection
+          sseConnectionsActive.dec();
           if (!this.isDisconnected) {
             logger.debug('SSE stream ended, reconnecting...');
             this.scheduleReconnect(onEvent);
@@ -86,9 +89,12 @@ export class OpenCodeSSEClient {
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
         logger.debug('SSE connection aborted');
-      } else if (!this.isDisconnected) {
-        logger.error(`SSE connection error: ${(err as Error).message}`);
-        this.scheduleReconnect(onEvent);
+      } else {
+        sseConnectionsActive.dec();
+        if (!this.isDisconnected) {
+          logger.error(`SSE connection error: ${(err as Error).message}`);
+          this.scheduleReconnect(onEvent);
+        }
       }
     } finally {
       this.isConnecting = false;
@@ -130,6 +136,7 @@ export class OpenCodeSSEClient {
   private scheduleReconnect(onEvent: (event: SSEEvent) => void): void {
     if (this.isDisconnected) return;
     if (this.reconnectAttempts >= this.reconnectMaxAttempts) {
+      sseReconnectTotal.labels('exhausted').inc();
       logger.warn(`SSE reconnection failed after ${this.reconnectMaxAttempts} attempts`);
       return;
     }
@@ -139,6 +146,7 @@ export class OpenCodeSSEClient {
       MAX_RECONNECT_MS
     );
     this.reconnectAttempts++;
+    sseReconnectTotal.labels('attempt').inc();
 
     logger.info(`SSE reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.reconnectMaxAttempts})`);
 
@@ -154,6 +162,7 @@ export class OpenCodeSSEClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
+    sseConnectionsActive.set(0);
   }
 
   getLastEventId(): string | undefined {

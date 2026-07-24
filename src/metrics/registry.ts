@@ -63,3 +63,45 @@ export const conversationStateChangesTotal = new Counter({
   labelNames: ['status'],
   registers: [metricsRegistry],
 });
+
+export const opencodeHttpRequestsTotal = new Counter({
+  name: 'agentorchestrator_opencode_http_requests_total',
+  help: 'Total OpenCode HTTP proxy requests',
+  labelNames: ['method', 'path', 'status'],
+  registers: [metricsRegistry],
+});
+
+export const opencodeHttpRequestDurationSeconds = new Histogram({
+  name: 'agentorchestrator_opencode_http_request_duration_seconds',
+  help: 'OpenCode HTTP proxy request duration in seconds',
+  labelNames: ['method', 'path'],
+  buckets: [0.1, 0.5, 1, 5, 10, 30, 60],
+  registers: [metricsRegistry],
+});
+
+export const sseConnectionsActive = new Gauge({
+  name: 'agentorchestrator_sse_connections_active',
+  help: 'Active SSE connections to OpenCode instances',
+  registers: [metricsRegistry],
+});
+
+export const sseReconnectTotal = new Counter({
+  name: 'agentorchestrator_sse_reconnect_total',
+  help: 'Total SSE reconnection attempts',
+  labelNames: ['status'],
+  registers: [metricsRegistry],
+});
+
+export const messagesSentTotal = new Counter({
+  name: 'agentorchestrator_messages_sent_total',
+  help: 'Total messages sent to OpenCode instances',
+  labelNames: ['status'],
+  registers: [metricsRegistry],
+});
+
+export const messageSendDurationSeconds = new Histogram({
+  name: 'agentorchestrator_message_send_duration_seconds',
+  help: 'Duration of message send operations in seconds',
+  buckets: [0.1, 0.5, 1, 5, 10, 30, 60],
+  registers: [metricsRegistry],
+});

@@ -2,6 +2,7 @@ import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-man
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
 import { parseModelString } from '../utils/model-parser.js';
+import { messagesSentTotal, messageSendDurationSeconds } from '../metrics/registry.js';
 
 export interface SendResult {
   messageId: string;
@@ -44,25 +45,34 @@ export class MessageService {
     const model = parseModelString(rawModel);
     const agent = typeof rawAgent === 'string' ? rawAgent : undefined;
 
-    const response = await instance.client.sendPrompt(instance.sessionId, {
-      model,
-      agent,
-      parts: [{ type: 'text' as const, text }],
-    });
+    const start = performance.now();
+    try {
+      const response = await instance.client.sendPrompt(instance.sessionId, {
+        model,
+        agent,
+        parts: [{ type: 'text' as const, text }],
+      });
 
-    const texts = (response.parts as Array<{ type: string; text?: string }>)
-      .filter((p) => p.type === 'text')
-      .map((p) => p.text ?? '')
-      .join('');
+      const texts = (response.parts as Array<{ type: string; text?: string }>)
+        .filter((p) => p.type === 'text')
+        .map((p) => p.text ?? '')
+        .join('');
 
-    this.conversationState.emitEvent(id, 'conversation.message', {
-      messageId: response.info.id,
-      text: texts,
-      parts: response.parts,
-      role: 'assistant',
-    });
+      this.conversationState.emitEvent(id, 'conversation.message', {
+        messageId: response.info.id,
+        text: texts,
+        parts: response.parts,
+        role: 'assistant',
+      });
 
-    return { messageId: response.info.id, text: texts, parts: response.parts };
+      messagesSentTotal.labels('success').inc();
+      messageSendDurationSeconds.observe((performance.now() - start) / 1000);
+      return { messageId: response.info.id, text: texts, parts: response.parts };
+    } catch (err) {
+      messagesSentTotal.labels('error').inc();
+      messageSendDurationSeconds.observe((performance.now() - start) / 1000);
+      throw err;
+    }
   }
 
   async getHistory(id: string, sessionId?: string, limit?: number): Promise<unknown[]> {

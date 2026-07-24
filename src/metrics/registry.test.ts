@@ -56,6 +56,12 @@ describe('Metrics', () => {
     expect(names).toContain('agentorchestrator_http_requests_total');
     expect(names).toContain('agentorchestrator_http_request_duration_seconds');
     expect(names).toContain('agentorchestrator_conversation_state_changes_total');
+    expect(names).toContain('agentorchestrator_opencode_http_requests_total');
+    expect(names).toContain('agentorchestrator_opencode_http_request_duration_seconds');
+    expect(names).toContain('agentorchestrator_sse_connections_active');
+    expect(names).toContain('agentorchestrator_sse_reconnect_total');
+    expect(names).toContain('agentorchestrator_messages_sent_total');
+    expect(names).toContain('agentorchestrator_message_send_duration_seconds');
   });
 
   it('updates gauge values correctly', async () => {
