@@ -318,4 +318,109 @@ describe('SkillService', () => {
       expect(mockConversationState.markNeedsRestart).toHaveBeenCalledWith(testId, 'skill my-skill deleted');
     });
   });
+
+  describe('agent-scoped skills', () => {
+    const agentName = 'my-agent';
+
+    describe('uploadSkill with agentName', () => {
+      it('should extract zip to agent skill directory', async () => {
+        mockZipEntries([makeMockEntry('SKILL.md')]);
+
+        await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'), agentName);
+
+        const destPath = join(mockWsPath, '.opencode', 'agents', agentName, 'skills', 'my-skill');
+        expect(mkdirSync).toHaveBeenCalledWith(destPath, { recursive: true });
+      });
+
+      it('should emit event with agent-scoped changedFiles', async () => {
+        makeRunning();
+        mockZipEntries([makeMockEntry('SKILL.md')]);
+
+        await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'), agentName);
+
+        expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
+          changedFiles: [`.opencode/agents/${agentName}/skills/my-skill/`],
+        });
+      });
+    });
+
+    describe('importSkill with agentName', () => {
+      it('should copy source to agent skill directory', async () => {
+        const srcPath = join(process.cwd(), 'skills', 'custom-skill');
+
+        await skillService.importSkill(testId, srcPath, 'imported-skill', agentName);
+
+        const destPath = join(mockWsPath, '.opencode', 'agents', agentName, 'skills', 'imported-skill');
+        expect(cpSync).toHaveBeenCalledWith(srcPath, destPath, { recursive: true, force: true });
+      });
+
+      it('should emit event with agent-scoped changedFiles', async () => {
+        makeRunning();
+        const srcPath = join(process.cwd(), 'skills', 'custom-skill');
+
+        await skillService.importSkill(testId, srcPath, 'imported-skill', agentName);
+
+        expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
+          changedFiles: [`.opencode/agents/${agentName}/skills/imported-skill/`],
+        });
+      });
+    });
+
+    describe('listSkills with agentName', () => {
+      it('should list from agent skill directory', () => {
+        const makeDirent = (name: string, isDir: boolean) => ({ name, isDirectory: () => isDir });
+        vi.mocked(readdirSync).mockReturnValue([
+          makeDirent('agent-skill', true),
+        ] as any);
+
+        const result = skillService.listSkills(testId, agentName);
+
+        expect(result).toEqual(['agent-skill']);
+        const calledPath = vi.mocked(readdirSync).mock.calls[0][0] as string;
+        expect(calledPath).toContain(join('.opencode', 'agents', agentName, 'skills'));
+      });
+    });
+
+    describe('readSkill with agentName', () => {
+      it('should read from agent skill directory', () => {
+        vi.mocked(readFileSync).mockReturnValueOnce('# Agent skill');
+
+        const result = skillService.readSkill(testId, 'my-skill', agentName);
+
+        expect(result).toBe('# Agent skill');
+      });
+    });
+
+    describe('getSkillInfo with agentName', () => {
+      it('should return info from agent skill directory', () => {
+        const result = skillService.getSkillInfo(testId, 'my-skill', agentName);
+
+        expect(result).toEqual({
+          name: 'my-skill',
+          files: ['SKILL.md', 'script.js'],
+          totalSize: 500,
+          sha256: 'abc123',
+        });
+      });
+    });
+
+    describe('deleteSkill with agentName', () => {
+      it('should delete from agent skill directory', () => {
+        skillService.deleteSkill(testId, 'my-skill', agentName);
+
+        const destPath = join(mockWsPath, '.opencode', 'agents', agentName, 'skills', 'my-skill');
+        expect(rmSync).toHaveBeenCalledWith(destPath, { recursive: true, force: true });
+      });
+
+      it('should emit event with agent-scoped changedFiles', () => {
+        makeRunning();
+
+        skillService.deleteSkill(testId, 'my-skill', agentName);
+
+        expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.configChanged', {
+          changedFiles: [`.opencode/agents/${agentName}/skills/my-skill/`],
+        });
+      });
+    });
+  });
 });

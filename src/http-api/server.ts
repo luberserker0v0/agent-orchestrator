@@ -5,7 +5,7 @@ import swaggerUi from 'swagger-ui-express';
 import type { AgentOrchestratorConfig, ServerConfig, WebSocketConfig } from '../config-loader.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
-import { WorkspaceFactory, validateSkillName } from '../orchestrator/workspace-factory.js';
+import { WorkspaceFactory, validateSkillName, validateAgentName } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { ConfigService } from '../services/config-service.js';
 import { AgentService } from '../services/agent-service.js';
@@ -770,6 +770,185 @@ export function createHttpServer(
 
     try {
       skillService.deleteSkill(id, req.params.name as string);
+      res.status(204).send();
+    } catch (err) {
+      const message = (err as Error).message;
+      if (isAppError(err)) {
+        sendError(res, err.statusCode, err.code, err.message);
+      } else if (message.includes('Skill not found')) {
+        sendError(res, 404, ErrorCodes.SKILL_NOT_FOUND, message);
+      } else {
+        sendError(res, 500, ErrorCodes.INTERNAL_ERROR, message);
+      }
+    }
+  });
+
+  // ─── Agent-Scoped Skills ────────────────────────────────
+
+  function getAgentNameParam(res: Response, raw: unknown): string | null {
+    if (typeof raw !== 'string' || !raw) {
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing agent parameter');
+      return null;
+    }
+    try {
+      return validateAgentName(raw);
+    } catch {
+      sendError(res, 400, ErrorCodes.INVALID_AGENT_NAME, 'Invalid agent name');
+      return null;
+    }
+  }
+
+  app.post('/api/conversations/:id/agents/:agent/skills/upload', express.raw({ type: 'application/zip', limit: '10mb' }), async (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+    const agent = getAgentNameParam(res, req.params.agent);
+    if (!agent) return;
+
+    const rawName = typeof req.query.name === 'string' ? req.query.name : undefined;
+    if (!rawName) {
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing name query parameter');
+      return;
+    }
+
+    try {
+      validateSkillName(rawName);
+    } catch {
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
+      return;
+    }
+
+    try {
+      await skillService.uploadSkill(id, rawName, req.body as Buffer, agent);
+      res.status(204).send();
+    } catch (err) {
+      const message = (err as Error).message;
+      logger.error(`Failed to upload skill for ${id} agent ${agent}:`, err);
+      if (isAppError(err)) {
+        sendError(res, err.statusCode, err.code, err.message);
+      } else if (message.includes('Skill archive must contain SKILL.md')) {
+        sendError(res, 400, ErrorCodes.SKILL_INVALID_ARCHIVE, message);
+      } else if (message.includes('Invalid zip entry path')) {
+        sendError(res, 400, ErrorCodes.SKILL_INVALID_ARCHIVE, message);
+      } else if (message.includes('Workspace quota exceeded')) {
+        sendError(res, 413, ErrorCodes.SKILL_QUOTA_EXCEEDED, 'Skill archive exceeds workspace quota');
+      } else {
+        sendError(res, 500, ErrorCodes.INTERNAL_ERROR, message);
+      }
+    }
+  });
+
+  app.post('/api/conversations/:id/agents/:agent/skills/import', async (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+    const agent = getAgentNameParam(res, req.params.agent);
+    if (!agent) return;
+
+    const source = typeof req.body.source === 'string' ? req.body.source : undefined;
+    const name = typeof req.body.name === 'string' ? req.body.name : undefined;
+
+    if (!source || !name) {
+      sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing source or name');
+      return;
+    }
+
+    try {
+      validateSkillName(name);
+    } catch {
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
+      return;
+    }
+
+    try {
+      await skillService.importSkill(id, source, name, agent);
+      res.status(204).send();
+    } catch (err) {
+      const message = (err as Error).message;
+      logger.error(`Failed to import skill for ${id} agent ${agent}:`, err);
+      if (isAppError(err)) {
+        sendError(res, err.statusCode, err.code, err.message);
+      } else if (message.includes('Source path not allowed')) {
+        sendError(res, 403, ErrorCodes.SOURCE_NOT_ALLOWED, message);
+      } else if (message.includes('Source not found') || message.includes('Source must be a directory')) {
+        sendError(res, 404, ErrorCodes.SOURCE_NOT_FOUND, message);
+      } else if (message.includes('Workspace quota exceeded')) {
+        sendError(res, 413, ErrorCodes.WORKSPACE_QUOTA_EXCEEDED, message);
+      } else {
+        sendError(res, 500, ErrorCodes.INTERNAL_ERROR, message);
+      }
+    }
+  });
+
+  app.get('/api/conversations/:id/agents/:agent/skills', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+    const agent = getAgentNameParam(res, req.params.agent);
+    if (!agent) return;
+
+    try {
+      const skills = skillService.listSkills(id, agent);
+      res.json(skills);
+    } catch (err) {
+      handleControllerError(res, err);
+    }
+  });
+
+  app.get('/api/conversations/:id/agents/:agent/skills/:name', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+    const agent = getAgentNameParam(res, req.params.agent);
+    if (!agent) return;
+
+    try {
+      validateSkillName(req.params.name as string);
+    } catch {
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
+      return;
+    }
+
+    try {
+      const content = skillService.readSkill(id, req.params.name as string, agent);
+      res.json({ name: req.params.name as string, content });
+    } catch (err) {
+      handleControllerError(res, err, 404);
+    }
+  });
+
+  app.get('/api/conversations/:id/agents/:agent/skills/:name/info', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+    const agent = getAgentNameParam(res, req.params.agent);
+    if (!agent) return;
+
+    try {
+      validateSkillName(req.params.name as string);
+    } catch {
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
+      return;
+    }
+
+    try {
+      const info = skillService.getSkillInfo(id, req.params.name as string, agent);
+      res.json(info);
+    } catch (err) {
+      handleControllerError(res, err, 404);
+    }
+  });
+
+  app.delete('/api/conversations/:id/agents/:agent/skills/:name', (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    if (!ensureConversation(res, id)) return;
+    const agent = getAgentNameParam(res, req.params.agent);
+    if (!agent) return;
+
+    try {
+      validateSkillName(req.params.name as string);
+    } catch {
+      sendError(res, 400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name');
+      return;
+    }
+
+    try {
+      skillService.deleteSkill(id, req.params.name as string, agent);
       res.status(204).send();
     } catch (err) {
       const message = (err as Error).message;

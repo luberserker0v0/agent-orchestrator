@@ -19,7 +19,19 @@ export class SkillService {
     ];
   }
 
-  async uploadSkill(id: string, name: string, zipBuffer: Buffer): Promise<void> {
+  private getSkillsDir(id: string, agentName?: string): string {
+    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
+    if (agentName) {
+      return join(wsPath, '.opencode', 'agents', agentName, 'skills');
+    }
+    return join(wsPath, '.opencode', 'skills');
+  }
+
+  private getChangedFilePrefix(agentName?: string): string {
+    return agentName ? `.opencode/agents/${agentName}/skills/` : '.opencode/skills/';
+  }
+
+  async uploadSkill(id: string, name: string, zipBuffer: Buffer, agentName?: string): Promise<void> {
     const skillName = validateSkillName(name);
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
@@ -29,8 +41,7 @@ export class SkillService {
       throw new Error('Skill archive must contain SKILL.md at the root');
     }
 
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const destPath = join(wsPath, '.opencode', 'skills', skillName);
+    const destPath = join(this.getSkillsDir(id, agentName), skillName);
     let totalUncompressedSize = 0;
 
     for (const entry of entries) {
@@ -68,14 +79,13 @@ export class SkillService {
     logger.info(`Skill uploaded: ${destPath}`);
     this.markNeedsRestartIfRunning(id, `skill ${name} uploaded`);
     this.conversationState.emitEvent(id, 'conversation.configChanged', {
-      changedFiles: [`.opencode/skills/${skillName}/`],
+      changedFiles: [`${this.getChangedFilePrefix(agentName)}${skillName}/`],
     });
   }
 
-  async importSkill(id: string, source: string, name: string): Promise<void> {
+  async importSkill(id: string, source: string, name: string, agentName?: string): Promise<void> {
     const skillName = validateSkillName(name);
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const destPath = join(wsPath, '.opencode', 'skills', skillName);
+    const destPath = join(this.getSkillsDir(id, agentName), skillName);
 
     const resolvedSource = resolve(process.cwd(), source);
     const isAllowed = this.allowedCopySources.some((allowed) => {
@@ -106,33 +116,30 @@ export class SkillService {
 
     this.markNeedsRestartIfRunning(id, `skill ${name} imported`);
     this.conversationState.emitEvent(id, 'conversation.configChanged', {
-      changedFiles: [`.opencode/skills/${skillName}/`],
+      changedFiles: [`${this.getChangedFilePrefix(agentName)}${skillName}/`],
     });
   }
 
-  listSkills(id: string): string[] {
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const skillsDir = join(wsPath, '.opencode', 'skills');
+  listSkills(id: string, agentName?: string): string[] {
+    const skillsDir = this.getSkillsDir(id, agentName);
     if (!existsSync(skillsDir)) return [];
     return readdirSync(skillsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
   }
 
-  readSkill(id: string, name: string): string {
+  readSkill(id: string, name: string, agentName?: string): string {
     const skillName = validateSkillName(name);
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const skillPath = join(wsPath, '.opencode', 'skills', skillName, 'SKILL.md');
+    const skillPath = join(this.getSkillsDir(id, agentName), skillName, 'SKILL.md');
     if (!existsSync(skillPath)) {
       throw new Error(`Skill not found: ${name}`);
     }
     return readFileSync(skillPath, 'utf-8');
   }
 
-  getSkillInfo(id: string, name: string): { name: string; files: string[]; totalSize: number; sha256: string } {
+  getSkillInfo(id: string, name: string, agentName?: string): { name: string; files: string[]; totalSize: number; sha256: string } {
     const skillName = validateSkillName(name);
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const skillDir = join(wsPath, '.opencode', 'skills', skillName);
+    const skillDir = join(this.getSkillsDir(id, agentName), skillName);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill not found: ${name}`);
     }
@@ -140,10 +147,9 @@ export class SkillService {
     return { name: skillName, ...info };
   }
 
-  deleteSkill(id: string, name: string): void {
+  deleteSkill(id: string, name: string, agentName?: string): void {
     const skillName = validateSkillName(name);
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const skillDir = join(wsPath, '.opencode', 'skills', skillName);
+    const skillDir = join(this.getSkillsDir(id, agentName), skillName);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill not found: ${name}`);
     }
@@ -152,7 +158,7 @@ export class SkillService {
 
     this.markNeedsRestartIfRunning(id, `skill ${skillName} deleted`);
     this.conversationState.emitEvent(id, 'conversation.configChanged', {
-      changedFiles: [`.opencode/skills/${skillName}/`],
+      changedFiles: [`${this.getChangedFilePrefix(agentName)}${skillName}/`],
     });
   }
 

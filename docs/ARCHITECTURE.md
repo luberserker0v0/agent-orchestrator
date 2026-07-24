@@ -503,11 +503,11 @@ function waitForHealthy(
 | `writeAgent(id, name, content)` / `readAgent(id, name)` / `listAgents(id)` / `deleteAgent(id, name)` | Agent Markdown 檔案 CRUD（寫入 `.opencode/agents/*.md`，OpenCode 自動發現） |
 | `writeFile(id, path, content)` / `readFile(id, path)` / `listFiles(id)` / `deleteFile(id, path)` | 通用檔案 CRUD（所有路徑經 `sanitizeRelativePath` 驗證） |
 | `copyFromLocal(id, source, dest)` | 從本機 `{cwd}/assets/`、`{cwd}/templates/` 或 `{cwd}/skills/` 複製檔案/資料夾到 workspace |
-| `importSkillFromLocal(id, source, name)` | 從本機 `{cwd}/skills/` 複製 Skill 目錄到 `.opencode/skills/{name}/` |
-| `listSkills(id)` | 列出 `.opencode/skills/` 下的所有 Skill 目錄 |
-| `readSkill(id, name)` | 讀取 `.opencode/skills/{name}/SKILL.md` 內容 |
-| `getSkillInfo(id, name)` | 取得 Skill 目錄結構、總大小與 SHA-256 hash |
-| `deleteSkill(id, name)` | 移除 `.opencode/skills/{name}/` 目錄；若不存在則拋出錯誤 |
+| `importSkillFromLocal(id, source, name, agentName?)` | 從本機 `{cwd}/skills/` 複製 Skill 目錄到 `.opencode/skills/{name}/` 或 `.opencode/agents/{agentName}/skills/{name}/` |
+| `listSkills(id, agentName?)` | 列出 `.opencode/skills/` 或 `.opencode/agents/{agentName}/skills/` 下的所有 Skill 目錄 |
+| `readSkill(id, name, agentName?)` | 讀取 Skill 的 `SKILL.md` 內容 |
+| `getSkillInfo(id, name, agentName?)` | 取得 Skill 目錄結構、總大小與 SHA-256 hash |
+| `deleteSkill(id, name, agentName?)` | 移除 Skill 目錄；若不存在則拋出錯誤 |
 | `getWorkspaceSize(id)` | 計算 workspace 總大小（遞迴） |
 
 **規範配置強制合併**：
@@ -518,6 +518,7 @@ function waitForHealthy(
 **安全機制**：
 - `sanitizeRelativePath(path)`：拒絕包含 `..` 的相對路徑與絕對路徑（`/...` 或 `C:\...`）
 - `validateSkillName(name)`：拒絕非 `[A-Za-z0-9_-]` 的字元，最大長度 128；API 層應先驗證，factory 層作為 defense-in-depth
+- `validateAgentName(name)`：與 `validateSkillName` 相同規則，用於 agent-scoped skill 路徑中的 agent 名稱驗證
 - 配額上限：`MAX_WORKSPACE_SIZE = 50 * 1024 * 1024` bytes（50 MB）；超過時寫入操作拒絕
 
 ---

@@ -48,6 +48,16 @@ export function validateSkillName(name: string): string {
   return name;
 }
 
+export function validateAgentName(name: string): string {
+  if (!name || typeof name !== 'string') {
+    throw new Error('Invalid agent name');
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(name)) {
+    throw new Error('Invalid agent name');
+  }
+  return name;
+}
+
 export function getDirSize(dirPath: string): number {
   let total = 0;
   try {

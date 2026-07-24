@@ -470,12 +470,96 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 
 ---
 
+### Agent-Scoped Skill API
+
+以下端點與上方共用相同邏輯，但 Skill 儲存在 `.opencode/agents/{agent}/skills/{name}/` 路徑下，實現 subagent 技能隔離。所有端點多一個 `{agent}` 路徑參數，需符合 `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`，否則回傳 `400 Invalid agent name`。
+
+#### `POST /api/conversations/:id/agents/:agent/skills/upload`
+
+上傳 Skill 到指定 Agent（zip 壓縮包形式）。
+
+**Query**：`?name=web-search`
+
+**Content-Type**：`application/zip`
+
+**Body**：zip 檔案的 binary 內容
+
+**回應**（`204 No Content`）
+
+---
+
+#### `POST /api/conversations/:id/agents/:agent/skills/import`
+
+從伺服器本地目錄複製 Skill 到指定 Agent 的 workspace。
+
+**請求**：
+```json
+{
+  "source": "skills/web-search",
+  "name": "web-search"
+}
+```
+
+**回應**（`204 No Content`）
+
+---
+
+#### `GET /api/conversations/:id/agents/:agent/skills`
+
+列出指定 Agent 的所有 Skill。
+
+**回應**：
+```json
+["web-search", "code-review"]
+```
+
+---
+
+#### `GET /api/conversations/:id/agents/:agent/skills/:name`
+
+讀取指定 Agent Skill 的 `SKILL.md` 內容。
+
+**回應**：
+```json
+{
+  "name": "web-search",
+  "content": "# web-search\nA web search skill for OpenCode."
+}
+```
+
+---
+
+#### `GET /api/conversations/:id/agents/:agent/skills/:name/info`
+
+查詢指定 Agent Skill 的目錄結構、總大小與內容 hash。
+
+**回應**：
+```json
+{
+  "name": "web-search",
+  "files": ["SKILL.md"],
+  "totalSize": 1234,
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+```
+
+---
+
+#### `DELETE /api/conversations/:id/agents/:agent/skills/:name`
+
+刪除指定 Agent Skill（移除整個 `{name}/` 目錄）。
+
+**回應**（`204 No Content`）
+
+---
+
 ### Skill API 錯誤碼對照表
 
 | 錯誤情境 | 狀態碼 | 回應範例 |
 |----------|--------|----------|
 | Missing name | 400 | `{"error": "Missing name query parameter"}` |
 | Invalid skill name | 400 | `{"error": "Invalid skill name"}` |
+| Invalid agent name | 400 | `{"error": "Invalid agent name"}` |
 | Invalid zip entry path | 400 | `{"error": "Invalid zip entry path: ../evil.txt"}` |
 | Missing SKILL.md | 400 | `{"error": "Skill archive must contain SKILL.md at the root"}` |
 | Zip parse failed | 400 | `{"error": "Invalid or unsupported zip format"}` |
@@ -1526,6 +1610,8 @@ references/capabilities.md
 
 ### Skill 類
 
+所有 Skill WebSocket 方法均支援可選的 `agent` 參數。提供 `agent` 時，操作針對 `.opencode/agents/{agent}/skills/` 路徑下的技能；省略時則操作共用的 `.opencode/skills/` 路徑。
+
 #### `skills.import`
 
 從伺服器本地目錄導入 Skill。
@@ -1538,7 +1624,8 @@ references/capabilities.md
   "method": "skills.import",
   "params": {
     "source": "skills/web-search",
-    "name": "web-search"
+    "name": "web-search",
+    "agent": "my-agent"
   }
 }
 ```
