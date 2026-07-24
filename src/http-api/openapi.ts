@@ -523,6 +523,109 @@ export const openapiSpec: Record<string, unknown> = {
       },
     },
 
+    // ─── Agent-Scoped Skills ──────────────────────────────
+
+    '/api/conversations/{id}/agents/{agent}/skills/upload': {
+      post: {
+        tags: ['Skills'],
+        summary: 'Upload a skill to an agent as zip archive',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'agent', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'name', in: 'query', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: { content: { 'application/zip': { schema: { type: 'string', format: 'binary' } } } },
+        responses: {
+          '204': { description: 'Skill uploaded' },
+          '400': { description: 'Invalid name, missing SKILL.md, or zip slip', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '413': { description: 'Quota exceeded', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/conversations/{id}/agents/{agent}/skills/import': {
+      post: {
+        tags: ['Skills'],
+        summary: 'Import a skill to an agent from server-local directory',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'agent', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { source: { type: 'string' }, name: { type: 'string' } }, required: ['source', 'name'] } } } },
+        responses: {
+          '204': { description: 'Skill imported' },
+          '400': { description: 'Invalid skill name', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '403': { description: 'Source path not allowed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Source not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '413': { description: 'Quota exceeded', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/conversations/{id}/agents/{agent}/skills': {
+      get: {
+        tags: ['Skills'],
+        summary: 'List all skills for an agent',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'agent', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'Skill list', content: { 'application/json': { schema: { type: 'array', items: { type: 'string' } } } } },
+          '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/conversations/{id}/agents/{agent}/skills/{name}': {
+      get: {
+        tags: ['Skills'],
+        summary: 'Read agent skill SKILL.md content',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'agent', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'name', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'SKILL.md content', content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' }, content: { type: 'string' } } } } } },
+          '400': { description: 'Invalid skill name', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      delete: {
+        tags: ['Skills'],
+        summary: 'Delete an agent skill',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'agent', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'name', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '204': { description: 'Skill deleted' },
+          '400': { description: 'Invalid skill name', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/conversations/{id}/agents/{agent}/skills/{name}/info': {
+      get: {
+        tags: ['Skills'],
+        summary: 'Get agent skill directory structure, size, and hash',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'agent', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'name', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'Skill info', content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' }, files: { type: 'array', items: { type: 'string' } }, totalSize: { type: 'integer' }, sha256: { type: 'string' } } } } } },
+          '400': { description: 'Invalid skill name', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
   },
   components: {
     schemas: {

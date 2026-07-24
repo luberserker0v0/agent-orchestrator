@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(skills): add agent-scoped skill isolation — 6 new REST endpoints and optional `agent` param on WebSocket skill methods for skills at `.opencode/agents/<agentName>/skills/<skillName>/`
+- feat(skills): add `validateAgentName()` and `INVALID_AGENT_NAME` error code for agent name validation
 - feat(opencode-sse): integrate OpenCode SSE `/global/event` endpoint for real-time event forwarding to WebSocket clients
 - feat(opencode-sse): add OpenCodeSSEClient with reconnection and exponential backoff
 - feat(opencode-sse): add SSEBridge to map OpenCode events to AgentOrchestrator events and filter heartbeats

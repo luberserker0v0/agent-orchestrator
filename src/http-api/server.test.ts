@@ -1445,4 +1445,117 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(400);
   });
+
+  // ─── Agent-scoped skill endpoints ──────────────────────
+
+  it('GET /api/conversations/:id/agents/:agent/skills lists agent skills', async () => {
+    mockSkillService.listSkills.mockReturnValue(['agent-skill']);
+
+    const res = await request(server).get('/api/conversations/conv-001/agents/my-agent/skills');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(['agent-skill']);
+    expect(mockSkillService.listSkills).toHaveBeenCalledWith('conv-001', 'my-agent');
+  });
+
+  it('GET /api/conversations/:id/agents/:agent/skills returns 400 for invalid agent name', async () => {
+    const res = await request(server).get('/api/conversations/conv-001/agents/foo%5Cbar/skills');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe(ErrorCodes.INVALID_AGENT_NAME);
+  });
+
+  it('GET /api/conversations/:id/agents/:agent/skills/:name reads agent skill', async () => {
+    mockSkillService.readSkill.mockReturnValue('# Agent skill');
+
+    const res = await request(server).get('/api/conversations/conv-001/agents/my-agent/skills/my-skill');
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('my-skill');
+    expect(res.body.content).toBe('# Agent skill');
+    expect(mockSkillService.readSkill).toHaveBeenCalledWith('conv-001', 'my-skill', 'my-agent');
+  });
+
+  it('GET /api/conversations/:id/agents/:agent/skills/:name returns 400 for invalid skill name', async () => {
+    const res = await request(server).get('/api/conversations/conv-001/agents/my-agent/skills/foo%5Cbar');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe(ErrorCodes.INVALID_SKILL_NAME);
+  });
+
+  it('GET /api/conversations/:id/agents/:agent/skills/:name/info returns agent skill info', async () => {
+    mockSkillService.getSkillInfo.mockReturnValue({
+      name: 'my-skill',
+      files: ['SKILL.md'],
+      totalSize: 100,
+      sha256: 'abc',
+    });
+
+    const res = await request(server).get('/api/conversations/conv-001/agents/my-agent/skills/my-skill/info');
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('my-skill');
+    expect(mockSkillService.getSkillInfo).toHaveBeenCalledWith('conv-001', 'my-skill', 'my-agent');
+  });
+
+  it('DELETE /api/conversations/:id/agents/:agent/skills/:name deletes agent skill', async () => {
+    const res = await request(server).delete('/api/conversations/conv-001/agents/my-agent/skills/my-skill');
+
+    expect(res.status).toBe(204);
+    expect(mockSkillService.deleteSkill).toHaveBeenCalledWith('conv-001', 'my-skill', 'my-agent');
+  });
+
+  it('DELETE /api/conversations/:id/agents/:agent/skills/:name returns 404 when not found', async () => {
+    mockSkillService.deleteSkill.mockImplementation(() => {
+      throw new Error('Skill not found: missing');
+    });
+
+    const res = await request(server).delete('/api/conversations/conv-001/agents/my-agent/skills/missing');
+
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /api/conversations/:id/agents/:agent/skills/import imports agent skill', async () => {
+    const res = await request(server)
+      .post('/api/conversations/conv-001/agents/my-agent/skills/import')
+      .send({ source: 'skills/web-search', name: 'web-search' });
+
+    expect(res.status).toBe(204);
+    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills/web-search', 'web-search', 'my-agent');
+  });
+
+  it('POST /api/conversations/:id/agents/:agent/skills/import returns 403 for disallowed source', async () => {
+    mockSkillService.importSkill.mockImplementation(() => {
+      throw new Error('Source path not allowed. Must be under one of: /skills');
+    });
+
+    const res = await request(server)
+      .post('/api/conversations/conv-001/agents/my-agent/skills/import')
+      .send({ source: 'skills/web-search', name: 'web-search' });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /api/conversations/:id/agents/:agent/skills/import returns 400 for invalid name', async () => {
+    const res = await request(server)
+      .post('/api/conversations/conv-001/agents/my-agent/skills/import')
+      .send({ source: 'skills/web-search', name: 'foo/bar' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/conversations/:id/agents/:agent/skills/upload returns 400 for missing name', async () => {
+    const res = await request(server)
+      .post('/api/conversations/conv-001/agents/my-agent/skills/upload');
+
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/conversations/:id/agents/:agent/skills/upload returns 400 for invalid agent name', async () => {
+    const res = await request(server)
+      .post('/api/conversations/conv-001/agents/foo%5Cbar/skills/upload?name=valid-skill');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe(ErrorCodes.INVALID_AGENT_NAME);
+  });
 });

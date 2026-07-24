@@ -762,7 +762,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockSkillService.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search');
+    expect(mockSkillService.deleteSkill).toHaveBeenCalledWith('conv-001', 'web-search', undefined);
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find((call) => {
@@ -798,7 +798,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills/test', 'foo/bar');
+    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills/test', 'foo/bar', undefined);
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
@@ -836,7 +836,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills_evil/web-search', 'web-search');
+    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills_evil/web-search', 'web-search', undefined);
 
     const sendCalls = mockWs.send.mock.calls as string[][];
     const errorCall = sendCalls.find((call) => {
@@ -1947,7 +1947,7 @@ describe('WSRouter', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills/test', 'test-skill');
+    expect(mockSkillService.importSkill).toHaveBeenCalledWith('conv-001', 'skills/test', 'test-skill', undefined);
     const sendCalls = mockWs.send.mock.calls as string[][];
     const resultCall = sendCalls.find(c => {
       try { const p = JSON.parse(c[0]); return p.id === 90 && p.result?.imported === 'test-skill'; } catch { return false; }

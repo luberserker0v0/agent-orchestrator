@@ -12,7 +12,7 @@ import { MessageService } from '../services/message-service.js';
 import { WSConnection } from './connection.js';
 import type { WebSocketConfig } from '../config-loader.js';
 import { wsConnectionsActive } from '../metrics/registry.js';
-import { validateSkillName } from '../orchestrator/workspace-factory.js';
+import { validateSkillName, validateAgentName } from '../orchestrator/workspace-factory.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
 
 export class WSRouter {
@@ -291,35 +291,56 @@ export class WSRouter {
       // ─── Skills ────────────────────────────────────────────
 
       case 'skills.import': {
-        const { source, name } = params as { source: string; name: string };
+        const { source, name, agent } = params as { source: string; name: string; agent?: string };
         if (!source || !name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing source or name');
-        this.skillService.importSkill(conversationId, source, name);
+        let agentName: string | undefined;
+        if (agent) {
+          try { agentName = validateAgentName(agent); } catch { throw new AppError(400, ErrorCodes.INVALID_AGENT_NAME, 'Invalid agent name'); }
+        }
+        this.skillService.importSkill(conversationId, source, name, agentName);
         return { imported: name };
       }
 
       case 'skills.list': {
-        return this.skillService.listSkills(conversationId);
+        const { agent } = params as { agent?: string };
+        let agentName: string | undefined;
+        if (agent) {
+          try { agentName = validateAgentName(agent); } catch { throw new AppError(400, ErrorCodes.INVALID_AGENT_NAME, 'Invalid agent name'); }
+        }
+        return this.skillService.listSkills(conversationId, agentName);
       }
 
       case 'skills.get': {
-        const { name } = params as { name: string };
+        const { name, agent } = params as { name: string; agent?: string };
         if (!name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name');
         try { validateSkillName(name); } catch { throw new AppError(400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name'); }
-        return this.skillService.readSkill(conversationId, name);
+        let agentName: string | undefined;
+        if (agent) {
+          try { agentName = validateAgentName(agent); } catch { throw new AppError(400, ErrorCodes.INVALID_AGENT_NAME, 'Invalid agent name'); }
+        }
+        return this.skillService.readSkill(conversationId, name, agentName);
       }
 
       case 'skills.info': {
-        const { name } = params as { name: string };
+        const { name, agent } = params as { name: string; agent?: string };
         if (!name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name');
         try { validateSkillName(name); } catch { throw new AppError(400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name'); }
-        return this.skillService.getSkillInfo(conversationId, name);
+        let agentName: string | undefined;
+        if (agent) {
+          try { agentName = validateAgentName(agent); } catch { throw new AppError(400, ErrorCodes.INVALID_AGENT_NAME, 'Invalid agent name'); }
+        }
+        return this.skillService.getSkillInfo(conversationId, name, agentName);
       }
 
       case 'skills.delete': {
-        const { name } = params as { name: string };
+        const { name, agent } = params as { name: string; agent?: string };
         if (!name) throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Missing name');
         try { validateSkillName(name); } catch { throw new AppError(400, ErrorCodes.INVALID_SKILL_NAME, 'Invalid skill name'); }
-        this.skillService.deleteSkill(conversationId, name);
+        let agentName: string | undefined;
+        if (agent) {
+          try { agentName = validateAgentName(agent); } catch { throw new AppError(400, ErrorCodes.INVALID_AGENT_NAME, 'Invalid agent name'); }
+        }
+        this.skillService.deleteSkill(conversationId, name, agentName);
         return { deleted: name };
       }
 
