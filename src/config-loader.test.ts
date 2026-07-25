@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse as parseJSONC } from 'jsonc-parser';
 import { describe, it, expect, afterEach } from 'vitest';
-import { loadConfig, validateConfig, readJSON } from './config-loader.js';
+import { loadConfig, validateConfig, readJSON, normalizeApiKeys } from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
 
 function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentOrchestratorConfig {
@@ -121,6 +121,68 @@ describe('validateConfig', () => {
   it('accepts valid apiKey', () => {
     const config = createValidConfig({
       server: { ...createValidConfig().server, apiKey: 'valid-api-key-123' },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  // ─── apiKeys validation ─────────────────────────────
+
+  it('accepts valid apiKeys array', () => {
+    const config = createValidConfig({
+      server: {
+        ...createValidConfig().server,
+        apiKeys: [
+          { key: 'admin-key-123456', role: 'admin' },
+          { key: 'obs-key-1234567', role: 'observer', name: 'Observer' },
+        ],
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('rejects apiKeys that is not an array', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, apiKeys: 'not-an-array' as any },
+    });
+    expect(() => validateConfig(config)).toThrow('server.apiKeys must be an array');
+  });
+
+  it('rejects apiKeys entry with short key', () => {
+    const config = createValidConfig({
+      server: {
+        ...createValidConfig().server,
+        apiKeys: [{ key: 'short', role: 'admin' }],
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('at least 8 characters');
+  });
+
+  it('rejects apiKeys entry with invalid role', () => {
+    const config = createValidConfig({
+      server: {
+        ...createValidConfig().server,
+        apiKeys: [{ key: 'valid-key-1234', role: 'superuser' as any }],
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('must be "admin" or "observer"');
+  });
+
+  it('rejects duplicate apiKeys', () => {
+    const config = createValidConfig({
+      server: {
+        ...createValidConfig().server,
+        apiKeys: [
+          { key: 'same-key-12345', role: 'admin' },
+          { key: 'same-key-12345', role: 'observer' },
+        ],
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('duplicate apiKey');
+  });
+
+  it('accepts empty apiKeys array', () => {
+    const config = createValidConfig({
+      server: { ...createValidConfig().server, apiKeys: [] },
     });
     expect(() => validateConfig(config)).not.toThrow();
   });
@@ -413,5 +475,57 @@ describe('loadConfig fallback paths', () => {
     expect(config.server.host).toBe('127.0.0.1');
     expect(config.orchestrator.maxInstances).toBe(10);
     expect(config.workspace.basePath).toBe('./workspace');
+  });
+});
+
+describe('normalizeApiKeys', () => {
+  it('returns apiKeys when apiKeys is set', () => {
+    const serverConfig = {
+      port: 8080,
+      host: '127.0.0.1',
+      shutdownTimeoutMs: 15000,
+      apiKeys: [
+        { key: 'admin-key-123456', role: 'admin' as const },
+        { key: 'obs-key-12345678', role: 'observer' as const },
+      ],
+    };
+    const result = normalizeApiKeys(serverConfig);
+    expect(result).toHaveLength(2);
+    expect(result![0].role).toBe('admin');
+    expect(result![1].role).toBe('observer');
+  });
+
+  it('converts legacy apiKey to admin apiKeys entry', () => {
+    const serverConfig = { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000, apiKey: 'legacy-key-12345' };
+    const result = normalizeApiKeys(serverConfig);
+    expect(result).toHaveLength(1);
+    expect(result![0].key).toBe('legacy-key-12345');
+    expect(result![0].role).toBe('admin');
+  });
+
+  it('returns undefined when no auth is configured', () => {
+    const serverConfig = { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 };
+    const result = normalizeApiKeys(serverConfig);
+    expect(result).toBeUndefined();
+  });
+
+  it('returns undefined for empty apiKey', () => {
+    const serverConfig = { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000, apiKey: '' };
+    const result = normalizeApiKeys(serverConfig);
+    expect(result).toBeUndefined();
+  });
+
+  it('apiKeys takes precedence over apiKey', () => {
+    const serverConfig = {
+      port: 8080,
+      host: '127.0.0.1',
+      shutdownTimeoutMs: 15000,
+      apiKey: 'legacy-key-12345',
+      apiKeys: [{ key: 'new-key-1234567', role: 'observer' as const }],
+    };
+    const result = normalizeApiKeys(serverConfig);
+    expect(result).toHaveLength(1);
+    expect(result![0].key).toBe('new-key-1234567');
+    expect(result![0].role).toBe('observer');
   });
 });

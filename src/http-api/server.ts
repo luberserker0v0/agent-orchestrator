@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { WebSocketServer } from 'ws';
 import swaggerUi from 'swagger-ui-express';
 import type { AgentOrchestratorConfig, ServerConfig, WebSocketConfig } from '../config-loader.js';
+import { normalizeApiKeys } from '../config-loader.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { RuntimeRegistry } from '../agent-runtime/registry.js';
 import { WorkspaceFactory, validateSkillName, validateAgentName } from '../orchestrator/workspace-factory.js';
@@ -19,6 +20,15 @@ import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal, httpRequestDurationSeconds } from '../metrics/registry.js';
 import { openapiSpec } from './openapi.js';
 import { ErrorCodes, isAppError, toHttpErrorResponse } from '../utils/errors.js';
+import { mountDashboard } from './dashboard.js';
+import type { ApiKeyRole } from '../config-loader.js';
+
+declare module 'express-serve-static-core' {
+  interface Request {
+    apiKeyRole?: ApiKeyRole;
+    apiKeyName?: string;
+  }
+}
 
 export interface HttpServer {
   server: Server;
@@ -82,18 +92,42 @@ export function createHttpServer(
   });
 
   // API key authentication (optional)
-  const PUBLIC_PATHS = ['/health', '/metrics', '/api-docs', '/api-docs.json'];
-  if (serverConfig.apiKey) {
+  const PUBLIC_PATHS = ['/health', '/metrics', '/api-docs', '/api-docs.json', '/dashboard', '/dashboard/'];
+  const resolvedApiKeys = normalizeApiKeys(serverConfig);
+  if (resolvedApiKeys && resolvedApiKeys.length > 0) {
     app.use((req, res, next) => {
       if (PUBLIC_PATHS.includes(req.path)) return next();
       const header = req.headers.authorization;
-      if (!header || !header.startsWith('Bearer ') || header.slice(7) !== serverConfig.apiKey) {
+      if (!header || !header.startsWith('Bearer ')) {
         res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or missing API key' } });
+        return;
+      }
+      const token = header.slice(7);
+      const match = resolvedApiKeys.find(e => e.key === token);
+      if (!match) {
+        res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid API key' } });
+        return;
+      }
+      req.apiKeyRole = match.role;
+      req.apiKeyName = match.name;
+      next();
+    });
+  }
+
+  // All mutating routes (non-GET, non-public) require admin role
+  if (resolvedApiKeys && resolvedApiKeys.length > 0) {
+    app.use((req, res, next) => {
+      if (req.method === 'GET' || PUBLIC_PATHS.includes(req.path)) return next();
+      if (!req.apiKeyRole || req.apiKeyRole !== 'admin') {
+        res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
         return;
       }
       next();
     });
   }
+
+  // ─── Dashboard ────────────────────────────────────────
+  mountDashboard(app);
 
   // ─── Helpers ─────────────────────────────────────────────
 
@@ -169,6 +203,16 @@ export function createHttpServer(
       };
     });
     res.json(runtimes);
+  });
+
+  // ─── Auth ────────────────────────────────────────────────
+
+  app.get('/api/auth/role', (req: Request, res: Response) => {
+    if (!resolvedApiKeys || resolvedApiKeys.length === 0) {
+      res.json({ role: 'admin', name: 'local' });
+      return;
+    }
+    res.json({ role: req.apiKeyRole ?? 'admin', name: req.apiKeyName ?? '' });
   });
 
   // ─── Conversation Lifecycle ──────────────────────────────
@@ -974,11 +1018,22 @@ export function createHttpServer(
   const httpServer = createServer(app);
 
   const wss = new WebSocketServer({ noServer: true });
-  const wsRouter = new WSRouter(wss, conversationState, wsConfig, configService, agentService, skillService, conversationService, fileService, sessionService, messageService);
+  const wsRouter = new WSRouter(wss, conversationState, wsConfig, configService, agentService, skillService, conversationService, fileService, sessionService, messageService, resolvedApiKeys);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ?? '';
     if (pathname.startsWith('/ws/')) {
+      // Validate apiKey for WS connections (query param or x-api-key header)
+      if (resolvedApiKeys && resolvedApiKeys.length > 0) {
+        const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+        const token = url.searchParams.get('apiKey')
+          ?? request.headers['x-api-key'] as string | undefined;
+        if (!token || !resolvedApiKeys.find(e => e.key === token)) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+      }
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });

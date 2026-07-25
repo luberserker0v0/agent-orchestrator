@@ -235,7 +235,8 @@ AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES=104857600  # 0 = unlimited
 | `port` | integer | 0 | HTTP server port (0 = auto-assign) |
 | `host` | string | '127.0.0.1' | Bind address |
 | `shutdownTimeoutMs` | integer | 15000 | Maximum time in ms for graceful shutdown before force exit |
-| `apiKey` | string | (none) | Optional bearer token for API authentication. All endpoints except `/health`, `/metrics`, `/api-docs*` require `Authorization: Bearer <key>`. Min 8 characters. |
+| `apiKey` | string | (none) | **Deprecated**: use `apiKeys` instead. Optional bearer token for API authentication. If set alone, treated as admin role. Min 8 characters. |
+| `apiKeys` | array | (none) | Role-based API keys. Each entry: `{ key, role, name? }` where `role` is `admin` or `observer`. Takes precedence over `apiKey`. WebSocket connections authenticate via `?apiKey=<key>` query param or `x-api-key` header. |
 
 ## Orchestrator Configuration
 

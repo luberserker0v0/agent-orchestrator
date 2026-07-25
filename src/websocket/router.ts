@@ -10,10 +10,21 @@ import { FileService } from '../services/file-service.js';
 import { SessionService } from '../services/session-service.js';
 import { MessageService } from '../services/message-service.js';
 import { WSConnection } from './connection.js';
-import type { WebSocketConfig } from '../config-loader.js';
+import type { WebSocketConfig, ApiKeyEntry, ApiKeyRole } from '../config-loader.js';
 import { wsConnectionsActive } from '../metrics/registry.js';
 import { validateSkillName, validateAgentName } from '../orchestrator/workspace-factory.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
+
+const WRITE_METHODS = new Set([
+  'message.send',
+  'config.update', 'config.patch',
+  'agent.register', 'agent.delete',
+  'agent.config.write', 'agent.config.delete',
+  'file.write', 'file.delete', 'file.copy',
+  'session.create', 'session.delete', 'session.fork', 'session.abort',
+  'skills.import', 'skills.delete',
+  'conversation.start', 'conversation.stop', 'conversation.restart', 'conversation.delete',
+]);
 
 export class WSRouter {
   private wss: WebSocketServer;
@@ -26,7 +37,9 @@ export class WSRouter {
   private fileService: FileService;
   private sessionService: SessionService;
   private messageService: MessageService;
+  private resolvedApiKeys?: ApiKeyEntry[];
   private connections: Map<string, WSConnection> = new Map();
+  private connectionRoles: Map<string, ApiKeyRole> = new Map();
   private eventUnsubscribers: Map<string, () => void> = new Map();
 
   constructor(
@@ -39,7 +52,8 @@ export class WSRouter {
     conversationService: ConversationService,
     fileService: FileService,
     sessionService: SessionService,
-    messageService: MessageService
+    messageService: MessageService,
+    resolvedApiKeys?: ApiKeyEntry[]
   ) {
     this.wss = wss;
     this.conversationState = conversationState;
@@ -51,6 +65,7 @@ export class WSRouter {
     this.fileService = fileService;
     this.sessionService = sessionService;
     this.messageService = messageService;
+    this.resolvedApiKeys = resolvedApiKeys;
 
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
   }
@@ -79,6 +94,16 @@ export class WSRouter {
     const conversationId = match[1];
     logger.info(`WS connection requested: ${conversationId}`);
 
+    // Extract role from apiKey
+    let role: ApiKeyRole = 'admin';
+    if (this.resolvedApiKeys && this.resolvedApiKeys.length > 0) {
+      const parsedUrl = new URL(url, `http://${req.headers.host ?? 'localhost'}`);
+      const token = parsedUrl.searchParams.get('apiKey')
+        ?? req.headers['x-api-key'] as string | undefined;
+      const match = this.resolvedApiKeys.find(e => e.key === token);
+      role = match?.role ?? 'admin';
+    }
+
     if (!this.conversationState.has(conversationId)) {
       logger.warn(`Conversation not found for ${conversationId}`);
       ws.close(1011, 'Conversation not found');
@@ -104,6 +129,7 @@ export class WSRouter {
     );
 
     this.connections.set(conversationId, connection);
+    this.connectionRoles.set(conversationId, role);
     wsConnectionsActive.inc();
     logger.info(`WS connection established: ${conversationId}`);
 
@@ -117,6 +143,7 @@ export class WSRouter {
 
     ws.on('close', () => {
       this.connections.delete(conversationId);
+      this.connectionRoles.delete(conversationId);
       this.eventUnsubscribers.get(conversationId)?.();
       this.eventUnsubscribers.delete(conversationId);
       wsConnectionsActive.dec();
@@ -125,6 +152,11 @@ export class WSRouter {
   }
 
   private async handleMessage(conversationId: string, method: string, params: unknown): Promise<unknown> {
+    const role = this.connectionRoles.get(conversationId);
+    if (role === 'observer' && WRITE_METHODS.has(method)) {
+      throw new AppError(403, ErrorCodes.FORBIDDEN, 'Insufficient permissions');
+    }
+
     switch (method) {
 
       // ─── Message ───────────────────────────────────────────
