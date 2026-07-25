@@ -164,7 +164,7 @@ describe('validateConfig', () => {
         apiKeys: [{ key: 'valid-key-1234', role: 'superuser' as any }],
       },
     });
-    expect(() => validateConfig(config)).toThrow('must be "admin" or "observer"');
+    expect(() => validateConfig(config)).toThrow('must be "admin", "user", or "observer"');
   });
 
   it('rejects duplicate apiKeys', () => {

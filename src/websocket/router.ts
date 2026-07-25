@@ -9,22 +9,25 @@ import { ConversationService } from '../services/conversation-service.js';
 import { FileService } from '../services/file-service.js';
 import { SessionService } from '../services/session-service.js';
 import { MessageService } from '../services/message-service.js';
+import { RoleService } from '../services/role-service.js';
 import { WSConnection } from './connection.js';
 import type { WebSocketConfig, ApiKeyEntry, ApiKeyRole } from '../config-loader.js';
 import { wsConnectionsActive } from '../metrics/registry.js';
 import { validateSkillName, validateAgentName } from '../orchestrator/workspace-factory.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
 
-const WRITE_METHODS = new Set([
-  'message.send',
-  'config.update', 'config.patch',
-  'agent.register', 'agent.delete',
-  'agent.config.write', 'agent.config.delete',
-  'file.write', 'file.delete', 'file.copy',
-  'session.create', 'session.delete', 'session.fork', 'session.abort',
-  'skills.import', 'skills.delete',
-  'conversation.start', 'conversation.stop', 'conversation.restart', 'conversation.delete',
-]);
+const WS_METHOD_PERMISSIONS: Record<string, string> = {
+  'message.send': 'message:send',
+  'config.update': 'config:write', 'config.patch': 'config:write',
+  'agent.register': 'agent:write', 'agent.delete': 'agent:delete',
+  'agent.config.write': 'agent:write', 'agent.config.delete': 'agent:delete',
+  'file.write': 'file:write', 'file.delete': 'file:delete', 'file.copy': 'file:copy',
+  'session.create': 'session:create', 'session.delete': 'session:delete',
+  'session.fork': 'session:fork', 'session.abort': 'session:abort',
+  'skills.import': 'skill:import', 'skills.delete': 'skill:delete',
+  'conversation.start': 'conversation:start', 'conversation.stop': 'conversation:stop',
+  'conversation.restart': 'conversation:restart', 'conversation.delete': 'conversation:delete',
+};
 
 export class WSRouter {
   private wss: WebSocketServer;
@@ -37,6 +40,7 @@ export class WSRouter {
   private fileService: FileService;
   private sessionService: SessionService;
   private messageService: MessageService;
+  private roleService: RoleService;
   private resolvedApiKeys?: ApiKeyEntry[];
   private connections: Map<string, WSConnection> = new Map();
   private connectionRoles: Map<string, ApiKeyRole> = new Map();
@@ -53,6 +57,7 @@ export class WSRouter {
     fileService: FileService,
     sessionService: SessionService,
     messageService: MessageService,
+    roleService: RoleService,
     resolvedApiKeys?: ApiKeyEntry[]
   ) {
     this.wss = wss;
@@ -65,6 +70,7 @@ export class WSRouter {
     this.fileService = fileService;
     this.sessionService = sessionService;
     this.messageService = messageService;
+    this.roleService = roleService;
     this.resolvedApiKeys = resolvedApiKeys;
 
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
@@ -158,8 +164,11 @@ export class WSRouter {
 
   private async handleMessage(conversationId: string, method: string, params: unknown): Promise<unknown> {
     const role = this.connectionRoles.get(conversationId);
-    if (role === 'observer' && WRITE_METHODS.has(method)) {
-      throw new AppError(403, ErrorCodes.FORBIDDEN, 'Insufficient permissions');
+    if (role) {
+      const permission = WS_METHOD_PERMISSIONS[method];
+      if (permission && !this.roleService.hasPermission(role, permission)) {
+        throw new AppError(403, ErrorCodes.FORBIDDEN, 'Insufficient permissions');
+      }
     }
 
     switch (method) {

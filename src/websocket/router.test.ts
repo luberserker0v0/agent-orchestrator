@@ -73,6 +73,7 @@ describe('WSRouter', () => {
   let mockFileService: any;
   let mockSessionService: any;
   let mockMessageService: any;
+  let mockRoleService: any;
 
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -165,6 +166,10 @@ describe('WSRouter', () => {
       getHistory: vi.fn().mockResolvedValue([{ id: 'msg_1', text: 'Hello' }]),
     };
 
+    mockRoleService = {
+      hasPermission: vi.fn().mockReturnValue(true),
+    };
+
     router = new WSRouter(
       mockWss as any,
       mockConversationState,
@@ -175,7 +180,8 @@ describe('WSRouter', () => {
       mockConversationService,
       mockFileService,
       mockSessionService,
-      mockMessageService
+      mockMessageService,
+      mockRoleService
     );
   });
 
@@ -1841,7 +1847,8 @@ describe('WSRouter', () => {
       mockConversationService,
       mockFileService,
       mockSessionService,
-      mockMessageService
+      mockMessageService,
+      mockRoleService
     );
 
     dockerMockWss.emit('connection', dockerWs, createMockReq('/ws/conv-001'));
