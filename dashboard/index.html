@@ -199,7 +199,7 @@ function showApp() {
   document.getElementById('login').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   document.getElementById('roleBadge').textContent = API.role;
-  document.getElementById('detailActions').style.display = API.role === 'admin' ? 'flex' : 'none';
+  document.getElementById('detailActions').style.display = API.role !== 'observer' ? 'flex' : 'none';
   showList();
 }
 
@@ -282,7 +282,7 @@ async function openDetail(id) {
   document.getElementById('listView').style.display = 'none';
   document.getElementById('detailView').style.display = 'block';
   document.getElementById('detailTitle').textContent = id;
-  document.getElementById('detailActions').innerHTML = API.role === 'admin'
+  document.getElementById('detailActions').innerHTML = API.role !== 'observer'
     ? `<button class="btn-ghost btn-sm" onclick="convAction('${id}','stop')">Stop</button>
        <button class="btn-ghost btn-sm" onclick="convAction('${id}','restart')">Restart</button>
        <button class="btn-danger btn-sm" onclick="convAction('${id}','delete')">Delete</button>`

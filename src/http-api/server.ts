@@ -15,6 +15,7 @@ import { ConversationService } from '../services/conversation-service.js';
 import { FileService } from '../services/file-service.js';
 import { SessionService } from '../services/session-service.js';
 import { MessageService } from '../services/message-service.js';
+import { RoleService } from '../services/role-service.js';
 import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal, httpRequestDurationSeconds } from '../metrics/registry.js';
@@ -50,6 +51,7 @@ export function createHttpServer(
   fileService: FileService,
   sessionService: SessionService,
   messageService: MessageService,
+  roleService: RoleService,
   config: AgentOrchestratorConfig
 ): HttpServer {
   const app = express();
@@ -114,11 +116,43 @@ export function createHttpServer(
     });
   }
 
-  // All mutating routes (non-GET, non-public) require admin role
+  // All mutating routes (non-GET, non-public) require appropriate permission
+  const ROUTE_PERMISSIONS: Array<{ method: string; pattern: RegExp; permission: string }> = [
+    { method: 'POST', pattern: /^\/api\/conversations$/, permission: 'conversation:start' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/start$/, permission: 'conversation:start' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/stop$/, permission: 'conversation:stop' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/restart$/, permission: 'conversation:restart' },
+    { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+$/, permission: 'conversation:delete' },
+    { method: 'PUT', pattern: /^\/api\/conversations\/[^/]+\/config$/, permission: 'config:write' },
+    { method: 'PUT', pattern: /^\/api\/conversations\/[^/]+\/agents$/, permission: 'agent:write' },
+    { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+$/, permission: 'agent:delete' },
+    { method: 'PUT', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+\/agents\.md$/, permission: 'agent:write' },
+    { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+\/agents\.md$/, permission: 'agent:delete' },
+    { method: 'PUT', pattern: /^\/api\/conversations\/[^/]+\/files$/, permission: 'file:write' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/files\/delete$/, permission: 'file:delete' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/files\/copy$/, permission: 'file:copy' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/sessions$/, permission: 'session:create' },
+    { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/sessions\/[^/]+$/, permission: 'session:delete' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/sessions\/[^/]+\/fork$/, permission: 'session:fork' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/sessions\/abort$/, permission: 'session:abort' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/skills\/import$/, permission: 'skill:import' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/skills\/upload$/, permission: 'skill:import' },
+    { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/skills\/[^/]+$/, permission: 'skill:delete' },
+    { method: 'POST', pattern: /^\/api\/roles$/, permission: 'role:write' },
+    { method: 'PUT', pattern: /^\/api\/roles\/[^/]+$/, permission: 'role:write' },
+    { method: 'DELETE', pattern: /^\/api\/roles\/[^/]+$/, permission: 'role:write' },
+  ];
+
   if (resolvedApiKeys && resolvedApiKeys.length > 0) {
     app.use((req, res, next) => {
       if (req.method === 'GET' || PUBLIC_PATHS.includes(req.path)) return next();
-      if (!req.apiKeyRole || req.apiKeyRole !== 'admin') {
+      const role = req.apiKeyRole;
+      if (!role) {
+        res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+        return;
+      }
+      const match = ROUTE_PERMISSIONS.find(r => r.method === req.method && r.pattern.test(req.path));
+      if (match && !roleService.hasPermission(role, match.permission)) {
         res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
         return;
       }
@@ -213,6 +247,69 @@ export function createHttpServer(
       return;
     }
     res.json({ role: req.apiKeyRole ?? 'admin', name: req.apiKeyName ?? '' });
+  });
+
+  // ─── Roles ──────────────────────────────────────────────
+
+  app.get('/api/roles', (_req: Request, res: Response) => {
+    const roles = roleService.list().map(r => ({
+      name: r.name,
+      permissions: r.permissions,
+      builtin: r.builtin,
+    }));
+    res.json(roles);
+  });
+
+  app.get('/api/roles/:name', (req: Request, res: Response) => {
+    const name = req.params.name as string;
+    const role = roleService.get(name);
+    if (!role) {
+      sendError(res, 404, ErrorCodes.ROLE_NOT_FOUND, `Role "${name}" not found`);
+      return;
+    }
+    res.json({ name: role.name, permissions: role.permissions, builtin: role.builtin });
+  });
+
+  app.post('/api/roles', (req: Request, res: Response) => {
+    try {
+      const { name, permissions } = req.body as { name?: string; permissions?: string[] };
+      if (!name || typeof name !== 'string') {
+        sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing or invalid "name" field');
+        return;
+      }
+      if (!Array.isArray(permissions)) {
+        sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing or invalid "permissions" array');
+        return;
+      }
+      const role = roleService.create(name, permissions);
+      res.status(201).json({ name: role.name, permissions: role.permissions, builtin: role.builtin });
+    } catch (err) {
+      handleControllerError(res, err);
+    }
+  });
+
+  app.put('/api/roles/:name', (req: Request, res: Response) => {
+    try {
+      const { permissions } = req.body as { permissions?: string[] };
+      if (!Array.isArray(permissions)) {
+        sendError(res, 400, ErrorCodes.MISSING_FIELD, 'Missing or invalid "permissions" array');
+        return;
+      }
+      const name = req.params.name as string;
+      const role = roleService.update(name, permissions);
+      res.json({ name: role.name, permissions: role.permissions, builtin: role.builtin });
+    } catch (err) {
+      handleControllerError(res, err);
+    }
+  });
+
+  app.delete('/api/roles/:name', (req: Request, res: Response) => {
+    try {
+      roleService.delete(req.params.name as string);
+      res.json({ deleted: true });
+    } catch (err) {
+      handleControllerError(res, err);
+    }
   });
 
   // ─── Conversation Lifecycle ──────────────────────────────
@@ -1018,7 +1115,7 @@ export function createHttpServer(
   const httpServer = createServer(app);
 
   const wss = new WebSocketServer({ noServer: true });
-  const wsRouter = new WSRouter(wss, conversationState, wsConfig, configService, agentService, skillService, conversationService, fileService, sessionService, messageService, resolvedApiKeys);
+  const wsRouter = new WSRouter(wss, conversationState, wsConfig, configService, agentService, skillService, conversationService, fileService, sessionService, messageService, roleService, resolvedApiKeys);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ?? '';

@@ -20,6 +20,7 @@ describe('HTTP API Server', () => {
   let mockMessageService: any;
   let mockRuntimeRegistry: any;
   let mockConfig: any;
+  let mockRoleService: any;
 
   beforeEach(() => {
     mockConfig = {
@@ -178,6 +179,15 @@ describe('HTTP API Server', () => {
       getHistory: vi.fn().mockResolvedValue([]),
     };
 
+    mockRoleService = {
+      list: vi.fn().mockReturnValue([]),
+      get: vi.fn().mockReturnValue(null),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      hasPermission: vi.fn().mockReturnValue(true),
+    };
+
     httpServer = createHttpServer(
       { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
       { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
@@ -192,6 +202,7 @@ describe('HTTP API Server', () => {
       mockFileService,
       mockSessionService,
       mockMessageService,
+      mockRoleService,
       mockConfig
     );
     server = httpServer.server;
@@ -239,6 +250,7 @@ describe('HTTP API Server', () => {
       mockFileService,
       mockSessionService,
       mockMessageService,
+      mockRoleService,
       mockConfig
     );
 
@@ -315,6 +327,7 @@ describe('HTTP API Server', () => {
         mockFileService,
         mockSessionService,
         mockMessageService,
+        mockRoleService,
         mockConfig
       );
       secureServer = hs.server;
@@ -1042,6 +1055,7 @@ describe('HTTP API Server', () => {
       mockFileService,
       mockSessionService,
       mockMessageService,
+      mockRoleService,
       mockConfig
     );
     mockConversationService.restart.mockResolvedValue({ id: 'conv-docker', agentType: 'opencode-direct', status: 'running', ready: false, port: 30010 });

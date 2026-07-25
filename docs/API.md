@@ -208,6 +208,76 @@ Admin 角色使用 `["*"]` 表示全部權限。其他角色需明確列出所�
 
 ---
 
+## Role Management
+
+### List Roles
+```
+GET /api/roles
+```
+Returns all roles (built-in + custom). Authenticated users only.
+Response: `Role[]`
+
+### Get Role
+```
+GET /api/roles/:name
+```
+Returns a specific role by name.
+
+### Create Role
+```
+POST /api/roles
+Body: { "name": string, "permissions": string[] }
+```
+Creates a new custom role. Admin only.
+- Name must match `^[a-zA-Z][a-zA-Z0-9_-]{0,63}$`
+
+### Update Role
+```
+PUT /api/roles/:name
+Body: { "permissions": string[] }
+```
+Replaces permissions for a custom role. Admin only.
+- Built-in roles (`admin`, `user`, `observer`) cannot be modified.
+
+### Delete Role
+```
+DELETE /api/roles/:name
+```
+Deletes a custom role. Admin only.
+- Built-in roles cannot be deleted.
+
+### Permission Model
+
+Permissions use `resource:action` format:
+
+| Permission | Resources |
+|-----------|-----------|
+| `conversation:start` | Create/start conversations |
+| `conversation:stop` | Stop conversations |
+| `conversation:restart` | Restart conversations |
+| `conversation:delete` | Delete conversations |
+| `message:send` | Send messages |
+| `config:write` | Write conversation config |
+| `agent:write` | Create/update agents |
+| `agent:delete` | Delete agents |
+| `file:write` | Write files |
+| `file:delete` | Delete files |
+| `file:copy` | Copy files |
+| `session:create` | Create sessions |
+| `session:delete` | Delete sessions |
+| `session:fork` | Fork sessions |
+| `session:abort` | Abort sessions |
+| `skill:import` | Import skills |
+| `skill:delete` | Delete skills |
+| `role:write` | Create/update/delete roles |
+
+**Built-in roles:**
+- `admin`: `["*"]` (wildcard, all permissions)
+- `user`: Conversation/message/config/agent/file/session/skill write permissions
+- `observer`: Read-only permissions (list/get operations)
+
+---
+
 ## REST API
 
 ### `GET /api-docs/`

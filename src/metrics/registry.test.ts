@@ -27,6 +27,7 @@ describe('Metrics', () => {
       {} as any,
       {} as any,
       {} as any,
+      { hasPermission: vi.fn().mockReturnValue(true) } as any,
       {
         server: {},
         websocket: {},

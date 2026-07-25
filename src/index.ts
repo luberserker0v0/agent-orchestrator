@@ -13,6 +13,7 @@ import { ConversationService } from './services/conversation-service.js';
 import { FileService } from './services/file-service.js';
 import { SessionService } from './services/session-service.js';
 import { MessageService } from './services/message-service.js';
+import { RoleService } from './services/role-service.js';
 import { RuntimeRegistry } from './agent-runtime/registry.js';
 import { RuntimeFactory } from './agent-runtime/runtime-factory.js';
 import { DirectRuntime } from './agent-runtime/runtimes/direct.js';
@@ -145,12 +146,13 @@ export async function main(cliArgs?: string[]) {
   const fileService = new FileService(workspaceFactory, conversationState);
   const sessionService = new SessionService(instanceManager, conversationState);
   const messageService = new MessageService(instanceManager, conversationState);
+  const roleService = new RoleService(cli.configPath ?? 'config/agentorchestrator.json', config.roles);
 
   // Clean up orphan resources from previous runs (e.g., after SIGKILL/crash)
   await instanceManager.cleanupOrphanContainers();
   await workspaceFactory.cleanupOrphans();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService, config);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService, roleService, config);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();

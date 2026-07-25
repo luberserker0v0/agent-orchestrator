@@ -2,7 +2,15 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseJSONC } from 'jsonc-parser';
 
-export type ApiKeyRole = 'admin' | 'observer';
+export type ApiKeyRole = 'admin' | 'user' | 'observer';
+
+export interface RoleConfig {
+  permissions: string[];
+}
+
+export interface RolesConfig {
+  [roleName: string]: RoleConfig;
+}
 
 export interface ApiKeyEntry {
   key: string;
@@ -106,6 +114,7 @@ export interface AgentOrchestratorConfig {
   websocket: WebSocketConfig;
   orchestrator: OrchestratorConfig;
   workspace: WorkspaceConfig;
+  roles?: RolesConfig;
 }
 
 const CONFIG_DIR = join(process.cwd(), 'config');
@@ -180,8 +189,8 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       if (typeof entry.key !== 'string' || entry.key.length < 8) {
         throw new Error('Config validation failed: each apiKeys entry must have a "key" string of at least 8 characters');
       }
-      if (entry.role !== 'admin' && entry.role !== 'observer') {
-        throw new Error(`Config validation failed: apiKeys entry role must be "admin" or "observer", got "${entry.role}"`);
+      if (entry.role !== 'admin' && entry.role !== 'user' && entry.role !== 'observer') {
+        throw new Error(`Config validation failed: apiKeys entry role must be "admin", "user", or "observer", got "${entry.role}"`);
       }
       if (keys.has(entry.key)) {
         throw new Error(`Config validation failed: duplicate apiKey "${entry.key.slice(0, 4)}..."`);
