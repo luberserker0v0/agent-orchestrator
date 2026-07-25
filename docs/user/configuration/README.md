@@ -46,6 +46,7 @@ Any config field can be overridden via environment variables:
     "shutdownTimeoutMs": 15000,
     "apiKeys": [
       { "key": "admin-secret-key-12345678", "role": "admin", "name": "Admin" },
+      { "key": "user-secret-key-12345678", "role": "user", "name": "User" },
       { "key": "observer-secret-key-12345678", "role": "observer", "name": "Observer" }
     ]
   },

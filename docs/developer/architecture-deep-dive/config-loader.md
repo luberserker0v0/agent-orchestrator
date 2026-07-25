@@ -89,7 +89,7 @@ Validates all configuration fields. Throws `AppError` on invalid values.
 **Validation rules:**
 - `server.port`: 0-65535
 - `server.host`: non-empty string
-- `server.apiKeys[].role`: must be `'admin'` or `'observer'`
+- `server.apiKeys[].role`: must be `'admin'`, `'user'`, or `'observer'`
 - `server.apiKeys[].key`: minimum 8 characters
 - `orchestrator.maxInstances`: must be <= port range size
 - `orchestrator.portRange.start`: must be < `end`
@@ -142,7 +142,7 @@ interface ServerConfig {
 
 interface ApiKeyEntry {
   key: string;
-  role: 'admin' | 'observer';
+  role: 'admin' | 'user' | 'observer';
   name?: string;
 }
 ```

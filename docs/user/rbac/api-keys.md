@@ -11,6 +11,7 @@ Add API keys to your config file under `server.apiKeys`:
   "server": {
     "apiKeys": [
       { "key": "admin-secret-key-12345678", "role": "admin", "name": "Admin" },
+      { "key": "user-secret-key-12345678", "role": "user", "name": "User" },
       { "key": "observer-secret-key-12345678", "role": "observer", "name": "Observer" }
     ]
   }
@@ -22,7 +23,7 @@ Add API keys to your config file under `server.apiKeys`:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `key` | string | Yes | The API key string. Minimum 8 characters. |
-| `role` | string | Yes | Role: `"admin"` or `"observer"`. |
+| `role` | string | Yes | Role: `"admin"`, `"user"`, or `"observer"`. |
 | `name` | string | No | Human-readable label for this key. |
 
 ## Authentication Methods
@@ -88,8 +89,9 @@ openssl rand -hex 24
 ## Security Best Practices
 
 1. **Use strong keys** — At least 16 characters, randomly generated
-2. **Separate roles** — Use different keys for admin and observer
+2. **Separate roles** — Use different keys for admin, user, and observer
 3. **Rotate regularly** — Change keys periodically
 4. **Use HTTPS** — In production, always use TLS
 5. **Don't log keys** — Never include keys in logs or error messages
 6. **Limit observer access** — Give observer keys to monitoring tools only
+7. **Use user role** — Give user keys to regular users who need write access

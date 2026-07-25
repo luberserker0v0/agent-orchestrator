@@ -10,7 +10,7 @@ The `server` section controls the HTTP server, authentication, and API access.
 | `host` | string | `'127.0.0.1'` | Bind address. Use `0.0.0.0` to listen on all interfaces. |
 | `shutdownTimeoutMs` | integer | `15000` | Maximum time (ms) for graceful shutdown before force exit. |
 | `apiKey` | string | (none) | **Deprecated.** Single API key for admin access. Min 8 characters. |
-| `apiKeys` | array | (none) | Role-based API keys. See below. |
+| `apiKeys` | array | (none) | Role-based API keys. Each entry: `{ key, role, name? }` where `role` is `admin`, `user`, or `observer`. See below. |
 
 ## API Keys
 
@@ -19,7 +19,7 @@ The `apiKeys` array defines role-based access control. Each entry has:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `key` | string | Yes | The API key string. Min 8 characters. |
-| `role` | string | Yes | One of: `"admin"`, `"observer"` |
+| `role` | string | Yes | One of: `"admin"`, `"user"`, `"observer"` |
 | `name` | string | No | Human-readable name for this key. |
 
 ### Example
@@ -29,6 +29,7 @@ The `apiKeys` array defines role-based access control. Each entry has:
   "server": {
     "apiKeys": [
       { "key": "admin-secret-key-12345678", "role": "admin", "name": "Admin" },
+      { "key": "user-secret-key-12345678", "role": "user", "name": "User" },
       { "key": "observer-secret-key-12345678", "role": "observer", "name": "Observer" }
     ]
   }
