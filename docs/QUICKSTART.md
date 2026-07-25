@@ -1,3 +1,5 @@
+> **DEPRECATED**: This file has been reorganized. See [new documentation](user/quick-start.md) for the updated quick start guide. This file will be removed in a future version.
+
 # Quick Start
 
 Get AgentOrchestrator running in under 5 minutes.

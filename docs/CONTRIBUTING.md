@@ -1,3 +1,5 @@
+> **DEPRECATED**: This file has been reorganized. See [new documentation](developer/contributing/) for the updated contributing guide. This file will be removed in a future version.
+
 # 貢獻指南
 
 感謝你對 AgentOrchestrator 的興趣！以下是參與開發的指南。

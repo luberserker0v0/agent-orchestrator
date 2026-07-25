@@ -1,3 +1,5 @@
+> **DEPRECATED**: This file has been reorganized. See [new documentation](developer/testing/) for the updated testing guide. This file will be removed in a future version.
+
 # Quick Test Guide
 
 How to run and write tests for AgentOrchestrator.

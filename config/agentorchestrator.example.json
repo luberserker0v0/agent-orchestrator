@@ -8,7 +8,38 @@
     "apiKeys": [                // Optional: role-based API keys. Takes precedence over apiKey.
       { "key": "admin-secret-123456", "role": "admin", "name": "Admin" },
       { "key": "observer-secret-123456", "role": "observer", "name": "Observer" }
-    ]
+    ],
+
+    // ── Role Definitions (RBAC) ──────────────────────────────────────
+    // Permissions: "resource:action" format, "*" for admin wildcard
+    // Built-in resources: conversation, message, config, agent, file, session, skill, role
+    // Roles are persisted to config file when modified via POST /api/roles
+    "roles": {
+      "admin": {
+        "permissions": ["*"]       // Full access + role management
+      },
+      "user": {
+        "permissions": [           // Conversation services (CRUD + messages)
+          "conversation:create", "conversation:start", "conversation:stop",
+          "conversation:restart", "conversation:read", "conversation:list",
+          "message:send", "message:read",
+          "config:read", "config:write",
+          "agent:read", "file:read", "file:write", "file:delete",
+          "session:read", "session:create", "session:delete",
+          "skill:read", "skill:import", "skill:delete"
+        ]
+      },
+      "observer": {
+        "permissions": [           // Read-only access
+          "conversation:read", "conversation:list",
+          "message:read",
+          "config:read",
+          "agent:read",
+          "session:read",
+          "skill:read"
+        ]
+      }
+    }
   },
 
   // ── WebSocket ─────────────────────────────────────────────────────
