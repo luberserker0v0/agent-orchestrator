@@ -49,34 +49,39 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 **回應**（`200 OK`）：
 ```json
-{
-  "roles": {
-    "admin": {
-      "permissions": ["*"]
-    },
-    "user": {
-      "permissions": [
-        "conversation:create", "conversation:start", "conversation:stop",
-        "conversation:restart", "conversation:read", "conversation:list",
-        "message:send", "message:read",
-        "config:read", "config:write",
-        "agent:read", "file:read", "file:write", "file:delete",
-        "session:read", "session:create", "session:delete",
-        "skill:read", "skill:import", "skill:delete"
-      ]
-    },
-    "observer": {
-      "permissions": [
-        "conversation:read", "conversation:list",
-        "message:read",
-        "config:read",
-        "agent:read",
-        "session:read",
-        "skill:read"
-      ]
-    }
+[
+  {
+    "name": "admin",
+    "permissions": ["*"],
+    "builtin": true
+  },
+  {
+    "name": "user",
+    "permissions": [
+      "conversation:start", "conversation:stop", "conversation:restart", "conversation:delete",
+      "message:send",
+      "config:write",
+      "agent:write", "agent:delete",
+      "file:write", "file:delete", "file:copy",
+      "session:create", "session:delete", "session:fork", "session:abort",
+      "skill:import", "skill:delete"
+    ],
+    "builtin": true
+  },
+  {
+    "name": "observer",
+    "permissions": [
+      "conversation:list", "conversation:get", "conversation:events",
+      "message:history",
+      "config:get",
+      "agent:list", "agent:get",
+      "file:read", "file:list",
+      "session:list", "session:get", "session:children",
+      "skill:list", "skill:get", "skill:info"
+    ],
+    "builtin": true
   }
-}
+]
 ```
 
 ---
@@ -92,15 +97,15 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 {
   "name": "moderator",
   "permissions": [
-    "conversation:read", "conversation:list",
+    "conversation:list", "conversation:get", "conversation:events",
     "conversation:start", "conversation:stop",
-    "message:read", "message:send",
-    "agent:read"
+    "message:send", "message:history",
+    "agent:list", "agent:get"
   ]
 }
 ```
 
-- `name`（必填）：角色名稱，只允許 `[A-Za-z0-9_-]`，最大 32 字元
+- `name`（必填）：角色名稱，必須以字母開頭，只允許 `[a-zA-Z][a-zA-Z0-9_-]`，最大 64 字元
 - `permissions`（必填）：權限陣列，格式為 `resource:action`
 
 **回應**（`201 Created`）：
@@ -108,22 +113,23 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 {
   "name": "moderator",
   "permissions": [
-    "conversation:read", "conversation:list",
+    "conversation:list", "conversation:get", "conversation:events",
     "conversation:start", "conversation:stop",
-    "message:read", "message:send",
-    "agent:read"
-  ]
+    "message:send", "message:history",
+    "agent:list", "agent:get"
+  ],
+  "builtin": false
 }
 ```
 
 **錯誤**：
 - `400`：名稱格式無效或缺少欄位
   ```json
-  { "error": { "code": "INVALID_ROLE_NAME", "message": "Role name must match [A-Za-z0-9_-]{1,32}" } }
+  { "error": { "code": "INVALID_ROLE_NAME", "message": "Invalid role name \"mod\". Must start with a letter and contain only alphanumeric, hyphen, or underscore characters (max 64)." } }
   ```
 - `409`：角色已存在
   ```json
-  { "error": { "code": "ROLE_ALREADY_EXISTS", "message": "Role 'moderator' already exists" } }
+  { "error": { "code": "ROLE_ALREADY_EXISTS", "message": "Role \"moderator\" already exists" } }
   ```
 
 ---
@@ -138,8 +144,8 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 ```json
 {
   "permissions": [
-    "conversation:read", "conversation:list",
-    "message:read"
+    "conversation:list", "conversation:get",
+    "message:history"
   ]
 }
 ```
@@ -149,20 +155,21 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 {
   "name": "moderator",
   "permissions": [
-    "conversation:read", "conversation:list",
-    "message:read"
-  ]
+    "conversation:list", "conversation:get",
+    "message:history"
+  ],
+  "builtin": false
 }
 ```
 
 **錯誤**：
 - `404`：角色不存在
   ```json
-  { "error": { "code": "ROLE_NOT_FOUND", "message": "Role 'moderator' not found" } }
+  { "error": { "code": "ROLE_NOT_FOUND", "message": "Role \"moderator\" not found" } }
   ```
-- `400`：嘗試修改 `admin` 角色的 `*` 權限
+- `403`：嘗試修改 `admin` 角色
   ```json
-  { "error": { "code": "CANNOT_MODIFY_ADMIN", "message": "Cannot modify admin role permissions" } }
+  { "error": { "code": "CANNOT_MODIFY_ADMIN", "message": "Cannot modify admin role" } }
   ```
 
 ---
@@ -173,11 +180,14 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 **權限**：admin
 
-**回應**（`204 No Content`）
+**回應**（`200 OK`）：
+```json
+{ "deleted": true }
+```
 
 **錯誤**：
 - `404`：角色不存在
-- `400`：嘗試刪除 admin 角色
+- `403`：嘗試刪除 admin 角色
   ```json
   { "error": { "code": "CANNOT_DELETE_ADMIN", "message": "Cannot delete admin role" } }
   ```
@@ -190,14 +200,14 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 
 | Resource | Actions | 說明 |
 |----------|---------|------|
-| `conversation` | `create`, `start`, `stop`, `restart`, `read`, `list`, `delete` | 對話生命週期管理 |
-| `message` | `send`, `read` | 訊息發送與讀取 |
-| `config` | `read`, `write` | opencode.json 讀寫 |
-| `agent` | `read`, `write`, `delete` | Agent 定義管理 |
-| `file` | `read`, `write`, `delete`, `copy` | Workspace 檔案操作 |
-| `session` | `read`, `create`, `delete` | OpenCode Session 管理 |
-| `skill` | `read`, `import`, `delete` | Skill 管理 |
-| `role` | `read`, `write` | 角色管理（僅 admin） |
+| `conversation` | `start`, `stop`, `restart`, `delete`, `list`, `get`, `events` | 對話生命週期管理 |
+| `message` | `send`, `history` | 訊息發送與讀取 |
+| `config` | `get`, `write` | opencode.json 讀寫 |
+| `agent` | `list`, `get`, `write`, `delete` | Agent 定義管理 |
+| `file` | `read`, `list`, `write`, `delete`, `copy` | Workspace 檔案操作 |
+| `session` | `list`, `get`, `children`, `create`, `delete`, `fork`, `abort` | OpenCode Session 管理 |
+| `skill` | `list`, `get`, `info`, `import`, `delete` | Skill 管理 |
+| `role` | `write` | 角色管理（僅 admin） |
 
 Admin 角色使用 `["*"]` 表示全部權限。其他角色需明確列出所需權限。
 
@@ -214,8 +224,8 @@ Admin 角色使用 `["*"]` 表示全部權限。其他角色需明確列出所�
 ```
 GET /api/roles
 ```
-Returns all roles (built-in + custom). Authenticated users only.
-Response: `Role[]`
+Returns all roles (built-in + custom) as an array. Authenticated users only.
+Response: `Role[]` — each entry has `name`, `permissions`, `builtin`.
 
 ### Get Role
 ```
@@ -236,15 +246,15 @@ Creates a new custom role. Admin only.
 PUT /api/roles/:name
 Body: { "permissions": string[] }
 ```
-Replaces permissions for a custom role. Admin only.
-- Built-in roles (`admin`, `user`, `observer`) cannot be modified.
+Replaces permissions for a role. Admin only.
+- Only `admin` role is protected from modification.
 
 ### Delete Role
 ```
 DELETE /api/roles/:name
 ```
-Deletes a custom role. Admin only.
-- Built-in roles cannot be deleted.
+Deletes a role. Admin only.
+- Only `admin` role is protected from deletion.
 
 ### Permission Model
 
@@ -256,17 +266,32 @@ Permissions use `resource:action` format:
 | `conversation:stop` | Stop conversations |
 | `conversation:restart` | Restart conversations |
 | `conversation:delete` | Delete conversations |
+| `conversation:list` | List conversations |
+| `conversation:get` | Get conversation details |
+| `conversation:events` | Get conversation events |
 | `message:send` | Send messages |
+| `message:history` | Get message history |
+| `config:get` | Read conversation config |
 | `config:write` | Write conversation config |
+| `agent:list` | List agents |
+| `agent:get` | Get agent details |
 | `agent:write` | Create/update agents |
 | `agent:delete` | Delete agents |
+| `file:read` | Read files |
+| `file:list` | List files |
 | `file:write` | Write files |
 | `file:delete` | Delete files |
 | `file:copy` | Copy files |
+| `session:list` | List sessions |
+| `session:get` | Get session details |
+| `session:children` | Get session children |
 | `session:create` | Create sessions |
 | `session:delete` | Delete sessions |
 | `session:fork` | Fork sessions |
 | `session:abort` | Abort sessions |
+| `skill:list` | List skills |
+| `skill:get` | Get skill content |
+| `skill:info` | Get skill info |
 | `skill:import` | Import skills |
 | `skill:delete` | Delete skills |
 | `role:write` | Create/update/delete roles |
@@ -326,14 +351,45 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 |--------|------|-------------|
 | `agentorchestrator_instances_active` | Gauge | 目前活躍的 OpenCode 實例數 |
 | `agentorchestrator_instances_total_created` | Counter | 啟動以來建立的總實例數 |
-| `agentorchestrator_instances_errors_total` | Counter | 實例錯誤數（labels: type: spawn|health|kill） |
+| `agentorchestrator_instances_errors_total` | Counter | 實例錯誤數（labels: type: spawn\|health\|kill） |
 | `agentorchestrator_instance_spawn_duration_seconds` | Histogram | 啟動 OpenCode 實例耗時 |
+| `agentorchestrator_instance_evictions_total` | Counter | LRU 實例驅逐數 |
+| `agentorchestrator_instance_idle_timeouts_total` | Counter | 閒置超時實例銷毀數 |
 | `agentorchestrator_port_pool_available` | Gauge | 動態端口池中可用端口數 |
 | `agentorchestrator_websocket_connections_active` | Gauge | 活躍的 WebSocket 連線數 |
 | `agentorchestrator_http_requests_total` | Counter | 總 HTTP 請求數（labels: method, status） |
 | `agentorchestrator_http_request_duration_seconds` | Histogram | HTTP 請求持續時間（labels: method, status） |
 | `agentorchestrator_conversation_state_changes_total` | Counter | 對話狀態轉換數（labels: status） |
+| `agentorchestrator_opencode_http_requests_total` | Counter | OpenCode HTTP 代理請求數（labels: method, path, status） |
+| `agentorchestrator_opencode_http_request_duration_seconds` | Histogram | OpenCode HTTP 代理請求耗時（labels: method, path） |
+| `agentorchestrator_sse_connections_active` | Gauge | 活躍的 SSE 連線數 |
+| `agentorchestrator_sse_reconnect_total` | Counter | SSE 重連次數（labels: status） |
+| `agentorchestrator_messages_sent_total` | Counter | 總訊息發送數（labels: status） |
+| `agentorchestrator_message_send_duration_seconds` | Histogram | 訊息發送耗時 |
+| `agentorchestrator_workspaces_active` | Gauge | 活躍的 workspace 數 |
+| `agentorchestrator_workspace_quota_exceeded_total` | Counter | Workspace 配額超限次數 |
 | `nodejs_*` | Various | Node.js 程序指標（memory, CPU, GC, event loop） |
+
+---
+
+### `GET /api/runtimes`
+
+列出所有已註冊的 agent runtime 及其狀態。
+
+**回應**（`200 OK`）：
+```json
+[
+  {
+    "id": "opencode-direct",
+    "type": "direct",
+    "version": "1.17.8",
+    "config": { "binary": "opencode", "version": "1.17.8" },
+    "registered": true,
+    "isValid": true,
+    "capabilities": null
+  }
+]
+```
 
 ---
 
@@ -344,11 +400,12 @@ Prometheus 指標端點，暴露 AgentOrchestrator 與 Node.js 執行時期指�
 **請求**：
 ```json
 {
-  "id": "my-conversation-001"
+  "id": "my-conversation-001",
+  "agentType": "opencode-direct"
 }
 ```
 - `id`：可省略，由系統自動生成 UUID
-- **注意**：`model` 與 `agent` 不再作為請求欄位；請透過 config endpoints（`POST /:id/config` 或 WS `config.update`）設定 opencode.json
+- `agentType`：可省略，指定要使用的 agent type（必須匹配 `orchestrator.runtimes[].id`）。省略時使用 `orchestrator.defaultAgentType`
 
 **回應**（`201 Created`）：
 ```json
@@ -954,6 +1011,32 @@ references/capabilities.md
 
 ---
 
+### `POST /api/conversations/:id/files/copy`
+
+從伺服器本地目錄複製檔案/資料夾到 workspace。來源必須在 `{cwd}/skills/`、`{cwd}/assets/` 或 `{cwd}/templates/` 下。
+
+**請求**：
+```json
+{
+  "source": "templates/spec.md",
+  "dest": "docs/spec.md"
+}
+```
+
+**回應**（`204 No Content`）
+
+**錯誤**（`403`）：
+```json
+{ "error": "Source path not allowed. Must be under one of: /skills, /assets, /templates" }
+```
+
+**錯誤**（`404`）：
+```json
+{ "error": "Source not found: templates/spec.md" }
+```
+
+---
+
 ### `POST /api/conversations/:id/files/list`
 
 列出指定目錄下的所有檔案與子目錄（僅一層，不遞迴）。路徑放於 request body，不指定 path 則列出 workspace 根目錄。
@@ -1021,6 +1104,14 @@ references/capabilities.md
 
 ---
 
+### `GET /api/conversations/:id/sessions/:sid`
+
+取得指定會話的詳細資訊。
+
+**回應**：OpenCode 會話物件。
+
+---
+
 ### `GET /api/conversations/:id/sessions/:sid/children`
 
 取得指定會話的子會話（會話樹）。
@@ -1078,6 +1169,17 @@ references/capabilities.md
 {
   "sessionId": "ses_fork_xxx"
 }
+```
+
+---
+
+### `POST /api/conversations/:id/sessions/abort`
+
+中止正在執行的 session（停止生成回應）。
+
+**回應**（`200 OK`）：
+```json
+{ "aborted": true }
 ```
 
 ---
@@ -1234,7 +1336,7 @@ references/capabilities.md
 
 所有訊息採用 JSON-RPC 2.0 格式。
 
-**重要限制**：WebSocket 連線時若對話不存在（尚未 `POST /api/conversations`），伺服器會直接關閉連線（code `1011`）。若對話存在但狀態不是 `running`，需要執行實例的操作（如 `message.send`）會回傳 `-32001` invalid state。
+**重要限制**：WebSocket 連線時若對話不存在（尚未 `POST /api/conversations`），伺服器會直接關閉連線（code `1011`）。
 
 ---
 
@@ -1424,6 +1526,35 @@ references/capabilities.md
 
 ---
 
+### Providers 類
+
+#### `providers.list`
+
+取得執行中 OpenCode 實例的供應商列表。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "providers.list",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "result": [
+    { "id": "anthropic", "name": "Anthropic", "models": ["claude-3-5-sonnet"] }
+  ]
+}
+```
+
+---
+
 ### 訊息類
 
 #### `message.send`
@@ -1462,12 +1593,12 @@ references/capabilities.md
 }
 ```
 
-**錯誤**（`-32001` invalid state）：
+**錯誤**（`-32000` server error，對話未在運行）：
 ```json
 {
   "jsonrpc": "2.0",
   "id": 4,
-  "error": { "code": -32001, "message": "Conversation not running" }
+  "error": { "code": -32000, "message": "Conversation not running (status: stopped)" }
 }
 ```
 
@@ -1635,6 +1766,31 @@ references/capabilities.md
 
 ---
 
+#### `conversation.delete`
+
+透過 WebSocket 請求刪除對話（等同 `DELETE /:id`）。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "method": "conversation.delete",
+  "params": {}
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "result": { "deleted": true }
+}
+```
+
+---
+
 ### 配置類
 
 #### `config.get`
@@ -1678,9 +1834,40 @@ references/capabilities.md
   "id": 11,
   "method": "config.update",
   "params": {
-    "$schema": "https://opencode.ai/schemas/opencode.json",
-    "permission": { "external_directory": { "*": "deny" }, "bash": { "*": "deny" } },
-    "model": "openai/gpt-5"
+    "config": {
+      "$schema": "https://opencode.ai/schemas/opencode.json",
+      "permission": { "external_directory": { "*": "deny" }, "bash": { "*": "deny" } },
+      "model": "openai/gpt-5"
+    }
+  }
+}
+```
+
+**回應**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 11,
+  "result": { "updated": true }
+}
+```
+
+---
+
+#### `config.patch`
+
+部分更新 `opencode.json`。僅更新請求中提供的欄位，其他欄位保持不變。
+
+**請求**：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 11,
+  "method": "config.patch",
+  "params": {
+    "config": {
+      "model": "openai/gpt-5"
+    }
   }
 }
 ```
@@ -2135,7 +2322,7 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 18,
-  "result": { "ok": true }
+  "result": { "written": "templates/spec.md" }
 }
 ```
 
@@ -2162,7 +2349,7 @@ references/capabilities.md
 {
   "jsonrpc": "2.0",
   "id": 19,
-  "result": { "ok": true }
+  "result": { "deleted": "templates/spec.md" }
 }
 ```
 
@@ -2313,8 +2500,8 @@ You are a senior UI/UX designer. Your responsibilities include:
 | `INVALID_ROLE_NAME` | 400 | 角色名稱格式無效 |
 | `ROLE_NOT_FOUND` | 404 | 角色不存在 |
 | `ROLE_ALREADY_EXISTS` | 409 | 角色已存在 |
-| `CANNOT_MODIFY_ADMIN` | 400 | 不可修改 admin 角色權限 |
-| `CANNOT_DELETE_ADMIN` | 400 | 不可刪除 admin 角色 |
+| `CANNOT_MODIFY_ADMIN` | 403 | 不可修改 admin 角色 |
+| `CANNOT_DELETE_ADMIN` | 403 | 不可刪除 admin 角色 |
 | `INTERNAL_ERROR` | 500 | 內部伺服器錯誤（未預期） |
 
 ### WebSocket JSON-RPC 錯誤

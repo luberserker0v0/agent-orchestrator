@@ -166,41 +166,57 @@ Example:
 
 ```
 src/
-  config-loader.ts           # Configuration loading with env overrides
-  index.ts                   # Application entry point
+  cli.ts                      # CLI entry, arg parsing, subcommands
+  config-loader.ts            # Configuration loading with env overrides, validation
+  index.ts                    # Application entry point
   agent-runtime/
-    types.ts                 # AgentRuntime interface, AgentEndpoint type
-    registry.ts              # RuntimeRegistry — runtime lookup by id
-    runtime-manager.ts       # RuntimeManager — manages instance map, lifecycle, policy queries (LRU candidate, idle detection)
+    types.ts                  # AgentRuntime interface, AgentEndpoint type, HealthInfo, SessionInfo, etc.
+    registry.ts               # RuntimeRegistry — runtime lookup by id
+    runtime-manager.ts        # RuntimeManager — manages instance map, lifecycle, policy queries (LRU candidate, idle detection)
+    runtime-factory.ts        # RuntimeFactory — registers and creates runtime instances by type
+    health.ts                 # waitForHealthy() — health check polling
+    versions.ts               # getRuntimeVersion(), getDefaultDirectVersion()
     runtimes/
-      direct.ts              # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill. Accepts DirectRuntimeConfig ({ binary })
-      docker.ts              # DockerRuntime — spawns Docker container, DockerHandle wraps docker rm -f. Accepts DockerRuntimeConfig ({ image, containerPort })
+      direct.ts               # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill
+      docker.ts               # DockerRuntime — spawns Docker container, DockerHandle wraps docker rm -f
   http-api/
-    server.ts                # Express HTTP server with conversation lifecycle, config, agents, files, sessions, events endpoints
+    server.ts                 # Express HTTP server with conversation lifecycle, config, agents, files, sessions, events, roles, skills, metrics endpoints
+    dashboard.ts              # mountDashboard() — serves built-in SPA
+    openapi.ts                # OpenAPI 3.0 spec
   orchestrator/
-    conversation-state.ts    # Event-driven conversation lifecycle with subscription and event replay
-    instance-manager.ts      # OpenCode instance lifecycle with workspace reuse
-    port-pool.ts             # Dynamic port allocation
-    workspace-factory.ts     # Workspace creation, config/agent/file CRUD, copy, quota, path sanitization
+    conversation-state.ts     # Event-driven conversation lifecycle with subscription and event replay
+    instance-manager.ts       # OpenCode instance lifecycle with workspace reuse
+    port-pool.ts              # Dynamic port allocation
+    workspace-factory.ts      # Workspace creation, config/agent/file CRUD, copy, quota, path sanitization
+    sse-bridge.ts             # SSEBridge — bridges OpenCode SSE events to conversation state
   services/
-    agent-service.ts         # Agent CRUD and config endpoints
-    config-service.ts        # Config read/write/patch
-    conversation-service.ts  # Conversation lifecycle orchestration (start/stop/restart/delete)
-    file-service.ts          # File CRUD with 50MB quota enforcement
-    message-service.ts       # Message send and history with model parsing
-    role-service.ts          # Role CRUD, permission resolution, config persistence
-    session-service.ts       # Session proxy with ensureReady guard
-    skill-service.ts         # Skill upload, import, CRUD, info
-  opencode-cli/
-    models.ts                # CLI model listing
+    agent-service.ts          # Agent CRUD and config endpoints
+    config-service.ts         # Config read/write/patch
+    conversation-service.ts   # Conversation lifecycle orchestration (start/stop/restart/delete)
+    file-service.ts           # File CRUD with 50MB quota enforcement
+    message-service.ts        # Message send and history with model parsing
+    role-service.ts           # Role CRUD, permission resolution, config persistence
+    session-service.ts        # Session proxy with ensureReady guard
+    skill-service.ts          # Skill upload, import, CRUD, info
+  storage/
+    types.ts                  # StorageBackend, RuntimeAccess interfaces
+    local.ts                  # LocalStorage — file system storage backend
+    index.ts                  # Storage exports
   opencode-http/
-    client.ts                # OpenCode HTTP API client
-    types.ts                 # TypeScript types for OpenCode API
+    client.ts                 # OpenCode HTTP API client
+    types.ts                  # TypeScript types for OpenCode API
+    sse-client.ts             # OpenCodeSSEClient — SSE event stream parser
+    sse-types.ts              # SSE event types and map
+  metrics/
+    registry.ts               # Prometheus metrics (16 custom metrics + Node.js defaults)
   utils/
-    logger.ts                # Structured logging with level/format control
+    errors.ts                 # AppError, ErrorCodes
+    logger.ts                 # Structured logging with level/format control
+    is-container.ts           # isRunningInContainer() — Docker/container detection
+    model-parser.ts           # parseModelString() — model string parsing
   websocket/
-    connection.ts            # JSON-RPC 2.0 WebSocket handler
-    router.ts                # WebSocket routing with 20+ JSON-RPC methods, event pushing, prepared-phase handling
+    connection.ts             # JSON-RPC 2.0 WebSocket handler
+    router.ts                 # WebSocket routing with 20+ JSON-RPC methods, event pushing, permission checks
 ```
 
 ## Technology Stack
@@ -237,7 +253,7 @@ AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES=104857600  # 0 = unlimited
 | `host` | string | '127.0.0.1' | Bind address |
 | `shutdownTimeoutMs` | integer | 15000 | Maximum time in ms for graceful shutdown before force exit |
 | `apiKey` | string | (none) | **Deprecated**: use `apiKeys` instead. Optional bearer token for API authentication. If set alone, treated as admin role. Min 8 characters. |
-| `apiKeys` | array | (none) | Role-based API keys. Each entry: `{ key, role, name? }` where `role` is `admin` or `observer`. Takes precedence over `apiKey`. WebSocket connections authenticate via `?apiKey=<key>` query param or `x-api-key` header. |
+| `apiKeys` | array | (none) | Role-based API keys. Each entry: `{ key, role, name? }` where `role` is `admin`, `user`, or `observer`. Takes precedence over `apiKey`. WebSocket connections authenticate via `?apiKey=<key>` query param or `x-api-key` header. |
 | `roles` | object | (none) | Custom role definitions. Each key is a role name with `{ permissions: string[] }`. Built-in roles (`admin`, `user`, `observer`) cannot be overridden. |
 
 ## Orchestrator Configuration
@@ -252,11 +268,11 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `portRange.start` | integer | 30000 | First port in the dynamic allocation range |
 | `portRange.end` | integer | 30100 | Last port in the dynamic allocation range |
 | `defaultAgentType` | string | 'opencode-direct' | Default agent type — must match the `id` of one runtime entry in `runtimes[]` |
-| `runtimes` | array | `[{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct` or `docker`), and `config` |
+| `runtimes` | array | `[{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode', version: '1.17.8' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct` or `docker`), and `config` |
 | `runtimes[].config.binary` | string | `opencode` | OpenCode CLI command or absolute path |
+| `runtimes[].config.version` | string | (optional) | OpenCode version (used by the version registry) |
 | `runtimes[].config.instanceHost` | string | `'127.0.0.1'` | Hostname used to reach started OpenCode instances (per-runtime, useful for remote Docker hosts) |
-| `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) |
-| `runtimes[].config.docker.containerPort` | integer | (required for docker) | Container port that OpenCode listens on |
+| `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.8`) |
 | `runtimes[].config.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
@@ -295,11 +311,21 @@ curl http://localhost:8080/metrics
 | `agentorchestrator_instances_total_created` | Counter | Total instances created since startup |
 | `agentorchestrator_instances_errors_total` | Counter | Total instance errors (labels: type) |
 | `agentorchestrator_instance_spawn_duration_seconds` | Histogram | Time to spawn an OpenCode instance |
+| `agentorchestrator_instance_evictions_total` | Counter | Total LRU instance evictions |
+| `agentorchestrator_instance_idle_timeouts_total` | Counter | Total idle timeout instance destructions |
 | `agentorchestrator_port_pool_available` | Gauge | Available ports in the dynamic pool |
 | `agentorchestrator_websocket_connections_active` | Gauge | Active WebSocket connections |
 | `agentorchestrator_http_requests_total` | Counter | Total HTTP requests (labels: method, status) |
 | `agentorchestrator_http_request_duration_seconds` | Histogram | HTTP request duration in seconds (labels: method, status) |
 | `agentorchestrator_conversation_state_changes_total` | Counter | Total conversation state transitions (labels: status) |
+| `agentorchestrator_opencode_http_requests_total` | Counter | Total OpenCode HTTP proxy requests (labels: method, path, status) |
+| `agentorchestrator_opencode_http_request_duration_seconds` | Histogram | OpenCode HTTP proxy request duration (labels: method, path) |
+| `agentorchestrator_sse_connections_active` | Gauge | Active SSE connections to OpenCode instances |
+| `agentorchestrator_sse_reconnect_total` | Counter | Total SSE reconnection attempts (labels: status) |
+| `agentorchestrator_messages_sent_total` | Counter | Total messages sent to OpenCode instances (labels: status) |
+| `agentorchestrator_message_send_duration_seconds` | Histogram | Duration of message send operations |
+| `agentorchestrator_workspaces_active` | Gauge | Currently active workspaces |
+| `agentorchestrator_workspace_quota_exceeded_total` | Counter | Total workspace quota exceeded errors |
 | `nodejs_*` | Various | Node.js process metrics (memory, CPU, GC, event loop) |
 
 ### Configuration for Prometheus
@@ -317,7 +343,7 @@ scrape_configs:
 ## Common Commands
 
 ```bash
-npm run dev           # Development mode (tsx watch)
+npm run dev           # Development mode (tsx)
 npm run build         # Compile TypeScript to dist/
 npm start             # Run compiled production build
 npm run test          # Run all unit tests once
@@ -353,7 +379,7 @@ npm run test:e2e:watch      # Watch mode for E2E tests
 ### Docker Build (for orchestrator container)
 ```bash
 docker build -t agent-orchestrator .
-docker run -p 8080:8080 -v /path/to/config:/app/config agent-orchestrator
+docker run -p 8080:8080 agent-orchestrator
 ```
 
 ## CI/CD Infrastructure
