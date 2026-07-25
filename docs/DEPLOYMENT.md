@@ -1,3 +1,5 @@
+> **DEPRECATED**: This file has been reorganized. See [new documentation](user/deployment/) for the updated deployment guide. This file will be removed in a future version.
+
 # Deployment Guide
 
 AgentOrchestrator can be deployed in three ways. Choose the one that fits your workflow.

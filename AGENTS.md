@@ -188,6 +188,7 @@ src/
     conversation-service.ts  # Conversation lifecycle orchestration (start/stop/restart/delete)
     file-service.ts          # File CRUD with 50MB quota enforcement
     message-service.ts       # Message send and history with model parsing
+    role-service.ts          # Role CRUD, permission resolution, config persistence
     session-service.ts       # Session proxy with ensureReady guard
     skill-service.ts         # Skill upload, import, CRUD, info
   opencode-cli/
@@ -205,8 +206,8 @@ src/
 ## Technology Stack
 
 - **Runtime**: Node.js >= 24.0.0
-- **Language**: TypeScript 5.4 (strict mode)
-- **Framework**: Express 4.x
+- **Language**: TypeScript 6.x (strict mode)
+- **Framework**: Express 5.x
 - **WebSocket**: ws 8.x
 - **Testing**: Vitest 4.x
 - **Linting**: ESLint 10.x with typescript-eslint
@@ -237,6 +238,7 @@ AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES=104857600  # 0 = unlimited
 | `shutdownTimeoutMs` | integer | 15000 | Maximum time in ms for graceful shutdown before force exit |
 | `apiKey` | string | (none) | **Deprecated**: use `apiKeys` instead. Optional bearer token for API authentication. If set alone, treated as admin role. Min 8 characters. |
 | `apiKeys` | array | (none) | Role-based API keys. Each entry: `{ key, role, name? }` where `role` is `admin` or `observer`. Takes precedence over `apiKey`. WebSocket connections authenticate via `?apiKey=<key>` query param or `x-api-key` header. |
+| `roles` | object | (planned) | **Not yet implemented.** Planned: role definitions with permission arrays. Currently only `admin` and `observer` roles are supported. |
 
 ## Orchestrator Configuration
 
@@ -249,8 +251,8 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `idleSweepIntervalMs` | integer | 60000 | How often the background sweep checks for idle instances |
 | `portRange.start` | integer | 30000 | First port in the dynamic allocation range |
 | `portRange.end` | integer | 30100 | Last port in the dynamic allocation range |
-| `defaultAgentType` | string | 'opencode' | Default agent type — must match the `id` of one runtime entry in `runtimes[]` |
-| `runtimes` | array | `[{ id: 'opencode', type: 'direct', config: { binary: 'opencode' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct` or `docker`), and `config` |
+| `defaultAgentType` | string | 'opencode-direct' | Default agent type — must match the `id` of one runtime entry in `runtimes[]` |
+| `runtimes` | array | `[{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct` or `docker`), and `config` |
 | `runtimes[].config.binary` | string | `opencode` | OpenCode CLI command or absolute path |
 | `runtimes[].config.instanceHost` | string | `'127.0.0.1'` | Hostname used to reach started OpenCode instances (per-runtime, useful for remote Docker hosts) |
 | `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.4`) |

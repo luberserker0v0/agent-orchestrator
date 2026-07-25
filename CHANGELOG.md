@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- docs: restructure documentation into user/developer/architecture paths
+- docs: translate all documentation to English (deprecate Chinese files)
+- docs: fix Express version (4.x → 5.x) in AGENTS.md
+- docs: fix TypeScript version (5.4 → 6.x) in AGENTS.md
+- docs: fix default runtime ID ('opencode' → 'opencode-direct') in AGENTS.md
+- docs: slim root README.md to landing page pointing to docs/
+
 ### Added
 - feat(rbac): add role-based access control with `server.apiKeys` config array supporting `admin` and `observer` roles
 - feat(rbac): backward-compatible `server.apiKey` treated as admin role when `apiKeys` is not set
@@ -14,12 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(rbac): observer role restricted to GET-only (read) operations; all mutating routes require admin
 - feat(rbac): WebSocket upgrade validates apiKey via query param or `x-api-key` header
 - feat(rbac): WebSocket write methods blocked for observer role
+- feat(rbac): add `user` role for conversation services — user can create/start/stop/restart conversations, send messages, manage files/sessions/skills, but cannot manage roles or other users
+- feat(rbac): add permission-based RBAC model with `resource:action` format (e.g. `conversation:start`, `message:send`, `role:write`)
+- feat(rbac): add `roles` config section to `server` — defines role permissions, persisted to config file at runtime
+- feat(rbac): add `RoleService` for role CRUD with config file persistence and runtime resolution
+- feat(rbac): add `GET /api/roles`, `POST /api/roles`, `PUT /api/roles/:name`, `DELETE /api/roles/:name` endpoints for dynamic role management (admin-only)
+- feat(rbac): HTTP auth middleware and WebSocket router check permissions against role definitions instead of hardcoded admin/observer
 - feat(dashboard): add built-in SPA dashboard at `/dashboard` for observing conversation events and messages
 - feat(dashboard): login page with API key authentication
 - feat(dashboard): conversation list with status, port, agent type, and age
 - feat(dashboard): conversation detail with event timeline and message history
 - feat(dashboard): real-time WebSocket event streaming in detail view
-- feat(dashboard): role-aware UI — admin sees controls, observer sees read-only view
+- feat(dashboard): role-aware UI — admin sees controls, user sees controls, observer sees read-only view
 - feat(metrics): add LRU eviction metric (`instance_evictions_total`) for capacity pressure visibility
 - feat(metrics): add idle timeout metric (`instance_idle_timeouts_total`) for resource recycling visibility
 - feat(metrics): add active workspaces metric (`workspaces_active`) for workspace lifecycle tracking
@@ -69,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - fix(e2e): add StorageBackend to WorkspaceFactory in e2e server helper (pre-existing crash)
 - fix(e2e): add setOnDestroyed callback to e2e server helper (pre-existing — state never transitioned to stopped on eviction/crash/timeout)
+- fix(docker): add `dashboard/` directory to Dockerfile template — dashboard was inaccessible in Docker containers
+- fix(dashboard): use `process.cwd()` for dashboard path resolution to work across tsx dev and tsc production modes
 
 ### Changed
 

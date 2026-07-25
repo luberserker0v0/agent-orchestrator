@@ -1,3 +1,5 @@
+> **DEPRECATED**: This file has been reorganized. See [new documentation](architecture/) for the updated architecture overview. This file will be removed in a future version.
+
 # 架構說明
 
 ## 概覽

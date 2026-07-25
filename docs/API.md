@@ -1,12 +1,16 @@
+> **DEPRECATED**: This file has been reorganized. See [new documentation](api/) for the updated API reference. This file will be removed in a future version.
+
 # API 文件
 
 AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介面。
 
 > **認證說明**：若伺服器設定了 `server.apiKeys`（設定檔），所有請求（除 `/health`、`/metrics`、`/api-docs*`、`/dashboard*` 外）需要在 HTTP 標頭中包含 `Authorization: Bearer <apiKey>`。
 >
-> **角色權限**：`apiKeys` 中每個 key 有 `role` 欄位（`admin` 或 `observer`）。Admin 擁有完整操作權限，Observer 只能進行 GET 讀取操作。向後兼容：若只設定 `server.apiKey`（字串），等同 admin 角色。
+> **角色權限**：`apiKeys` 中每個 key 有 `role` 欄位（`admin`、`user` 或 `observer`）。Admin 擁有完整操作權限包括角色管理；User 可操作對話（建立/啟動/停止/重啟）、發送訊息、管理檔案/Session/Skill；Observer 只能進行 GET 讀取操作。向後兼容：若只設定 `server.apiKey`（字串），等同 admin 角色。
 >
-> **WebSocket 認證**：WS 連接需在 URL query string 中帶入 `apiKey` 參數（例如 `ws://host/ws/conv-001?apiKey=xxx`），或在 HTTP 升級請求中帶入 `x-api-key` 標頭。
+> **權限模型**：角色透過 `server.roles` 定義，每個角色包含 `permissions` 陣列，格式為 `resource:action`（如 `conversation:start`、`message:send`、`role:write`）。Admin 角色使用 `["*"]` 表示全部權限。角色可透過 REST API 動態新增/修改/刪除，變更會持久化到設定檔。
+>
+> **WebSocket 認證**：WS 連接需在 URL query string 中帶入 `apiKey` 參數（例如 `ws://host/ws/conv-001?apiKey=xxx`），或在 HTTP 升級請求中帶入 `x-api-key` 標頭。User 和 Observer 角色的連線根據權限限制可執行的 WS 方法。
 
 ---
 
@@ -31,6 +35,176 @@ AgentOrchestrator 提供 REST API 與 WebSocket API（JSON-RPC 2.0）兩種介�
 ```json
 { "role": "admin", "name": "Admin" }
 ```
+---
+
+### 角色管理 API（RBAC）
+
+以下端點用於動態管理角色定義。角色變更會即時生效並持久化到設定檔。
+
+#### `GET /api/roles`
+
+列出所有已定義的角色及其權限。
+
+**權限**：所有已認證使用者
+
+**回應**（`200 OK`）：
+```json
+{
+  "roles": {
+    "admin": {
+      "permissions": ["*"]
+    },
+    "user": {
+      "permissions": [
+        "conversation:create", "conversation:start", "conversation:stop",
+        "conversation:restart", "conversation:read", "conversation:list",
+        "message:send", "message:read",
+        "config:read", "config:write",
+        "agent:read", "file:read", "file:write", "file:delete",
+        "session:read", "session:create", "session:delete",
+        "skill:read", "skill:import", "skill:delete"
+      ]
+    },
+    "observer": {
+      "permissions": [
+        "conversation:read", "conversation:list",
+        "message:read",
+        "config:read",
+        "agent:read",
+        "session:read",
+        "skill:read"
+      ]
+    }
+  }
+}
+```
+
+---
+
+#### `POST /api/roles`
+
+新增角色。已有同名角色會回傳 409。
+
+**權限**：admin
+
+**請求**：
+```json
+{
+  "name": "moderator",
+  "permissions": [
+    "conversation:read", "conversation:list",
+    "conversation:start", "conversation:stop",
+    "message:read", "message:send",
+    "agent:read"
+  ]
+}
+```
+
+- `name`（必填）：角色名稱，只允許 `[A-Za-z0-9_-]`，最大 32 字元
+- `permissions`（必填）：權限陣列，格式為 `resource:action`
+
+**回應**（`201 Created`）：
+```json
+{
+  "name": "moderator",
+  "permissions": [
+    "conversation:read", "conversation:list",
+    "conversation:start", "conversation:stop",
+    "message:read", "message:send",
+    "agent:read"
+  ]
+}
+```
+
+**錯誤**：
+- `400`：名稱格式無效或缺少欄位
+  ```json
+  { "error": { "code": "INVALID_ROLE_NAME", "message": "Role name must match [A-Za-z0-9_-]{1,32}" } }
+  ```
+- `409`：角色已存在
+  ```json
+  { "error": { "code": "ROLE_ALREADY_EXISTS", "message": "Role 'moderator' already exists" } }
+  ```
+
+---
+
+#### `PUT /api/roles/:name`
+
+更新角色權限。角色名稱不可變更（如需改名，請刪除後重建）。
+
+**權限**：admin
+
+**請求**：
+```json
+{
+  "permissions": [
+    "conversation:read", "conversation:list",
+    "message:read"
+  ]
+}
+```
+
+**回應**（`200 OK`）：
+```json
+{
+  "name": "moderator",
+  "permissions": [
+    "conversation:read", "conversation:list",
+    "message:read"
+  ]
+}
+```
+
+**錯誤**：
+- `404`：角色不存在
+  ```json
+  { "error": { "code": "ROLE_NOT_FOUND", "message": "Role 'moderator' not found" } }
+  ```
+- `400`：嘗試修改 `admin` 角色的 `*` 權限
+  ```json
+  { "error": { "code": "CANNOT_MODIFY_ADMIN", "message": "Cannot modify admin role permissions" } }
+  ```
+
+---
+
+#### `DELETE /api/roles/:name`
+
+刪除角色。不可刪除 `admin` 角色。
+
+**權限**：admin
+
+**回應**（`204 No Content`）
+
+**錯誤**：
+- `404`：角色不存在
+- `400`：嘗試刪除 admin 角色
+  ```json
+  { "error": { "code": "CANNOT_DELETE_ADMIN", "message": "Cannot delete admin role" } }
+  ```
+
+---
+
+### 權限模型
+
+每個角色包含 `permissions` 陣列，格式為 `resource:action`：
+
+| Resource | Actions | 說明 |
+|----------|---------|------|
+| `conversation` | `create`, `start`, `stop`, `restart`, `read`, `list`, `delete` | 對話生命週期管理 |
+| `message` | `send`, `read` | 訊息發送與讀取 |
+| `config` | `read`, `write` | opencode.json 讀寫 |
+| `agent` | `read`, `write`, `delete` | Agent 定義管理 |
+| `file` | `read`, `write`, `delete`, `copy` | Workspace 檔案操作 |
+| `session` | `read`, `create`, `delete` | OpenCode Session 管理 |
+| `skill` | `read`, `import`, `delete` | Skill 管理 |
+| `role` | `read`, `write` | 角色管理（僅 admin） |
+
+Admin 角色使用 `["*"]` 表示全部權限。其他角色需明確列出所需權限。
+
+**預設角色權限**：
+- **admin**：`["*"]`（全部權限，包括角色管理）
+- **user**：對話操作 + 訊息發送 + 設定/檔案/Session/Skill 讀寫
+- **observer**：僅讀取（列出/檢視對話、訊息、設定、Agent、Session、Skill）
 
 ---
 
@@ -986,7 +1160,7 @@ references/capabilities.md
 
 連線 URL：`ws://<host>:<port>/ws/<conversationId>?apiKey=<key>`
 
-> **認證**：若伺服器設定了 `apiKeys`，WebSocket 升級時需帶入 `apiKey` query 參數或 `x-api-key` 標頭。Observer 角色的連線不能執行寫操作（`message.send`、`config.update` 等）。
+> **認證**：若伺服器設定了 `apiKeys`，WebSocket 升級時需帶入 `apiKey` query 參數或 `x-api-key` 標頭。根據角色權限限制可執行的 WS 方法：Admin 可執行全部方法；User 可執行對話操作、訊息、檔案、Session、Skill 相關方法；Observer 只能執行唯讀方法（如 `message.history`、`conversation.status`）。
 
 所有訊息採用 JSON-RPC 2.0 格式。
 
@@ -2064,6 +2238,13 @@ You are a senior UI/UX designer. Your responsibilities include:
 | `AGENT_NOT_FOUND` | 404 | Agent 不存在 |
 | `WORKSPACE_QUOTA_EXCEEDED` | 413 | Workspace 配額超額 |
 | `INVALID_TEXT` | 400 | 無效的 text 欄位 |
+| `UNAUTHORIZED` | 401 | 缺少或無效的 API key |
+| `FORBIDDEN` | 403 | 權限不足（角色無此操作權限） |
+| `INVALID_ROLE_NAME` | 400 | 角色名稱格式無效 |
+| `ROLE_NOT_FOUND` | 404 | 角色不存在 |
+| `ROLE_ALREADY_EXISTS` | 409 | 角色已存在 |
+| `CANNOT_MODIFY_ADMIN` | 400 | 不可修改 admin 角色權限 |
+| `CANNOT_DELETE_ADMIN` | 400 | 不可刪除 admin 角色 |
 | `INTERNAL_ERROR` | 500 | 內部伺服器錯誤（未預期） |
 
 ### WebSocket JSON-RPC 錯誤

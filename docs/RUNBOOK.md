@@ -1,3 +1,5 @@
+> **DEPRECATED**: This file has been reorganized. See [new documentation](user/runbook/) for the updated runbook. This file will be removed in a future version.
+
 # Runbook: AgentOrchestrator 維運指南
 
 ## 啟動與停止
