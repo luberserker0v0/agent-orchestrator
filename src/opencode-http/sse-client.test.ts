@@ -241,6 +241,57 @@ describe('OpenCodeSSEClient', () => {
       expect(receivedEvents).toHaveLength(1);
       expect(receivedEvents[0].properties).toEqual({ valid: true });
     });
+
+    it('handles \\r\\n line endings', async () => {
+      const events = [
+        'event: server.connected\r\ndata: {"version":"1.0.0"}\r\n\r\n',
+        'event: session.created\r\ndata: {"session":{"id":"ses_1"}}\r\n\r\n',
+      ];
+
+      fetchFn = vi.fn().mockResolvedValue(createSSEResponse(events));
+      vi.stubGlobal('fetch', fetchFn);
+
+      const receivedEvents: SSEEvent[] = [];
+      const subscribePromise = client.subscribe((event) => {
+        receivedEvents.push(event);
+        if (receivedEvents.length >= 2) {
+          client.disconnect();
+        }
+      });
+
+      await vi.runAllTimersAsync();
+      await subscribePromise;
+
+      expect(receivedEvents).toHaveLength(2);
+      expect(receivedEvents[0].type).toBe('server.connected');
+      expect(receivedEvents[0].properties).toEqual({ version: '1.0.0' });
+      expect(receivedEvents[1].type).toBe('session.created');
+    });
+
+    it('handles mixed \\n and \\r\\n line endings', async () => {
+      const events = [
+        'event: test\ndata: {"a":1}\r\n\r\n',
+        'event: test2\r\ndata: {"b":2}\n\n',
+      ];
+
+      fetchFn = vi.fn().mockResolvedValue(createSSEResponse(events));
+      vi.stubGlobal('fetch', fetchFn);
+
+      const receivedEvents: SSEEvent[] = [];
+      const subscribePromise = client.subscribe((event) => {
+        receivedEvents.push(event);
+        if (receivedEvents.length >= 2) {
+          client.disconnect();
+        }
+      });
+
+      await vi.runAllTimersAsync();
+      await subscribePromise;
+
+      expect(receivedEvents).toHaveLength(2);
+      expect(receivedEvents[0].properties).toEqual({ a: 1 });
+      expect(receivedEvents[1].properties).toEqual({ b: 2 });
+    });
   });
 
   describe('reconnection', () => {

@@ -66,6 +66,13 @@ export async function main(cliArgs?: string[]) {
         '(e.g., "docker-volume") that supports volume sharing between containers.'
       );
     }
+    if (defaultEntry?.type === 'docker' && !defaultEntry.config.instanceHost) {
+      logger.warn(
+        'AO is running inside a container with Docker runtime. The default instanceHost "127.0.0.1" ' +
+        'may not reach OpenCode containers. Set instanceHost to "host.docker.internal" or use ' +
+        'networkMode "host" in your runtime config if SSE events are not received.'
+      );
+    }
   }
   const canonicalConfig = loadCanonicalConfig(config.workspace.enforceCanonicalConfig);
   logger.info('Configuration loaded');

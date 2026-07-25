@@ -102,7 +102,8 @@ export class OpenCodeSSEClient {
   }
 
   private parseSSEBuffer(buffer: string): { parsed: SSEEvent[]; remaining: string } {
-    const lines = buffer.split('\n');
+    const normalized = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
     const remaining = lines.pop() || '';
     const parsed: SSEEvent[] = [];
     let currentEvent: Partial<SSEEvent> = {};

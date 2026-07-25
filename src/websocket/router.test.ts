@@ -91,6 +91,7 @@ describe('WSRouter', () => {
     mockConversationState = {
       has: vi.fn().mockReturnValue(true),
       get: vi.fn().mockReturnValue({ status: 'running', ready: true, port: 30000 }),
+      getRecentEvents: vi.fn().mockReturnValue([]),
       markNeedsRestart: vi.fn(),
       emitEvent: vi.fn(),
       subscribe: vi.fn().mockReturnValue(() => {}),
@@ -226,6 +227,28 @@ describe('WSRouter', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(mockWs.close).toHaveBeenCalledWith(1011, 'Conversation not found');
+  });
+
+  it('replays recent events on connection', async () => {
+    const mockWs = createMockWebSocket();
+    mockConversationState.getRecentEvents.mockReturnValue([
+      { type: 'conversation.prepared', id: 'conv-001', timestamp: 1000, payload: { status: 'prepared' } },
+      { type: 'conversation.starting', id: 'conv-001', timestamp: 2000, payload: { status: 'starting' } },
+    ]);
+
+    mockWss.emit('connection', mockWs, createMockReq('/ws/conv-001'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    const sendCalls = mockWs.send.mock.calls as string[][];
+    const replayEvents = sendCalls.filter((call) => {
+      try {
+        const parsed = JSON.parse(call[0]);
+        return parsed.method === 'conversation.prepared' || parsed.method === 'conversation.starting';
+      } catch {
+        return false;
+      }
+    });
+    expect(replayEvents).toHaveLength(2);
   });
 
   it('uses existing instance without creating new one', async () => {

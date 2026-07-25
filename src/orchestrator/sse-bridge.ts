@@ -44,6 +44,8 @@ export class SSEBridge {
 
     client.subscribe((event) => {
       this.handleEvent(id, event);
+    }).catch((err) => {
+      logger.error(`SSE subscription error for ${id}: ${(err as Error).message}`);
     });
 
     this.clients.set(id, client);
