@@ -187,7 +187,7 @@ describe('dashboard subcommand', () => {
   beforeEach(() => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockedExec.mockReset();
-    mockedExec.mockImplementation((_cmd: string, cb: (err: Error | null) => void) => cb(null));
+    mockedExec.mockImplementation(((_cmd: string, cb: (err: Error | null) => void) => cb(null)) as never);
   });
 
   afterEach(() => {
@@ -232,10 +232,10 @@ describe('dashboard subcommand', () => {
   });
 
   it('logs warning when exec fails', async () => {
-    mockedExec.mockImplementation((_cmd: string, cb: (err: Error | null) => void) => {
+    mockedExec.mockImplementation(((_cmd: string, cb: (err: Error | null) => void) => {
       cb(new Error('Browser not found'));
       return {} as never;
-    });
+    }) as never);
 
     await handleSubcommand({ subcommand: 'dashboard', subcommandArgs: [], port: 3000 });
     await new Promise(r => setTimeout(r, 200));
@@ -262,7 +262,7 @@ describe('runtime list output', () => {
     await handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['list'] });
     await new Promise(r => setTimeout(r, 200));
 
-    const allOutput = consoleLogSpy.mock.calls.map(c => String(c[0])).join('\n');
+    const allOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
     expect(allOutput).toContain('opencode-direct');
   });
 
@@ -270,7 +270,7 @@ describe('runtime list output', () => {
     await handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['info', 'opencode-direct'] });
     await new Promise(r => setTimeout(r, 200));
 
-    const allOutput = consoleLogSpy.mock.calls.map(c => String(c[0])).join('\n');
+    const allOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
     expect(allOutput).toContain('Runtime: opencode-direct');
     expect(allOutput).toContain('Type: direct');
   });
