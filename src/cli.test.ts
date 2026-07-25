@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { parseCliArgs, handleSubcommand, printHelp } from './cli.js';
+import { exec } from 'node:child_process';
+
+vi.mock('node:child_process', () => ({
+  exec: vi.fn((_cmd: string, cb: (err: Error | null) => void) => cb(null)),
+}));
+
+const mockedExec = vi.mocked(exec);
 
 describe('parseCliArgs', () => {
   it('returns empty options for no args', () => {
@@ -74,6 +81,40 @@ describe('parseCliArgs', () => {
     expect(result.subcommand).toBe('help');
     expect(result.subcommandArgs).toEqual([]);
   });
+
+  it('handles multiple options together', () => {
+    const result = parseCliArgs(['--port', '3000', '--host', '0.0.0.0', '--config', './my.json']);
+    expect(result.port).toBe(3000);
+    expect(result.host).toBe('0.0.0.0');
+    expect(result.configPath).toBe('./my.json');
+  });
+
+  it('handles subcommand after options (non-flag after flags)', () => {
+    const result = parseCliArgs(['--port', '3000', 'dashboard']);
+    expect(result.port).toBe(3000);
+    expect(result.subcommand).toBe('dashboard');
+    expect(result.subcommandArgs).toEqual([]);
+  });
+
+  it('handles port at end of args (no value after flag)', () => {
+    const result = parseCliArgs(['--port']);
+    expect(result.port).toBeUndefined();
+  });
+
+  it('handles host at end of args (no value after flag)', () => {
+    const result = parseCliArgs(['--host']);
+    expect(result.host).toBeUndefined();
+  });
+
+  it('handles config at end of args (no value after flag)', () => {
+    const result = parseCliArgs(['--config']);
+    expect(result.configPath).toBeUndefined();
+  });
+
+  it('handles unknown flags gracefully', () => {
+    const result = parseCliArgs(['--unknown']);
+    expect(result).toEqual({});
+  });
 });
 
 describe('handleSubcommand', () => {
@@ -117,14 +158,13 @@ describe('handleSubcommand', () => {
   });
 
   it('handles runtime list by triggering async load', async () => {
-    handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['list'] });
-    // The async handler is triggered inside; we verify it returns true immediately
-    expect(consoleLogSpy).not.toHaveBeenCalled();
+    const result = await handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['list'] });
+    expect(result).toBe(true);
   });
 
   it('handles runtime info by triggering async load', async () => {
-    handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['info', 'some-rt'] });
-    expect(consoleLogSpy).not.toHaveBeenCalled();
+    const result = await handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['info', 'some-rt'] });
+    expect(result).toBe(true);
   });
 });
 
@@ -138,5 +178,107 @@ describe('printHelp', () => {
     expect(output).toContain('runtime list');
     expect(output).toContain('runtime info <id>');
     spy.mockRestore();
+  });
+});
+
+describe('dashboard subcommand', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockedExec.mockReset();
+    mockedExec.mockImplementation(((_cmd: string, cb: (err: Error | null) => void) => cb(null)) as never);
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+  });
+
+  it('opens dashboard with provided port', async () => {
+    await handleSubcommand({ subcommand: 'dashboard', subcommandArgs: [], port: 5555 });
+    await new Promise(r => setTimeout(r, 200));
+
+    expect(mockedExec).toHaveBeenCalled();
+    const cmd = mockedExec.mock.calls[mockedExec.mock.calls.length - 1][0] as string;
+    expect(cmd).toContain('5555');
+    expect(cmd).toContain('/dashboard');
+  });
+
+  it('opens dashboard with host 0.0.0.0 uses localhost', async () => {
+    await handleSubcommand({ subcommand: 'dashboard', subcommandArgs: [], host: '0.0.0.0' });
+    await new Promise(r => setTimeout(r, 200));
+
+    expect(mockedExec).toHaveBeenCalled();
+    const cmd = mockedExec.mock.calls[mockedExec.mock.calls.length - 1][0] as string;
+    expect(cmd).toContain('localhost');
+  });
+
+  it('opens dashboard with custom host', async () => {
+    await handleSubcommand({ subcommand: 'dashboard', subcommandArgs: [], host: '192.168.1.100' });
+    await new Promise(r => setTimeout(r, 200));
+
+    expect(mockedExec).toHaveBeenCalled();
+    const cmd = mockedExec.mock.calls[mockedExec.mock.calls.length - 1][0] as string;
+    expect(cmd).toContain('192.168.1.100');
+  });
+
+  it('opens dashboard with default host 127.0.0.1', async () => {
+    await handleSubcommand({ subcommand: 'dashboard', subcommandArgs: [], port: 3000 });
+    await new Promise(r => setTimeout(r, 200));
+
+    expect(mockedExec).toHaveBeenCalled();
+    const cmd = mockedExec.mock.calls[mockedExec.mock.calls.length - 1][0] as string;
+    expect(cmd).toContain('127.0.0.1');
+  });
+
+  it('logs warning when exec fails', async () => {
+    mockedExec.mockImplementation(((_cmd: string, cb: (err: Error | null) => void) => {
+      cb(new Error('Browser not found'));
+      return {} as never;
+    }) as never);
+
+    await handleSubcommand({ subcommand: 'dashboard', subcommandArgs: [], port: 3000 });
+    await new Promise(r => setTimeout(r, 200));
+
+    expect(consoleLogSpy).toHaveBeenCalled();
+  });
+});
+
+describe('runtime list output', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('prints runtime list with entries', async () => {
+    await handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['list'] });
+    await new Promise(r => setTimeout(r, 200));
+
+    const allOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
+    expect(allOutput).toContain('opencode-direct');
+  });
+
+  it('prints runtime info for existing runtime', async () => {
+    await handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['info', 'opencode-direct'] });
+    await new Promise(r => setTimeout(r, 200));
+
+    const allOutput = consoleLogSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
+    expect(allOutput).toContain('Runtime: opencode-direct');
+    expect(allOutput).toContain('Type: direct');
+  });
+
+  it('prints error for non-existing runtime', async () => {
+    await handleSubcommand({ subcommand: 'runtime', subcommandArgs: ['info', 'nonexistent'] });
+    await new Promise(r => setTimeout(r, 200));
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Runtime "nonexistent" not found in config.');
   });
 });
