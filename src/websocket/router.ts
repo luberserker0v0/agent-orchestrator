@@ -133,6 +133,11 @@ export class WSRouter {
     wsConnectionsActive.inc();
     logger.info(`WS connection established: ${conversationId}`);
 
+    const recentEvents = this.conversationState.getRecentEvents(conversationId);
+    for (const event of recentEvents) {
+      connection.sendEvent(event.type, event.payload);
+    }
+
     const unsub = this.conversationState.subscribe(conversationId, (event) => {
       connection.sendEvent(event.type, event.payload);
       if (event.type === 'conversation.destroyed') {

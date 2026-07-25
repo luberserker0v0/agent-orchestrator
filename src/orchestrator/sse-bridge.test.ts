@@ -4,7 +4,7 @@ import { ConversationState } from './conversation-state.js';
 
 const { mockDisconnectFn, mockSubscribeFn } = vi.hoisted(() => ({
   mockDisconnectFn: vi.fn(),
-  mockSubscribeFn: vi.fn().mockResolvedValue(undefined),
+  mockSubscribeFn: vi.fn().mockReturnValue(Promise.resolve()),
 }));
 
 vi.mock('../opencode-http/sse-client.js', () => ({
@@ -47,6 +47,14 @@ describe('SSEBridge', () => {
       const disabledBridge = new SSEBridge(conversationState, { enabled: false });
       disabledBridge.start('conv-1', 'http://localhost:3000');
       expect(mockSubscribeFn).not.toHaveBeenCalled();
+    });
+
+    it('catches subscribe rejection', async () => {
+      mockSubscribeFn.mockReturnValueOnce(Promise.reject(new Error('Connection failed')));
+      bridge.start('conv-1', 'http://localhost:3000', 'user', 'pass');
+      await vi.waitFor(() => {
+        expect(mockSubscribeFn).toHaveBeenCalled();
+      });
     });
   });
 
