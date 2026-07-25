@@ -51,97 +51,88 @@ Protects communication between OpenCode and AI providers.
 
 ## Authorization (RBAC)
 
-AgentOrchestrator implements role-based access control with two built-in roles.
+AgentOrchestrator implements role-based access control with three built-in roles. RBAC is **optional** — if no `apiKeys` are configured, all requests are allowed without authentication.
 
 ### Roles
 
 | Role | Permissions | Description |
 |------|-------------|-------------|
-| `admin` | `["*"]` | Full access to all endpoints, including mutation |
-| `observer` | Read-only | Can view conversations, agents, files, sessions; cannot modify |
+| `admin` | `["*"]` | Full access to all endpoints, including role management |
+| `user` | 16 write permissions | Can start conversations, send messages, manage files and sessions |
+| `observer` | 13 read permissions | Can view conversations, agents, files, sessions; cannot modify |
 
-**Note:** A `user` role with fine-grained permissions is planned but not yet implemented.
+Custom roles can be created via the REST API or config file. See [RBAC Guide](../user/rbac/) for details.
 
-### Permission Matrix
+### Permission Format
 
-#### HTTP Endpoints
+Permissions use the format `resource:action` (e.g. `conversation:start`, `message:send`). The `admin` role uses `["*"]` to grant all permissions.
 
-| Endpoint | Admin | Observer |
-|----------|-------|----------|
-| `GET /health` | Yes | Yes |
-| `GET /metrics` | Yes | Yes |
-| `GET /api/runtimes` | Yes | Yes |
-| `GET /api/auth/role` | Yes | Yes |
-| `GET /api/conversations` | Yes | Yes |
-| `GET /api/conversations/:id` | Yes | Yes |
-| `GET /api/conversations/:id/events` | Yes | Yes |
-| `POST /api/conversations` | Yes | No |
-| `POST /api/conversations/:id/start` | Yes | No |
-| `POST /api/conversations/:id/stop` | Yes | No |
-| `POST /api/conversations/:id/restart` | Yes | No |
-| `DELETE /api/conversations/:id` | Yes | No |
-| `GET /api/conversations/:id/config` | Yes | Yes |
-| `POST /api/conversations/:id/config` | Yes | No |
-| `PATCH /api/conversations/:id/config` | Yes | No |
-| `PUT /api/conversations/:id/agents` | Yes | No |
-| `GET /api/conversations/:id/agents` | Yes | Yes |
-| `GET /api/conversations/:id/agents/:name` | Yes | Yes |
-| `DELETE /api/conversations/:id/agents/:name` | Yes | No |
-| `PUT /api/conversations/:id/files` | Yes | No |
-| `POST /api/conversations/:id/files/read` | Yes | Yes |
-| `POST /api/conversations/:id/files/delete` | Yes | No |
-| `POST /api/conversations/:id/files/copy` | Yes | No |
-| `POST /api/conversations/:id/files/list` | Yes | Yes |
-| `POST /api/conversations/:id/sessions` | Yes | No |
-| `GET /api/conversations/:id/sessions` | Yes | Yes |
-| `GET /api/conversations/:id/sessions/:sid` | Yes | Yes |
-| `DELETE /api/conversations/:id/sessions/:sid` | Yes | No |
-| `POST /api/conversations/:id/message` | Yes | No |
-| `POST /api/conversations/:id/skills/upload` | Yes | No |
-| `POST /api/conversations/:id/skills/import` | Yes | No |
-| `GET /api/conversations/:id/skills` | Yes | Yes |
-| `GET /api/conversations/:id/skills/:name` | Yes | Yes |
-| `DELETE /api/conversations/:id/skills/:name` | Yes | No |
+### HTTP Permission Matrix
 
-#### WebSocket Methods
+| Endpoint | Permission | Admin | User | Observer |
+|----------|-----------|-------|------|----------|
+| `GET *` | (none) | Yes | Yes | Yes |
+| `POST /api/conversations` | `conversation:start` | Yes | Yes | No |
+| `POST /api/conversations/:id/start` | `conversation:start` | Yes | Yes | No |
+| `POST /api/conversations/:id/stop` | `conversation:stop` | Yes | Yes | No |
+| `POST /api/conversations/:id/restart` | `conversation:restart` | Yes | Yes | No |
+| `DELETE /api/conversations/:id` | `conversation:delete` | Yes | Yes | No |
+| `POST /api/conversations/:id/config` | `config:write` | Yes | Yes | No |
+| `PUT /api/conversations/:id/agents` | `agent:write` | Yes | Yes | No |
+| `DELETE /api/conversations/:id/agents/:name` | `agent:delete` | Yes | Yes | No |
+| `PUT /api/conversations/:id/files` | `file:write` | Yes | Yes | No |
+| `POST /api/conversations/:id/files/delete` | `file:delete` | Yes | Yes | No |
+| `POST /api/conversations/:id/files/copy` | `file:copy` | Yes | Yes | No |
+| `POST /api/conversations/:id/sessions` | `session:create` | Yes | Yes | No |
+| `DELETE /api/conversations/:id/sessions/:sid` | `session:delete` | Yes | Yes | No |
+| `POST /api/conversations/:id/sessions/:sid/fork` | `session:fork` | Yes | Yes | No |
+| `POST /api/conversations/:id/sessions/abort` | `session:abort` | Yes | Yes | No |
+| `POST /api/conversations/:id/skills/import` | `skill:import` | Yes | Yes | No |
+| `POST /api/conversations/:id/skills/upload` | `skill:import` | Yes | Yes | No |
+| `DELETE /api/conversations/:id/skills/:name` | `skill:delete` | Yes | Yes | No |
+| `POST /api/roles` | `role:write` | Yes | No | No |
+| `PUT /api/roles/:name` | `role:write` | Yes | No | No |
+| `DELETE /api/roles/:name` | `role:write` | Yes | No | No |
 
-| Method | Admin | Observer |
-|--------|-------|----------|
-| `message.history` | Yes | Yes |
-| `config.get` | Yes | Yes |
-| `agent.list` | Yes | Yes |
-| `agent.get` | Yes | Yes |
-| `agent.config.get` | Yes | Yes |
-| `file.read` | Yes | Yes |
-| `file.list` | Yes | Yes |
-| `session.list` | Yes | Yes |
-| `session.get` | Yes | Yes |
-| `session.children` | Yes | Yes |
-| `providers.list` | Yes | Yes |
-| `skills.list` | Yes | Yes |
-| `skills.get` | Yes | Yes |
-| `skills.info` | Yes | Yes |
-| `conversation.status` | Yes | Yes |
-| `message.send` | Yes | No |
-| `config.update` | Yes | No |
-| `config.patch` | Yes | No |
-| `agent.register` | Yes | No |
-| `agent.delete` | Yes | No |
-| `agent.config.write` | Yes | No |
-| `agent.config.delete` | Yes | No |
-| `file.write` | Yes | No |
-| `file.delete` | Yes | No |
-| `file.copy` | Yes | No |
-| `session.create` | Yes | No |
-| `session.delete` | Yes | No |
-| `session.fork` | Yes | No |
-| `session.abort` | Yes | No |
-| `skills.import` | Yes | No |
-| `skills.delete` | Yes | No |
-| `conversation.start` | Yes | No |
-| `conversation.stop` | Yes | No |
-| `conversation.restart` | Yes | No |
-| `conversation.delete` | Yes | No |
+### WebSocket Permission Matrix
+
+| Method | Permission | Admin | User | Observer |
+|--------|-----------|-------|------|----------|
+| `message.send` | `message:send` | Yes | Yes | No |
+| `config.update` | `config:write` | Yes | Yes | No |
+| `config.patch` | `config:write` | Yes | Yes | No |
+| `agent.register` | `agent:write` | Yes | Yes | No |
+| `agent.delete` | `agent:delete` | Yes | Yes | No |
+| `agent.config.write` | `agent:write` | Yes | Yes | No |
+| `agent.config.delete` | `agent:delete` | Yes | Yes | No |
+| `file.write` | `file:write` | Yes | Yes | No |
+| `file.delete` | `file:delete` | Yes | Yes | No |
+| `file.copy` | `file:copy` | Yes | Yes | No |
+| `session.create` | `session:create` | Yes | Yes | No |
+| `session.delete` | `session:delete` | Yes | Yes | No |
+| `session.fork` | `session:fork` | Yes | Yes | No |
+| `session.abort` | `session:abort` | Yes | Yes | No |
+| `skills.import` | `skill:import` | Yes | Yes | No |
+| `skills.delete` | `skill:delete` | Yes | Yes | No |
+| `conversation.start` | `conversation:start` | Yes | Yes | No |
+| `conversation.stop` | `conversation:stop` | Yes | Yes | No |
+| `conversation.restart` | `conversation:restart` | Yes | Yes | No |
+| `conversation.delete` | `conversation:delete` | Yes | Yes | No |
+| `message.history` | (none) | Yes | Yes | Yes |
+| `config.get` | (none) | Yes | Yes | Yes |
+| `agent.list` | (none) | Yes | Yes | Yes |
+| `agent.get` | (none) | Yes | Yes | Yes |
+| `agent.config.get` | (none) | Yes | Yes | Yes |
+| `file.read` | (none) | Yes | Yes | Yes |
+| `file.list` | (none) | Yes | Yes | Yes |
+| `session.list` | (none) | Yes | Yes | Yes |
+| `session.get` | (none) | Yes | Yes | Yes |
+| `session.children` | (none) | Yes | Yes | Yes |
+| `providers.list` | (none) | Yes | Yes | Yes |
+| `skills.list` | (none) | Yes | Yes | Yes |
+| `skills.get` | (none) | Yes | Yes | Yes |
+| `skills.info` | (none) | Yes | Yes | Yes |
+| `conversation.status` | (none) | Yes | Yes | Yes |
 
 ### Public Paths
 

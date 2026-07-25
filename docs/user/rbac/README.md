@@ -13,24 +13,29 @@ When `apiKeys` is configured, every request must include a valid API key. The ke
 | Role | Access Level | Description |
 |------|-------------|-------------|
 | `admin` | Full | Can perform all operations (read, write, delete) |
+| `user` | Write + Read | Can start conversations, send messages, manage files and sessions; cannot manage roles |
 | `observer` | Read-only | Can view conversations, agents, files, sessions; cannot modify |
-
-**Note:** A `user` role with fine-grained permissions (e.g., `conversation:start`, `message:send`) is planned but not yet implemented.
 
 ## Permission Model
 
 Permissions are enforced at two levels:
 
-1. **HTTP middleware** — Non-GET routes require `admin` role
-2. **WebSocket router** — Write methods require `admin` role
+1. **HTTP middleware** — Non-GET routes require appropriate permission based on role
+2. **WebSocket router** — Write methods require appropriate permission based on role
+
+Permissions use the format `resource:action` (e.g. `conversation:start`, `message:send`). The `admin` role uses `["*"]` to grant all permissions.
 
 ### What Admin Can Do
 
-- Create, start, stop, restart, delete conversations
-- Read and write config, agents, files, sessions
+- Everything (wildcard `["*"]`)
+- Manage roles (create, update, delete custom roles)
+
+### What User Can Do
+
+- Start, stop, restart, delete conversations
 - Send messages
-- Upload and delete skills
-- View all conversations (same as observer)
+- Write config, agents, files, sessions
+- Import and delete skills
 
 ### What Observer Can Do
 
@@ -43,6 +48,8 @@ Permissions are enforced at two levels:
 ## Configuration
 
 See [API Keys](api-keys.md) for how to configure `apiKeys` in your config file.
+
+See [Roles](roles.md) for details on built-in and custom roles.
 
 ## Checking Your Role
 
@@ -65,14 +72,14 @@ Response:
 |----------|-------------|------------|
 | Missing API key (when required) | 401 | `UNAUTHORIZED` |
 | Invalid API key | 401 | `UNAUTHORIZED` |
-| Observer trying to write | 403 | `FORBIDDEN` |
+| Insufficient permissions | 403 | `FORBIDDEN` |
 
 Example error:
 ```json
 {
   "error": {
     "code": "FORBIDDEN",
-    "message": "Write operations require admin role"
+    "message": "Insufficient permissions"
   }
 }
 ```
