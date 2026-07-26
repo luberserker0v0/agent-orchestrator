@@ -363,6 +363,79 @@ describe('HTTP API Server', () => {
     });
   });
 
+  describe('rbac.enabled', () => {
+    let secureServer: HttpServer['server'];
+
+    afterEach(() => {
+      secureServer?.close();
+    });
+
+    function createRbacServer(rbacEnabled: boolean, apiKeys?: { key: string; role: 'admin' | 'user' | 'observer' }[]): HttpServer['server'] {
+      const hs = createHttpServer(
+        { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000, apiKeys, rbac: { enabled: rbacEnabled } },
+        { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
+        mockInstanceManager,
+        mockWorkspaceFactory,
+        mockConversationState,
+        mockConfigService,
+        mockAgentService,
+        mockSkillService,
+        mockRuntimeRegistry,
+        mockConversationService,
+        mockFileService,
+        mockSessionService,
+        mockMessageService,
+        mockRoleService,
+        mockConfig
+      );
+      secureServer = hs.server;
+      return secureServer;
+    }
+
+    it('rejects all requests when rbac.enabled=true and no keys', async () => {
+      const srv = createRbacServer(true);
+      const res = await request(srv).get('/api/conversations');
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('allows requests when rbac.enabled=false without keys', async () => {
+      const srv = createRbacServer(false);
+      const res = await request(srv).get('/api/conversations');
+      expect(res.status).toBe(200);
+    });
+
+    it('enforces auth when rbac.enabled=true with keys', async () => {
+      const srv = createRbacServer(true, [{ key: 'rbac-test-key-1234', role: 'admin' }]);
+      const unauthed = await request(srv).get('/api/conversations');
+      expect(unauthed.status).toBe(401);
+
+      const authed = await request(srv).get('/api/conversations').set('Authorization', 'Bearer rbac-test-key-1234');
+      expect(authed.status).toBe(200);
+    });
+
+    it('allows public paths when rbac.enabled=true', async () => {
+      const srv = createRbacServer(true);
+      const healthRes = await request(srv).get('/health');
+      expect(healthRes.status).toBe(200);
+    });
+
+    it('/api/auth/role returns admin/local when rbac disabled', async () => {
+      const srv = createRbacServer(false);
+      const res = await request(srv).get('/api/auth/role');
+      expect(res.status).toBe(200);
+      expect(res.body.role).toBe('admin');
+      expect(res.body.name).toBe('local');
+    });
+
+    it('/api/auth/role returns actual role when rbac enabled', async () => {
+      const srv = createRbacServer(true, [{ key: 'rbac-role-key-1234', role: 'observer' }]);
+      const res = await request(srv).get('/api/auth/role').set('Authorization', 'Bearer rbac-role-key-1234');
+      expect(res.status).toBe(200);
+      expect(res.body.role).toBe('observer');
+    });
+  });
+
   it('POST /api/conversations prepares workspace', async () => {
     mockConversationService.create.mockReturnValue({
       id: 'conv-001', agentType: 'opencode-direct', status: 'prepared', ready: false,

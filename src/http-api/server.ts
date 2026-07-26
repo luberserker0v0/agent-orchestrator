@@ -96,7 +96,12 @@ export function createHttpServer(
   // API key authentication (optional)
   const PUBLIC_PATHS = ['/health', '/metrics', '/api-docs', '/api-docs.json', '/dashboard', '/dashboard/'];
   const resolvedApiKeys = normalizeApiKeys(serverConfig);
-  if (resolvedApiKeys && resolvedApiKeys.length > 0) {
+  const rbacEnabled = serverConfig.rbac?.enabled === true
+    ? true
+    : serverConfig.rbac?.enabled === false
+      ? false
+      : !!(resolvedApiKeys && resolvedApiKeys.length > 0);
+  if (rbacEnabled) {
     app.use((req, res, next) => {
       if (PUBLIC_PATHS.includes(req.path)) return next();
       const header = req.headers.authorization;
@@ -105,7 +110,7 @@ export function createHttpServer(
         return;
       }
       const token = header.slice(7);
-      const match = resolvedApiKeys.find(e => e.key === token);
+      const match = resolvedApiKeys?.find(e => e.key === token);
       if (!match) {
         res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid API key' } });
         return;
@@ -141,7 +146,7 @@ export function createHttpServer(
     { method: 'DELETE', pattern: /^\/api\/roles\/[^/]+$/, permission: 'role:write' },
   ];
 
-  if (resolvedApiKeys && resolvedApiKeys.length > 0) {
+  if (rbacEnabled) {
     app.use((req, res, next) => {
       if (req.method === 'GET' || PUBLIC_PATHS.includes(req.path)) return next();
       const role = req.apiKeyRole;
@@ -240,7 +245,7 @@ export function createHttpServer(
   // ─── Auth ────────────────────────────────────────────────
 
   app.get('/api/auth/role', (req: Request, res: Response) => {
-    if (!resolvedApiKeys || resolvedApiKeys.length === 0) {
+    if (!rbacEnabled) {
       res.json({ role: 'admin', name: 'local' });
       return;
     }
@@ -1113,17 +1118,17 @@ export function createHttpServer(
   const httpServer = createServer(app);
 
   const wss = new WebSocketServer({ noServer: true });
-  const wsRouter = new WSRouter(wss, conversationState, wsConfig, configService, agentService, skillService, conversationService, fileService, sessionService, messageService, roleService, resolvedApiKeys);
+  const wsRouter = new WSRouter(wss, conversationState, wsConfig, configService, agentService, skillService, conversationService, fileService, sessionService, messageService, roleService, resolvedApiKeys, rbacEnabled);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ?? '';
     if (pathname.startsWith('/ws/')) {
       // Validate apiKey for WS connections (query param or x-api-key header)
-      if (resolvedApiKeys && resolvedApiKeys.length > 0) {
+      if (rbacEnabled) {
         const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
         const token = url.searchParams.get('apiKey')
           ?? request.headers['x-api-key'] as string | undefined;
-        if (!token || !resolvedApiKeys.find(e => e.key === token)) {
+        if (!token || !resolvedApiKeys?.find(e => e.key === token)) {
           socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
           socket.destroy();
           return;

@@ -365,6 +365,65 @@ describe('validateConfig', () => {
     });
     expect(() => validateConfig(config)).not.toThrow();
   });
+
+  // ─── RBAC validation ─────────────────────────────────────
+
+  it('accepts rbac.enabled: true with apiKeys', () => {
+    const config = createValidConfig({
+      server: {
+        port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000,
+        apiKeys: [{ key: 'admin-secret-123456', role: 'admin' }],
+        rbac: { enabled: true },
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('accepts rbac.enabled: true with legacy apiKey', () => {
+    const config = createValidConfig({
+      server: {
+        port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000,
+        apiKey: 'legacy-key-123456',
+        rbac: { enabled: true },
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('rejects rbac.enabled: true without any API keys', () => {
+    const config = createValidConfig({
+      server: { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000, rbac: { enabled: true } },
+    });
+    expect(() => validateConfig(config)).toThrow('server.rbac.enabled is true but no API keys configured');
+  });
+
+  it('accepts rbac.enabled: false without API keys', () => {
+    const config = createValidConfig({
+      server: { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000, rbac: { enabled: false } },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it('rejects non-boolean rbac.enabled', () => {
+    const config = createValidConfig({
+      server: { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000, rbac: { enabled: 'yes' as any } },
+    });
+    expect(() => validateConfig(config)).toThrow('server.rbac.enabled must be a boolean');
+  });
+
+  it('rejects non-object rbac', () => {
+    const config = createValidConfig({
+      server: { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000, rbac: 'invalid' as any },
+    });
+    expect(() => validateConfig(config)).toThrow('server.rbac must be an object');
+  });
+
+  it('accepts config without rbac field (backward compatible)', () => {
+    const config = createValidConfig({
+      server: { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
+  });
 });
 
 describe('example config file', () => {

@@ -9,7 +9,10 @@
       { "key": "admin-secret-123456", "role": "admin", "name": "Admin" },
       { "key": "user-secret-123456", "role": "user", "name": "User" },
       { "key": "observer-secret-123456", "role": "observer", "name": "Observer" }
-    ]
+    ],
+    "rbac": {
+      "enabled": true           // true = enforce auth (startup fails if no keys); false = disable auth; omit = backward-compatible
+    }
   },
 
   // ── Role Definitions (RBAC) ──────────────────────────────────────
