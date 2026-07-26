@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { WorkspaceFactory } from './workspace-factory.js';
+import { WorkspaceFactory, validateSkillName, validateAgentName, getDirSize, hashDirectory } from './workspace-factory.js';
 import { LocalStorage } from '../storage/index.js';
 
 vi.mock('../metrics/registry.js', async (importOriginal) => {
@@ -103,6 +103,17 @@ describe('WorkspaceFactory', () => {
   it('should not throw when destroying non-existent workspace', async () => {
     const factory = createFactory();
     await expect(factory.destroy('non-existent')).resolves.not.toThrow();
+  });
+
+  it('should handle destroy workspace error gracefully', async () => {
+    const storage = new LocalStorage('test-workspace');
+    vi.spyOn(storage, 'destroyWorkspace').mockRejectedValueOnce(new Error('Permission denied'));
+    const factory = new WorkspaceFactory(
+      { basePath: 'test-workspace', enforceCanonicalConfig: true, storage: { type: 'local' } },
+      storage,
+    );
+    await factory.create('conv-destroy-fail');
+    await expect(factory.destroy('conv-destroy-fail')).resolves.not.toThrow();
   });
 
   it('should ensure workspace directory exists without config', async () => {
@@ -214,6 +225,16 @@ describe('WorkspaceFactory', () => {
       const config = await factory.readConfig('conv-config-free');
       expect(config.model).toBe('gpt-4');
       expect(config.permission).toEqual({ bash: 'allow' });
+    });
+
+    it('should throw error when reading config fails with non-ENOENT error', async () => {
+      const storage = new LocalStorage('test-workspace');
+      vi.spyOn(storage, 'readFile').mockRejectedValueOnce(new Error('Disk read error'));
+      const factory = new WorkspaceFactory(
+        { basePath: 'test-workspace', enforceCanonicalConfig: true, storage: { type: 'local' } },
+        storage,
+      );
+      await expect(factory.readConfig('conv-err')).rejects.toThrow('Disk read error');
     });
 
     it('should return empty object when config does not exist', async () => {
@@ -330,6 +351,19 @@ describe('WorkspaceFactory', () => {
       if (existsSync(templatesDir)) rmSync(templatesDir, { recursive: true, force: true });
     });
 
+    it('should copy directory recursively from allowed source', async () => {
+      const assetsDir = join(process.cwd(), 'assets', 'sub-dir');
+      mkdirSync(assetsDir, { recursive: true });
+      writeFileSync(join(assetsDir, 'nested.txt'), 'nested content', 'utf-8');
+
+      const factory = createFactory();
+      await factory.create('conv-copy-dir');
+
+      await factory.copyFromLocal('conv-copy-dir', join('assets', 'sub-dir'), 'dest-dir');
+      const content = await factory.readFile('conv-copy-dir', 'dest-dir/nested.txt');
+      expect(content).toBe('nested content');
+    });
+
     it('should copy file from allowed source', async () => {
       const factory = createFactory();
       await factory.create('conv-copy');
@@ -412,6 +446,67 @@ describe('WorkspaceFactory', () => {
 
       const bigContent = 'x'.repeat(51 * 1024 * 1024);
       await expect(factory.writeFile('conv-unlimited', 'big.txt', bigContent)).resolves.not.toThrow();
+    });
+  });
+
+  // ─── Utility Functions ───────────────────────────────────
+
+  describe('validateSkillName', () => {
+    it('should return valid skill name', () => {
+      expect(validateSkillName('my-skill_1')).toBe('my-skill_1');
+    });
+
+    it('should throw on invalid skill names', () => {
+      expect(() => validateSkillName('')).toThrow('Invalid skill name');
+      expect(() => validateSkillName('123' as unknown as string)).not.toThrow(); // starts with number is valid according to regex
+      expect(() => validateSkillName('-invalid')).toThrow('Invalid skill name');
+      expect(() => validateSkillName('invalid skill')).toThrow('Invalid skill name');
+      expect(() => validateSkillName(null as unknown as string)).toThrow('Invalid skill name');
+    });
+  });
+
+  describe('validateAgentName', () => {
+    it('should return valid agent name', () => {
+      expect(validateAgentName('agent-007')).toBe('agent-007');
+    });
+
+    it('should throw on invalid agent names', () => {
+      expect(() => validateAgentName('')).toThrow('Invalid agent name');
+      expect(() => validateAgentName('_invalid')).toThrow('Invalid agent name');
+      expect(() => validateAgentName('agent@name')).toThrow('Invalid agent name');
+      expect(() => validateAgentName(undefined as unknown as string)).toThrow('Invalid agent name');
+    });
+  });
+
+  describe('getDirSize', () => {
+    it('should calculate directory size recursively', () => {
+      const sampleDir = join(TEST_BASE_PATH, 'size-test');
+      mkdirSync(join(sampleDir, 'nested'), { recursive: true });
+      writeFileSync(join(sampleDir, 'a.txt'), 'hello', 'utf-8');
+      writeFileSync(join(sampleDir, 'nested', 'b.txt'), 'world', 'utf-8');
+
+      const size = getDirSize(sampleDir);
+      expect(size).toBe(10);
+    });
+
+    it('should handle non-existent directory gracefully', () => {
+      expect(getDirSize(join(TEST_BASE_PATH, 'non-existent'))).toBe(0);
+    });
+  });
+
+  describe('hashDirectory', () => {
+    it('should hash directory files correctly', () => {
+      const sampleDir = join(TEST_BASE_PATH, 'hash-test');
+      mkdirSync(join(sampleDir, 'sub'), { recursive: true });
+      writeFileSync(join(sampleDir, 'a.txt'), 'a content', 'utf-8');
+      writeFileSync(join(sampleDir, 'sub', 'b.txt'), 'b content', 'utf-8');
+
+      const result = hashDirectory(sampleDir);
+
+      expect(result.files).toEqual(['a.txt', 'sub/b.txt']);
+      expect(result.totalSize).toBe('a content'.length + 'b content'.length);
+      expect(typeof result.sha256).toBe('string');
+      expect(result.sha256).toHaveLength(64);
     });
   });
 });
