@@ -163,7 +163,15 @@ function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHE
       trimmed !== '' &&
       Number.isFinite(numValue) &&
       !Number.isNaN(numValue);
-    current[finalKey] = isValidNumber ? numValue : envValue;
+    if (isValidNumber) {
+      current[finalKey] = numValue;
+    } else if (trimmed === 'true') {
+      current[finalKey] = true;
+    } else if (trimmed === 'false') {
+      current[finalKey] = false;
+    } else {
+      current[finalKey] = envValue;
+    }
   }
 }
 
