@@ -18,6 +18,7 @@ This document explains the internal workings of the configuration loading system
 4. Apply env var overrides:
    ├── AGENTORCHESTRATOR_SERVER_PORT → server.port
    ├── AGENTORCHESTRATOR_SERVER_HOST → server.host
+   ├── AGENTORCHESTRATOR_SERVER_RBAC_ENABLED → server.rbac.enabled
    ├── AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES → orchestrator.maxInstances
    ├── AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS → orchestrator.idleTimeoutMs
    ├── AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS → orchestrator.idleSweepIntervalMs

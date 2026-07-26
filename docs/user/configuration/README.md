@@ -20,6 +20,7 @@ Any config field can be overridden via environment variables:
 | `server.port` | `AGENTORCHESTRATOR_SERVER_PORT` |
 | `server.host` | `AGENTORCHESTRATOR_SERVER_HOST` |
 | `server.shutdownTimeoutMs` | `AGENTORCHESTRATOR_SERVER_SHUTDOWN_TIMEOUT_MS` |
+| `server.rbac.enabled` | `AGENTORCHESTRATOR_SERVER_RBAC_ENABLED` |
 | `orchestrator.maxInstances` | `AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES` |
 | `orchestrator.idleTimeoutMs` | `AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS` |
 | `orchestrator.idleSweepIntervalMs` | `AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS` |
