@@ -254,6 +254,7 @@ AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES=104857600  # 0 = unlimited
 | `shutdownTimeoutMs` | integer | 15000 | Maximum time in ms for graceful shutdown before force exit |
 | `apiKey` | string | (none) | **Deprecated**: use `apiKeys` instead. Optional bearer token for API authentication. If set alone, treated as admin role. Min 8 characters. |
 | `apiKeys` | array | (none) | Role-based API keys. Each entry: `{ key, role, name? }` where `role` is `admin`, `user`, or `observer`. Takes precedence over `apiKey`. WebSocket connections authenticate via `?apiKey=<key>` query param or `x-api-key` header. |
+| `rbac.enabled` | boolean | (undefined) | `true` = enforce RBAC (startup fails if no API keys configured); `false` = disable auth; omitted = backward-compatible (enabled when `apiKeys` is present). |
 | `roles` | object | (none) | Custom role definitions. Each key is a role name with `{ permissions: string[] }`. Built-in roles (`admin`, `user`, `observer`) cannot be overridden. |
 
 ## Orchestrator Configuration

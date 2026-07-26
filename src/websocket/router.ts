@@ -42,6 +42,7 @@ export class WSRouter {
   private messageService: MessageService;
   private roleService: RoleService;
   private resolvedApiKeys?: ApiKeyEntry[];
+  private rbacEnabled: boolean;
   private connections: Map<string, WSConnection> = new Map();
   private connectionRoles: Map<string, ApiKeyRole> = new Map();
   private eventUnsubscribers: Map<string, () => void> = new Map();
@@ -58,7 +59,8 @@ export class WSRouter {
     sessionService: SessionService,
     messageService: MessageService,
     roleService: RoleService,
-    resolvedApiKeys?: ApiKeyEntry[]
+    resolvedApiKeys?: ApiKeyEntry[],
+    rbacEnabled = false
   ) {
     this.wss = wss;
     this.conversationState = conversationState;
@@ -72,6 +74,7 @@ export class WSRouter {
     this.messageService = messageService;
     this.roleService = roleService;
     this.resolvedApiKeys = resolvedApiKeys;
+    this.rbacEnabled = rbacEnabled;
 
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
   }
@@ -102,11 +105,11 @@ export class WSRouter {
 
     // Extract role from apiKey
     let role: ApiKeyRole = 'admin';
-    if (this.resolvedApiKeys && this.resolvedApiKeys.length > 0) {
+    if (this.rbacEnabled) {
       const parsedUrl = new URL(url, `http://${req.headers.host ?? 'localhost'}`);
       const token = parsedUrl.searchParams.get('apiKey')
         ?? req.headers['x-api-key'] as string | undefined;
-      const match = this.resolvedApiKeys.find(e => e.key === token);
+      const match = this.resolvedApiKeys?.find(e => e.key === token);
       role = match?.role ?? 'admin';
     }
 

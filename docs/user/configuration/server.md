@@ -11,6 +11,7 @@ The `server` section controls the HTTP server, authentication, and API access.
 | `shutdownTimeoutMs` | integer | `15000` | Maximum time (ms) for graceful shutdown before force exit. |
 | `apiKey` | string | (none) | **Deprecated.** Single API key for admin access. Min 8 characters. |
 | `apiKeys` | array | (none) | Role-based API keys. Each entry: `{ key, role, name? }` where `role` is `admin`, `user`, or `observer`. See below. |
+| `rbac.enabled` | boolean | (undefined) | `true` = enforce RBAC (startup fails if no API keys configured). `false` = disable auth. Omitted = backward-compatible (enabled when `apiKeys` is present). |
 
 ## API Keys
 
@@ -38,10 +39,16 @@ The `apiKeys` array defines role-based access control. Each entry has:
 
 ### Authentication Behavior
 
-- If `apiKeys` is empty or not configured, **all requests are allowed** (no auth required)
-- If `apiKeys` is configured, every request must include a valid key
+| `rbac.enabled` | `apiKeys` present | Behavior |
+|---|---|---|
+| `true` | yes | RBAC enforced normally |
+| `true` | no/empty | **Startup fails** with error |
+| `false` | any | Auth disabled — all requests allowed |
+| omitted | yes | RBAC enabled (backward-compatible) |
+| omitted | no | Auth disabled (backward-compatible) |
+
 - HTTP: `Authorization: Bearer <key>` header
-- WebSocket: `?apiKey=<key>` query parameter
+- WebSocket: `?apiKey=<key>` query parameter or `x-api-key` header
 
 ### Legacy `apiKey`
 
@@ -72,3 +79,4 @@ The `apiKey` field is deprecated. If both `apiKey` and `apiKeys` are configured,
 | `AGENTORCHESTRATOR_SERVER_PORT` | `server.port` |
 | `AGENTORCHESTRATOR_SERVER_HOST` | `server.host` |
 | `AGENTORCHESTRATOR_SERVER_SHUTDOWN_TIMEOUT_MS` | `server.shutdownTimeoutMs` |
+| `AGENTORCHESTRATOR_SERVER_RBAC_ENABLED` | `server.rbac.enabled` |

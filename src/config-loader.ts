@@ -18,6 +18,11 @@ export interface ApiKeyEntry {
   name?: string;
 }
 
+export interface RbacConfig {
+  /** true = enforce RBAC (startup fails if no keys); false = disable auth; undefined = backward-compatible */
+  enabled?: boolean;
+}
+
 export interface ServerConfig {
   port: number;
   host: string;
@@ -25,6 +30,7 @@ export interface ServerConfig {
   /** @deprecated Use apiKeys instead. If set alone, treated as admin role. */
   apiKey?: string;
   apiKeys?: ApiKeyEntry[];
+  rbac?: RbacConfig;
 }
 
 export interface WebSocketConfig {
@@ -196,6 +202,27 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
         throw new Error(`Config validation failed: duplicate apiKey "${entry.key.slice(0, 4)}..."`);
       }
       keys.add(entry.key);
+    }
+  }
+
+  // RBAC validation
+  if (server.rbac !== undefined) {
+    if (typeof server.rbac !== 'object' || server.rbac === null) {
+      throw new Error('Config validation failed: server.rbac must be an object');
+    }
+    if (server.rbac.enabled !== undefined && typeof server.rbac.enabled !== 'boolean') {
+      throw new Error('Config validation failed: server.rbac.enabled must be a boolean');
+    }
+    if (server.rbac.enabled === true) {
+      const hasKeys =
+        (server.apiKeys !== undefined && server.apiKeys.length > 0) ||
+        (server.apiKey !== undefined && server.apiKey.length >= 8);
+      if (!hasKeys) {
+        throw new Error(
+          'Config validation failed: server.rbac.enabled is true but no API keys configured. ' +
+          'Add keys to server.apiKeys or set server.rbac.enabled to false.'
+        );
+      }
     }
   }
 

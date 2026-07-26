@@ -164,6 +164,22 @@ export async function main(cliArgs?: string[]) {
     logger.info(`Dashboard: http://${config.server.host}:${config.server.port}/dashboard`);
     logger.info(`Max instances: ${config.orchestrator.maxInstances}`);
     logger.info(`Port range: ${config.orchestrator.portRange.start}-${config.orchestrator.portRange.end}`);
+
+    // Compute RBAC status for startup info
+    const resolvedKeys = config.server.apiKeys ?? (config.server.apiKey ? [{ key: config.server.apiKey, role: 'admin' as const, name: 'legacy' }] : []);
+    const rbacEnabled = config.server.rbac?.enabled === true
+      ? true
+      : config.server.rbac?.enabled === false
+        ? false
+        : resolvedKeys.length > 0;
+    const rbacStatus = rbacEnabled
+      ? resolvedKeys.length > 0 ? `${resolvedKeys.length} key(s)` : 'enabled (0 keys)'
+      : 'disabled';
+    const wsType = config.workspace.storage.type;
+    const maxSize = config.workspace.maxSizeBytes === 0 || config.workspace.maxSizeBytes === undefined
+      ? 'unlimited'
+      : `${config.workspace.maxSizeBytes} bytes`;
+    logger.info(`RBAC: ${rbacStatus} | Workspace: ${wsType}, ${maxSize}`);
   });
 
   // Graceful shutdown
