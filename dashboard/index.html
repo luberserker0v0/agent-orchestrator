@@ -87,18 +87,44 @@ input:focus { border-color: var(--accent); }
 /* Messages panel */
 .messages-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
 .messages-panel h3 { padding: 12px 16px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
-.messages-list { flex: 1; overflow-y: auto; padding: 16px; }
-.msg { margin-bottom: 16px; }
-.msg-role { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; font-weight: 600; }
-.msg-role.user { color: var(--accent); }
+.messages-list { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+/* Bubble base */
+.msg { display: flex; }
+.msg.assistant, .msg.tool { justify-content: flex-start; }
+.msg.user { justify-content: flex-end; }
+.msg.system { justify-content: center; }
+
+.msg-bubble { max-width: 75%; border-radius: 12px; padding: 10px 14px; }
+.msg.user .msg-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.msg.assistant .msg-bubble { background: var(--surface2); color: var(--text); border-bottom-left-radius: 4px; }
+.msg.tool .msg-bubble { background: var(--surface2); color: var(--text); border-bottom-left-radius: 4px; }
+.msg.system .msg-bubble { background: transparent; color: var(--text-dim); font-style: italic; font-size: 12px; padding: 4px 12px; }
+
+.msg-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; gap: 12px; }
+.msg-role { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.msg-role.user { color: #fff; }
 .msg-role.assistant { color: var(--green); }
-.msg-role.system { color: var(--yellow); }
 .msg-role.tool { color: var(--orange); }
+.msg-time { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+.msg.user .msg-time { color: rgba(255,255,255,0.6); }
+
 .msg-content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-.msg-parts { margin-top: 4px; }
-.tool-call { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin-top: 6px; font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; }
-.tool-call-header { color: var(--orange); margin-bottom: 4px; }
-.tool-call-body { color: var(--text-dim); white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+
+/* Tool card */
+.tool-card { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.tool-card-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg); cursor: pointer; font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; user-select: none; }
+.tool-card-header:hover { background: var(--surface2); }
+.tool-icon { color: var(--orange); font-size: 10px; transition: transform 0.15s; }
+.tool-card-header.expanded .tool-icon { transform: rotate(90deg); }
+.tool-card-name { color: var(--orange); flex: 1; }
+.tool-toggle { color: var(--text-dim); font-size: 10px; }
+.tool-card-body { display: none; padding: 8px 10px; background: var(--bg); border-top: 1px solid var(--border); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; color: var(--text-dim); white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+.tool-card-body.show { display: block; }
+
+/* Tool result inside bubble */
+.tool-result { margin-top: 6px; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; color: var(--text-dim); white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
+
 .empty-state { text-align: center; color: var(--text-dim); padding: 40px; font-size: 13px; }
 
 /* Loading */
@@ -181,6 +207,8 @@ const API = {
   async get(path) { return (await this.fetch(path)).json(); },
   async post(path, body) { return (await this.fetch(path, { method: 'POST', body: JSON.stringify(body) })).json(); },
   async del(path) { return (await this.fetch(path, { method: 'DELETE' })).json(); },
+  async rawPost(path, body) { return this.fetch(path, { method: 'POST', body: JSON.stringify(body) }); },
+  async rawDel(path) { return this.fetch(path, { method: 'DELETE' }); },
   logout() { this.key = ''; sessionStorage.removeItem('ao_key'); showLogin(); }
 };
 
@@ -332,15 +360,31 @@ function renderMessages(msgs) {
   if (!msgs || msgs.length === 0) { el.innerHTML = '<div class="empty-state">No messages yet</div>'; return; }
   el.innerHTML = msgs.map(m => {
     const role = m.info?.role || 'unknown';
+    const ts = m.info?.created_at ? timeStr(m.info.created_at) : '';
     const parts = (m.parts || []).map(p => {
       if (p.type === 'text') return `<div class="msg-content">${escHtml(p.text || '')}</div>`;
-      if (p.type === 'tool_call') return `<div class="tool-call"><div class="tool-call-header">Tool Call: ${escHtml(p.tool || '')}</div><div class="tool-call-body">${escHtml(JSON.stringify(p.args || {}, null, 2))}</div></div>`;
-      if (p.type === 'tool_result') return `<div class="tool-call"><div class="tool-call-header">Tool Result</div><div class="tool-call-body">${escHtml(String(p.output || p.content || '').slice(0, 500))}</div></div>`;
-      return `<div class="msg-content">${escHtml(JSON.stringify(p))}</div>`;
+      if (p.type === 'tool_call') {
+        const argsStr = JSON.stringify(p.args || {}, null, 2);
+        const id = 'tc_' + Math.random().toString(36).slice(2, 8);
+        return `<div class="tool-card"><div class="tool-card-header" onclick="toggleToolDetail('${id}')"><span class="tool-icon">▶</span><span class="tool-card-name">Tool: ${escHtml(p.tool || 'unknown')}</span><span class="tool-toggle">▸</span></div><div class="tool-card-body" id="${id}">${escHtml(argsStr)}</div></div>`;
+      }
+      if (p.type === 'tool_result') {
+        const out = String(p.output || p.content || '').slice(0, 500);
+        return `<div class="tool-result">${escHtml(out)}</div>`;
+      }
+      return '';
     }).join('');
-    return `<div class="msg"><div class="msg-role ${role}">${role}</div><div class="msg-parts">${parts}</div></div>`;
+    return `<div class="msg ${role}"><div class="msg-bubble"><div class="msg-header"><span class="msg-role ${role}">${escHtml(role)}</span><span class="msg-time">${ts}</span></div>${parts}</div></div>`;
   }).join('');
   el.scrollTop = el.scrollHeight;
+}
+
+function toggleToolDetail(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const hdr = el.previousElementSibling;
+  el.classList.toggle('show');
+  if (hdr) hdr.classList.toggle('expanded');
 }
 
 function summarizePayload(p) {
@@ -353,11 +397,25 @@ function summarizePayload(p) {
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 async function convAction(id, action) {
+  if (action === 'delete') { if (!confirm(`Delete conversation ${id}?`)) return; }
+  const btns = document.querySelectorAll('#detailActions button');
+  btns.forEach(b => { b.disabled = true; b.dataset.origText = b.textContent; b.textContent = action === 'stop' ? 'Stopping…' : action === 'restart' ? 'Restarting…' : 'Deleting…'; });
   try {
-    if (action === 'delete') { if (!confirm(`Delete conversation ${id}?`)) return; }
-    await API.post(`/api/conversations/${id}/${action}`, {});
+    let res;
+    if (action === 'delete') {
+      res = await API.rawDel(`/api/conversations/${id}`);
+    } else {
+      res = await API.rawPost(`/api/conversations/${id}/${action}`, {});
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error?.message || `HTTP ${res.status}`);
+    }
     if (action === 'delete') { showList(); } else { setTimeout(() => loadDetail(id), 500); }
-  } catch (e) { alert(`Failed: ${e.message}`); }
+  } catch (e) {
+    alert(`Failed: ${e.message}`);
+    btns.forEach(b => { b.disabled = false; b.textContent = b.dataset.origText; });
+  }
 }
 
 // WebSocket
