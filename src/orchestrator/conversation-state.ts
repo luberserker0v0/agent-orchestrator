@@ -26,6 +26,8 @@ export interface ConversationStateData {
   port?: number;
   sessionId?: string;
   lastError?: string;
+  lastModel?: string;
+  lastAgent?: string;
   events: ConversationEvent[];
   createdAt: number;
   updatedAt: number;
@@ -200,6 +202,14 @@ export class ConversationState {
     if (!state) return;
     if (info.port !== undefined) state.port = info.port;
     if (info.sessionId !== undefined) state.sessionId = info.sessionId;
+    state.updatedAt = Date.now();
+  }
+
+  setLastModelAgent(id: string, model?: string, agent?: string): void {
+    const state = this.states.get(id);
+    if (!state) return;
+    if (model !== undefined) state.lastModel = model;
+    if (agent !== undefined) state.lastAgent = agent;
     state.updatedAt = Date.now();
   }
 

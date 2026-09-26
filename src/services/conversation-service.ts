@@ -16,6 +16,8 @@ export interface ConversationData {
   needsRestart: boolean;
   port?: number;
   sessionId?: string;
+  lastModel?: string;
+  lastAgent?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -234,6 +236,8 @@ export class ConversationService {
       needsRestart: state.needsRestart,
       port: state.port,
       sessionId: state.sessionId,
+      lastModel: state.lastModel,
+      lastAgent: state.lastAgent,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
     };
