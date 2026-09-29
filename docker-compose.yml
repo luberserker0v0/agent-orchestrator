@@ -1,0 +1,30 @@
+services:
+  agent-orchestrator:
+    build:
+      context: .
+      args:
+        # Must match orchestrator.runtimes[].config.version in config/agentorchestrator.json
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.17.8}
+    image: agent-orchestrator:latest
+    container_name: agent-orchestrator
+    ports:
+      - "32768:8080"
+      # OpenCode instance port range (required for bridge networking, see docs/user/deployment/docker.md)
+      - "30000-30100:30000-30100"
+    environment:
+      # 0 = unlimited workspace size (no quota enforcement)
+      AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES: "0"
+    volumes:
+      - ao-workspace:/data/workspace
+      # Uncomment to override the baked-in config with local files:
+      # - ./config/agentorchestrator.json:/app/config/agentorchestrator.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  ao-workspace:
