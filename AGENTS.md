@@ -391,7 +391,7 @@ docker run -p 8080:8080 agent-orchestrator
 - **Node.js**: 24.x
 - **Steps**: `npm ci` → `npm run preflight` (lint + test + build) → `npm run test:coverage` → upload coverage artifact
 
-- **Dependabot**: Weekly updates for npm (grouped dev dependencies) and GitHub Actions (`.github/dependabot.yml`)
+- **Dependabot**: Quarterly updates for npm (grouped dev dependencies, including `@vitest/*` scoped packages) and GitHub Actions (`.github/dependabot.yml`)
 
 ### Git Hooks (custom, no Husky)
 - **pre-commit**: `npm run lint`
