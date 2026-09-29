@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(dashboard): conversation detail with event timeline and message history
 - feat(dashboard): real-time WebSocket event streaming in detail view
 - feat(dashboard): role-aware UI — admin sees controls, user sees controls, observer sees read-only view
+- feat(dashboard): redesign UI with chat bubbles, timestamps, collapsible tool cards, thinking indicator, and full-viewport layout
+- feat(dashboard): track last model/agent per conversation (`lastModel`, `lastAgent`) with `conversation.thinking` event for live UI updates
 - feat(metrics): add LRU eviction metric (`instance_evictions_total`) for capacity pressure visibility
 - feat(metrics): add idle timeout metric (`instance_idle_timeouts_total`) for resource recycling visibility
 - feat(metrics): add active workspaces metric (`workspaces_active`) for workspace lifecycle tracking

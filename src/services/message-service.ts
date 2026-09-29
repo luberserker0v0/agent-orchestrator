@@ -45,6 +45,13 @@ export class MessageService {
     const model = parseModelString(rawModel);
     const agent = typeof rawAgent === 'string' ? rawAgent : undefined;
 
+    this.conversationState.setLastModelAgent(id, rawModel, rawAgent);
+    this.conversationState.emitEvent(id, 'conversation.thinking', {
+      text,
+      model: rawModel,
+      agent: rawAgent,
+    });
+
     const start = performance.now();
     try {
       const response = await instance.client.sendPrompt(instance.sessionId, {

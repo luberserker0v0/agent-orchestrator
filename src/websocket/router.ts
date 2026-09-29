@@ -93,7 +93,7 @@ export class WSRouter {
 
   private async onConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
     const url = req.url ?? '';
-    const match = url.match(/^\/ws\/([^/]+)$/);
+    const match = url.match(/^\/ws\/([^/?]+)/);
     if (!match) {
       logger.warn(`WS connection rejected: invalid path ${url}`);
       ws.close(1008, 'Invalid path');

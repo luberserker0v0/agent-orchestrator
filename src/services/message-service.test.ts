@@ -37,6 +37,7 @@ describe('MessageService', () => {
     mockConversationState = {
       get: vi.fn(),
       emitEvent: vi.fn(),
+      setLastModelAgent: vi.fn(),
     };
 
     service = new MessageService(mockInstanceManager, mockConversationState);

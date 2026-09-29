@@ -9,5 +9,4 @@ coverage/
 .env*
 src/test-fixtures/opencode.template.json
 src/test-fixtures/opencode.provider.template.json
-config/agentorchestrator.json
-config/canonical-opencode.json
+
