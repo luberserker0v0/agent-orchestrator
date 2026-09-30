@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OpenCodeAgentClient } from './client.js';
+import { AppError, ErrorCodes, isAppError } from '../utils/errors.js';
 
 vi.mock('../metrics/registry.js', () => {
   const inc = vi.fn();
@@ -242,6 +243,90 @@ describe('OpenCodeAgentClient', () => {
       await expect(client.health()).rejects.toThrow('Network error');
       expect(opencodeHttpRequestsTotal.labels).toHaveBeenCalledWith('GET', 'global', 'error');
       expect(opencodeHttpRequestsTotal.labels('GET', 'global', 'error').inc).toHaveBeenCalled();
+    });
+  });
+
+  describe('quota classification', () => {
+    function quotaResponse(status: number, body: string, retryAfter?: string) {
+      return mockFetch({
+        ok: false,
+        status,
+        text: vi.fn().mockResolvedValue(body),
+        headers: retryAfter !== undefined ? new Headers({ 'retry-after': retryAfter }) : undefined,
+      });
+    }
+
+    async function sendAndCatch(): Promise<unknown> {
+      try {
+        await client.sendPrompt('ses_1', { parts: [{ type: 'text', text: 'Hi' }] });
+      } catch (err) {
+        return err;
+      }
+      expect.unreachable('sendPrompt should have thrown');
+    }
+
+    it('classifies 429 quota body as LLM_QUOTA_EXHAUSTED with retry-after', async () => {
+      fetchFn = quotaResponse(429, 'API quota exceeded for model claude-sonnet', '120');
+      const err = (await sendAndCatch()) as AppError;
+      expect(isAppError(err)).toBe(true);
+      expect(err.code).toBe(ErrorCodes.LLM_QUOTA_EXHAUSTED);
+      expect(err.statusCode).toBe(429);
+      expect(err.message).toContain('OpenCode HTTP 429');
+      expect((err.details as { retryAfterMs?: number }).retryAfterMs).toBe(120000);
+      expect((err.details as { upstreamStatus?: number }).upstreamStatus).toBe(429);
+    });
+
+    it('classifies 429 rate-limit body as LLM_RATE_LIMITED', async () => {
+      fetchFn = quotaResponse(429, 'Too many requests, slow down');
+      const err = (await sendAndCatch()) as AppError;
+      expect(isAppError(err)).toBe(true);
+      expect(err.code).toBe(ErrorCodes.LLM_RATE_LIMITED);
+      expect(err.statusCode).toBe(429);
+      expect((err.details as { retryAfterMs?: number }).retryAfterMs).toBeUndefined();
+    });
+
+    it('classifies bare 429 as LLM_RATE_LIMITED', async () => {
+      fetchFn = quotaResponse(429, 'Internal server hiccup');
+      const err = (await sendAndCatch()) as AppError;
+      expect(isAppError(err)).toBe(true);
+      expect(err.code).toBe(ErrorCodes.LLM_RATE_LIMITED);
+    });
+
+    it('classifies 402 quota body as LLM_QUOTA_EXHAUSTED', async () => {
+      fetchFn = quotaResponse(402, 'Payment required: billing quota exhausted');
+      const err = (await sendAndCatch()) as AppError;
+      expect(isAppError(err)).toBe(true);
+      expect(err.code).toBe(ErrorCodes.LLM_QUOTA_EXHAUSTED);
+      expect(err.statusCode).toBe(429);
+      expect((err.details as { upstreamStatus?: number }).upstreamStatus).toBe(402);
+    });
+
+    it('classifies 403 quota body as LLM_QUOTA_EXHAUSTED', async () => {
+      fetchFn = quotaResponse(403, 'Insufficient credits for this request');
+      const err = (await sendAndCatch()) as AppError;
+      expect(isAppError(err)).toBe(true);
+      expect(err.code).toBe(ErrorCodes.LLM_QUOTA_EXHAUSTED);
+    });
+
+    it('keeps generic error for 403 without quota match', async () => {
+      fetchFn = quotaResponse(403, 'Forbidden: bad credentials');
+      const err = (await sendAndCatch()) as Error;
+      expect(isAppError(err)).toBe(false);
+      expect(err.message).toBe('OpenCode HTTP 403: Forbidden: bad credentials');
+    });
+
+    it('keeps generic error for non-quota statuses', async () => {
+      fetchFn = quotaResponse(500, 'quota exceeded but wrong status');
+      const err = (await sendAndCatch()) as Error;
+      expect(isAppError(err)).toBe(false);
+      expect(err.message).toContain('OpenCode HTTP 500');
+    });
+
+    it('ignores invalid retry-after header', async () => {
+      fetchFn = quotaResponse(429, 'quota exceeded', 'not-a-number');
+      const err = (await sendAndCatch()) as AppError;
+      expect(err.code).toBe(ErrorCodes.LLM_QUOTA_EXHAUSTED);
+      expect((err.details as { retryAfterMs?: number }).retryAfterMs).toBeUndefined();
     });
   });
 });

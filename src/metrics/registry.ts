@@ -106,6 +106,13 @@ export const messageSendDurationSeconds = new Histogram({
   registers: [metricsRegistry],
 });
 
+export const llmQuotaExhaustionsTotal = new Counter({
+  name: 'agentorchestrator_llm_quota_exhaustions_total',
+  help: 'Total LLM quota/rate-limit errors detected from OpenCode instances',
+  labelNames: ['code'],
+  registers: [metricsRegistry],
+});
+
 export const instanceEvictionsTotal = new Counter({
   name: 'agentorchestrator_instance_evictions_total',
   help: 'Total LRU instance evictions',

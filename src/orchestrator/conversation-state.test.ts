@@ -680,4 +680,24 @@ describe('ConversationState', () => {
       expect(mockClientOld.getSession).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('setLastError', () => {
+    it('should set lastError without changing status', () => {
+      const state = new ConversationState();
+      state.create('conv-err');
+      state.transition('conv-err', 'starting');
+      state.transition('conv-err', 'running');
+
+      state.setLastError('conv-err', 'OpenCode HTTP 429: quota exceeded');
+
+      expect(state.get('conv-err')?.lastError).toBe('OpenCode HTTP 429: quota exceeded');
+      expect(state.get('conv-err')?.status).toBe('running');
+    });
+
+    it('should do nothing for unknown conversation', () => {
+      const state = new ConversationState();
+      expect(() => state.setLastError('missing', 'boom')).not.toThrow();
+      expect(state.get('missing')).toBeUndefined();
+    });
+  });
 });
