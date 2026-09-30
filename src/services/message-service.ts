@@ -76,21 +76,26 @@ export class MessageService {
       messageSendDurationSeconds.observe((performance.now() - start) / 1000);
       return { messageId: response.info.id, text: texts, parts: response.parts };
     } catch (err) {
-      messagesSentTotal.labels('error').inc();
-      messageSendDurationSeconds.observe((performance.now() - start) / 1000);
       if (
         isAppError(err) &&
         (err.code === ErrorCodes.LLM_QUOTA_EXHAUSTED || err.code === ErrorCodes.LLM_RATE_LIMITED)
       ) {
+        messagesSentTotal.labels('quota_exhausted').inc();
         llmQuotaExhaustionsTotal.labels(err.code).inc();
         const details = err.details as LlmQuotaErrorDetails | undefined;
+        this.conversationState.setLastError(id, err.message);
         this.conversationState.emitEvent(id, 'conversation.quotaExhausted', {
           model: rawModel,
           agent: rawAgent,
+          sessionId: instance.sessionId,
           code: err.code,
           retryAfterMs: details?.retryAfterMs,
         });
+        messageSendDurationSeconds.observe((performance.now() - start) / 1000);
+        throw err;
       }
+      messagesSentTotal.labels('error').inc();
+      messageSendDurationSeconds.observe((performance.now() - start) / 1000);
       throw err;
     }
   }

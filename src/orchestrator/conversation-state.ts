@@ -213,6 +213,13 @@ export class ConversationState {
     state.updatedAt = Date.now();
   }
 
+  setLastError(id: string, error: string): void {
+    const state = this.states.get(id);
+    if (!state) return;
+    state.lastError = error;
+    state.updatedAt = Date.now();
+  }
+
   setRunningInstance(id: string, info: RunningInstanceInfo): void {
     this.instances.set(id, info);
   }
