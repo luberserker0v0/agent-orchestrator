@@ -52,6 +52,8 @@ export interface DirectRuntimeConfig {
   version?: string;
   /** Hostname used to reach the spawned instance (default: `127.0.0.1`) */
   instanceHost?: string;
+  /** Per-conversation opencode data-dir (session persistence). Omit for opencode defaults. */
+  sessionStorage?: SessionStorageConfig;
 }
 
 export interface DockerRuntimeConfig {
@@ -61,6 +63,40 @@ export interface DockerRuntimeConfig {
   instanceHost?: string;
   /** Docker network mode (e.g. `host`, `bridge`, or a custom network name). When `host`, port mapping is skipped. */
   networkMode?: string;
+  /** Per-conversation opencode data-dir (session persistence). Omit for ephemeral container storage. */
+  sessionStorage?: SessionStorageConfig;
+}
+
+/**
+ * Per-conversation opencode session storage. One subdirectory per conversation id
+ * is created under `sharedRoot`, so a new instance on any machine resumes the same
+ * session as long as it mounts the same root at an identical absolute path.
+ */
+export interface SessionStorageConfig {
+  /** Root directory for per-conversation opencode data-dirs. Relative paths resolve against the orchestrator cwd. */
+  sharedRoot: string;
+  /**
+   * `xdg` (default): set `XDG_DATA_HOME=<sharedRoot>/<id>` (whole opencode tree).
+   * `sqlite`: additionally set `OPENCODE_DB=<sharedRoot>/<id>/opencode.db` (single file).
+   */
+  mode?: 'xdg' | 'sqlite';
+}
+
+/** Validate a `sessionStorage` value. Returns a list of error strings (empty = valid). */
+export function validateSessionStorageConfig(value: unknown): string[] {
+  if (value === undefined) return [];
+  const errs: string[] = [];
+  if (typeof value !== 'object' || value === null) {
+    return ['"sessionStorage" must be an object'];
+  }
+  const cfg = value as Record<string, unknown>;
+  if (typeof cfg.sharedRoot !== 'string' || !cfg.sharedRoot) {
+    errs.push('"sessionStorage.sharedRoot" must be a non-empty string');
+  }
+  if (cfg.mode !== undefined && cfg.mode !== 'xdg' && cfg.mode !== 'sqlite') {
+    errs.push('"sessionStorage.mode" must be "xdg" or "sqlite"');
+  }
+  return errs;
 }
 
 export interface DirectRuntimeEntry {

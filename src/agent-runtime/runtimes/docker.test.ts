@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('cross-spawn', () => ({ spawn: vi.fn() }));
 
 import { spawn } from 'cross-spawn';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { DockerRuntime } from './docker.js';
 
@@ -123,6 +126,52 @@ describe('DockerRuntime', () => {
       expect(result.port).toBeGreaterThanOrEqual(40000);
       expect(result.handle).toBeDefined();
       expect(result.client).toBeDefined();
+    });
+
+    it('mounts session dir and sets XDG_DATA_HOME when sessionStorage is configured', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'ao-docker-test-'));
+      try {
+        const rt = new DockerRuntime(createPortPool(), { image: 'test-image', sessionStorage: { sharedRoot: root } });
+        const mockProc = createMockProc({ exitCode: 0 });
+        (spawn as any).mockReturnValue(mockProc);
+        mockFetch.mockResolvedValue(makeHealthyFetch());
+
+        await rt.start(
+          'sess-d', '/tmp/docker-ws',
+          { username: 'u', password: 'p' },
+          { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+        );
+
+        expect(spawn).toHaveBeenCalledWith(
+          'docker',
+          expect.arrayContaining(['-v', `${join(root, 'sess-d')}:/opencode-data`]),
+          expect.anything(),
+        );
+        expect(spawn).toHaveBeenCalledWith(
+          'docker',
+          expect.arrayContaining(['-e', 'XDG_DATA_HOME=/opencode-data']),
+          expect.anything(),
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('omits session mount when sessionStorage is unset', async () => {
+      const rt = new DockerRuntime(createPortPool(), { image: 'test-image' });
+      const mockProc = createMockProc({ exitCode: 0 });
+      (spawn as any).mockReturnValue(mockProc);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.start(
+        'sess-plain', '/tmp/docker-ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      const [, args] = (spawn as any).mock.calls[0];
+      expect(args).not.toContain('/opencode-data');
+      expect(args).not.toContain('XDG_DATA_HOME=/opencode-data');
     });
 
     it('uses instanceHost in baseUrl', async () => {

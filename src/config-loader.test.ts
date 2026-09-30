@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse as parseJSONC } from 'jsonc-parser';
 import { describe, it, expect, afterEach } from 'vitest';
-import { loadConfig, validateConfig, readJSON, normalizeApiKeys } from './config-loader.js';
+import { loadConfig, validateConfig, readJSON, normalizeApiKeys, validateSessionStorageConfig } from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
 
 function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentOrchestratorConfig {
@@ -364,6 +364,35 @@ describe('validateConfig', () => {
       },
     });
     expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  describe('validateSessionStorageConfig', () => {
+    it('accepts undefined (feature disabled)', () => {
+      expect(validateSessionStorageConfig(undefined)).toEqual([]);
+    });
+
+    it('accepts sharedRoot with default xdg mode', () => {
+      expect(validateSessionStorageConfig({ sharedRoot: '/data/sessions' })).toEqual([]);
+    });
+
+    it('accepts explicit sqlite mode', () => {
+      expect(validateSessionStorageConfig({ sharedRoot: '/data/sessions', mode: 'sqlite' })).toEqual([]);
+    });
+
+    it('rejects non-object values', () => {
+      expect(validateSessionStorageConfig('nope')).toEqual(['"sessionStorage" must be an object']);
+    });
+
+    it('rejects missing or empty sharedRoot', () => {
+      expect(validateSessionStorageConfig({})).toEqual(['"sessionStorage.sharedRoot" must be a non-empty string']);
+      expect(validateSessionStorageConfig({ sharedRoot: '' })).toEqual(['"sessionStorage.sharedRoot" must be a non-empty string']);
+    });
+
+    it('rejects unknown mode', () => {
+      expect(validateSessionStorageConfig({ sharedRoot: '/x', mode: 'nfs' })).toEqual([
+        '"sessionStorage.mode" must be "xdg" or "sqlite"',
+      ]);
+    });
   });
 
   // ─── RBAC validation ─────────────────────────────────────

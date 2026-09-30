@@ -373,6 +373,42 @@ describe('ConversationService', () => {
       expect(result.status).toBe('running');
     });
 
+    it('should resume the previous session when the server still has it', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState, status: 'running', sessionId: 'ses_old' });
+      const mockClient = {
+        getSession: vi.fn().mockResolvedValue({ id: 'ses_old' }),
+        createSession: vi.fn(),
+      };
+      mockInstanceManager.getInstance.mockReturnValue({ port: 41004, client: mockClient });
+      mockInstanceManager.restartInstance.mockResolvedValue(undefined);
+
+      await service.restart(testId);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(mockClient.getSession).toHaveBeenCalledWith('ses_old');
+      expect(mockClient.createSession).not.toHaveBeenCalled();
+      expect(mockConversationState.setInstanceInfo).toHaveBeenCalledWith(testId, { sessionId: 'ses_old' });
+      expect(mockInstanceManager.setSessionId).toHaveBeenCalledWith(testId, 'ses_old');
+    });
+
+    it('should create a fresh session when the previous session is gone', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState, status: 'running', sessionId: 'ses_gone' });
+      const mockClient = {
+        getSession: vi.fn().mockRejectedValue(new Error('not found')),
+        createSession: vi.fn().mockResolvedValue({ id: 'ses_new' }),
+      };
+      mockInstanceManager.getInstance.mockReturnValue({ port: 41004, client: mockClient });
+      mockInstanceManager.restartInstance.mockResolvedValue(undefined);
+
+      await service.restart(testId);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(mockClient.getSession).toHaveBeenCalledWith('ses_gone');
+      expect(mockClient.createSession).toHaveBeenCalledWith({ title: `AgentOrchestrator-${testId}` });
+      expect(mockConversationState.setInstanceInfo).toHaveBeenCalledWith(testId, { sessionId: 'ses_new' });
+      expect(mockInstanceManager.setSessionId).toHaveBeenCalledWith(testId, 'ses_new');
+    });
+
     it('should throw 404 when not found', async () => {
       mockConversationState.get.mockReturnValue(undefined);
 

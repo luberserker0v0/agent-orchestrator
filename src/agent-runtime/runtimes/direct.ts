@@ -5,6 +5,7 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { waitForHealthy } from '../health.js';
+import { resolveSessionStorage } from '../session-storage.js';
 import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, HealthCheckConfig, RuntimeAccess } from '../types.js';
 import type { DirectRuntimeConfig } from '../../config-loader.js';
 
@@ -73,7 +74,21 @@ export class DirectRuntime implements AgentRuntime {
 
   constructor(portPool: PortPool, config?: DirectRuntimeConfig) {
     this.portPool = portPool;
-    this.config = { binary: config?.binary ?? 'opencode', instanceHost: config?.instanceHost ?? '127.0.0.1' };
+    this.config = {
+      binary: config?.binary ?? 'opencode',
+      instanceHost: config?.instanceHost ?? '127.0.0.1',
+      sessionStorage: config?.sessionStorage,
+    };
+  }
+
+  /**
+   * Resolve the per-conversation opencode data-dir when `sessionStorage` is
+   * configured. Returns env vars for the spawned server (empty when unset).
+   * Re-resolving is idempotent (mkdir -p), so restart reuses the same dir.
+   */
+  private sessionEnvFor(id: string): Record<string, string> {
+    if (!this.config.sessionStorage) return {};
+    return resolveSessionStorage(this.config.sessionStorage, id).env;
   }
 
   async start(
@@ -101,6 +116,7 @@ export class DirectRuntime implements AgentRuntime {
         detached: false,
         env: {
           ...process.env,
+          ...this.sessionEnvFor(id),
           OPENCODE_SERVER_USERNAME: auth.username,
           OPENCODE_SERVER_PASSWORD: auth.password,
         },
@@ -149,6 +165,7 @@ export class DirectRuntime implements AgentRuntime {
         detached: false,
         env: {
           ...process.env,
+          ...this.sessionEnvFor(id),
           OPENCODE_SERVER_USERNAME: state.auth.username,
           OPENCODE_SERVER_PASSWORD: state.auth.password,
         },
