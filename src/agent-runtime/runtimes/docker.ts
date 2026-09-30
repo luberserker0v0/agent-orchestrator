@@ -4,6 +4,7 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { waitForHealthy } from '../health.js';
+import { resolveSessionStorage, sessionContainerArgs } from '../session-storage.js';
 import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, AgentClient, HealthCheckConfig, RuntimeAccess } from '../types.js';
 import type { DockerRuntimeConfig } from '../../config-loader.js';
 
@@ -135,8 +136,15 @@ export class DockerRuntime implements AgentRuntime {
           dockerArgs.push('--network', this.config.networkMode);
         }
       }
+      // Persist opencode sessions across container recreation when configured.
+      // Skipped with docker-volume access (storage owned by the data container).
+      const sessionMountArgs: string[] =
+        !vol && this.config.sessionStorage
+          ? sessionContainerArgs(resolveSessionStorage(this.config.sessionStorage, id))
+          : [];
       dockerArgs.push(
         ...(vol ? ['--volumes-from', vol.container] : ['-v', `${workspacePath}:/workspace`]),
+        ...sessionMountArgs,
         '-w', '/workspace',
         '-e', `OPENCODE_SERVER_USERNAME=${auth.username}`,
         '-e', `OPENCODE_SERVER_PASSWORD=${auth.password}`,

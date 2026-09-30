@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { loadConfig, loadCanonicalConfig } from './config-loader.js';
+import { loadConfig, loadCanonicalConfig, validateSessionStorageConfig } from './config-loader.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { LocalStorage } from './storage/index.js';
 import type { StorageBackend } from './storage/types.js';
@@ -89,13 +89,20 @@ export async function main(cliArgs?: string[]) {
 
   // Set up runtime registry — register all runtimes from config
   const runtimeFactory = new RuntimeFactory();
-  runtimeFactory.register('direct', DirectRuntime);
+  runtimeFactory.register('direct', DirectRuntime, (config) => {
+    const errs: string[] = [];
+    const cfg = config as Record<string, unknown>;
+    if (cfg?.binary !== undefined && typeof cfg.binary !== 'string') errs.push('"binary" must be a string');
+    errs.push(...validateSessionStorageConfig(cfg?.sessionStorage));
+    return errs;
+  });
   runtimeFactory.register('docker', DockerRuntime, (config) => {
     const errs: string[] = [];
     const cfg = config as Record<string, unknown>;
     if (!cfg?.image || typeof cfg.image !== 'string') errs.push('"image" is required');
     if (cfg?.networkMode !== undefined && typeof cfg.networkMode !== 'string')
       errs.push('"networkMode" must be a string');
+    errs.push(...validateSessionStorageConfig(cfg?.sessionStorage));
     return errs;
   });
 

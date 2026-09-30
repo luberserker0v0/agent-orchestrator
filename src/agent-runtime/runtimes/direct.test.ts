@@ -6,6 +6,9 @@ vi.mock('tree-kill', () => ({
 }));
 
 import { spawn } from 'cross-spawn';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { DirectRuntime } from './direct.js';
 
@@ -143,6 +146,49 @@ describe('DirectRuntime', () => {
       expect(result.port).toBeGreaterThanOrEqual(40000);
       expect(result.handle).toBeDefined();
       expect(result.client).toBeDefined();
+    });
+
+    it('injects XDG_DATA_HOME when sessionStorage is configured', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'ao-direct-test-'));
+      try {
+        const rt = new DirectRuntime(createPortPool(), { binary: 'opencode', sessionStorage: { sharedRoot: root } });
+        const mockProc = createMockProc();
+        (spawn as any).mockReturnValue(mockProc);
+        mockFetch.mockResolvedValue(makeHealthyFetch());
+
+        await rt.start(
+          'sess-conv', '/tmp/ws',
+          { username: 'u', password: 'p' },
+          { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+        );
+
+        expect(spawn).toHaveBeenCalledWith(
+          'opencode',
+          expect.anything(),
+          expect.objectContaining({
+            env: expect.objectContaining({ XDG_DATA_HOME: join(root, 'sess-conv') }),
+          }),
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('omits session env when sessionStorage is unset', async () => {
+      const rt = new DirectRuntime(createPortPool(), { binary: 'opencode' });
+      const mockProc = createMockProc();
+      (spawn as any).mockReturnValue(mockProc);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.start(
+        'sess-plain', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      const [, , opts] = (spawn as any).mock.calls[0];
+      expect(opts.env).not.toHaveProperty('XDG_DATA_HOME');
+      expect(opts.env).not.toHaveProperty('OPENCODE_DB');
     });
 
     it('throws when health check fails after all retries', async () => {

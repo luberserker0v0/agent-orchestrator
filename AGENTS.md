@@ -274,6 +274,7 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `runtimes[].config.binary` | string | `opencode` | OpenCode CLI command or absolute path |
 | `runtimes[].config.version` | string | (optional) | OpenCode version (used by the version registry) |
 | `runtimes[].config.instanceHost` | string | `'127.0.0.1'` | Hostname used to reach started OpenCode instances (per-runtime, useful for remote Docker hosts) |
+| `runtimes[].config.sessionStorage` | object | (none) | Per-conversation opencode data-dir: `{ sharedRoot, mode?: 'xdg' \| 'sqlite' }`. One subdirectory per conversation id; required for session resume across restarts/migration |
 | `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.8`) |
 | `runtimes[].config.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |

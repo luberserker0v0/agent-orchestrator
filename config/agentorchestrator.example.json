@@ -78,6 +78,14 @@
           "binary": "opencode",
           "version": "1.17.8"
           // "instanceHost": "127.0.0.1"  // Hostname to reach spawned instances (default: "127.0.0.1")
+          // Per-conversation opencode data-dir (session persistence across restarts/migration).
+          // Omit for opencode defaults (ephemeral sessions). One subdirectory per conversation
+          // id is created automatically; mount the same root at an identical absolute path on
+          // every machine to resume sessions cross-host.
+          // "sessionStorage": {
+          //   "sharedRoot": "./sessions",  // Relative paths resolve against the orchestrator cwd
+          //   "mode": "xdg"                // "xdg" = XDG_DATA_HOME=<root>/<id>; "sqlite" adds OPENCODE_DB=<root>/<id>/opencode.db
+          // }
         }
       },
       {
@@ -87,6 +95,8 @@
           "image": "ghcr.io/anomalyco/opencode:1.17.8"
           // "instanceHost": "127.0.0.1"  // Hostname to reach spawned instances (default: "127.0.0.1")
           // "networkMode": "bridge"       // Docker network mode: "host", "bridge", or custom network name
+          // Same sessionStorage semantics as direct; mounted as /opencode-data in the container.
+          // "sessionStorage": { "sharedRoot": "./sessions", "mode": "xdg" }
         }
       }
     ],

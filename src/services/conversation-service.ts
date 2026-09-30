@@ -110,7 +110,7 @@ export class ConversationService {
         this.sseBridge.start(id, instance.baseUrl, instance.username, instance.password);
       }
 
-      this.createSessionInBackground(id, instance.client);
+      this.ensureSessionInBackground(id, instance.client);
 
       return {
         id,
@@ -191,7 +191,7 @@ export class ConversationService {
         this.sseBridge.start(id, instance.baseUrl, instance.username, instance.password);
       }
 
-      this.createSessionInBackground(id, instance.client);
+      this.ensureSessionInBackground(id, instance.client, state.sessionId);
 
       return {
         id,
@@ -247,15 +247,43 @@ export class ConversationService {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  private createSessionInBackground(id: string, client: AgentClient): void {
+  /**
+   * Ensure the conversation has a live session on the (possibly new) instance.
+   * When `resumeSessionId` is set and the server still knows it (e.g. restart
+   * with persisted session storage), the existing session — and its full LLM
+   * history — is adopted instead of discarded. Otherwise a fresh session is
+   * created, preserving the previous behavior.
+   */
+  private ensureSessionInBackground(id: string, client: AgentClient, resumeSessionId?: string): void {
+    if (resumeSessionId) {
+      client.getSession(resumeSessionId).then(
+        (session) => {
+          this.adoptSession(id, session.id);
+          logger.info(`[OpenCode ${id}] session resumed: ${session.id}`);
+        },
+        () => {
+          logger.warn(`[OpenCode ${id}] previous session ${resumeSessionId} unavailable, creating fresh session`);
+          this.createFreshSession(id, client);
+        },
+      );
+      return;
+    }
+    this.createFreshSession(id, client);
+  }
+
+  private createFreshSession(id: string, client: AgentClient): void {
     client.createSession({ title: `AgentOrchestrator-${id}` })
       .then((session) => {
-        this.conversationState.setInstanceInfo(id, { sessionId: session.id });
-        this.instanceManager.setSessionId(id, session.id);
+        this.adoptSession(id, session.id);
         logger.info(`[OpenCode ${id}] session created: ${session.id}`);
       })
       .catch((err) => {
         logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
       });
+  }
+
+  private adoptSession(id: string, sessionId: string): void {
+    this.conversationState.setInstanceInfo(id, { sessionId });
+    this.instanceManager.setSessionId(id, sessionId);
   }
 }
