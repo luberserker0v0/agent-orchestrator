@@ -1,11 +1,19 @@
 import { logger } from '../utils/logger.js';
 import { opencodeHttpRequestsTotal, opencodeHttpRequestDurationSeconds } from '../metrics/registry.js';
+import { AppError, ErrorCodes, type LlmQuotaErrorDetails } from '../utils/errors.js';
 import type { AgentClient, SessionInfo, MessageEntry, SendPromptResult, AgentDefinition, ProviderListResult, AgentConfig, HealthInfo, SendPromptParams, CreateSessionParams } from '../agent-runtime/types.js';
+
+export type { LlmQuotaErrorDetails };
 
 export class OpenCodeAgentClient implements AgentClient {
   private baseUrl: string;
   private authHeader?: string;
   private timeoutMs: number;
+
+  private static readonly QUOTA_STATUSES = new Set([429, 402, 403]);
+  private static readonly QUOTA_EXHAUSTED_PATTERN =
+    /quota|token.*exhaust|credit|billing|payment|usage.*limit|insufficient/i;
+  private static readonly RATE_LIMITED_PATTERN = /rate.?limit|too many requests/i;
 
   constructor(baseUrl: string, username?: string, password?: string, timeoutMs = 600000) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -18,6 +26,47 @@ export class OpenCodeAgentClient implements AgentClient {
   private normalizePath(path: string): string {
     const segment = path.split('?')[0].split('/').filter(Boolean)[0];
     return segment || 'unknown';
+  }
+
+  /**
+   * Classify upstream 429/402/403 responses into typed LLM quota errors.
+   * Returns undefined when the response is not quota-related (caller keeps the
+   * generic error path). 429 without a quota match is treated as rate-limited
+   * (retryable); 402/403 require a quota body match to avoid misclassifying
+   * auth errors.
+   */
+  static classifyQuotaError(status: number, body: string, headers?: Headers | undefined): AppError | undefined {
+    if (!OpenCodeAgentClient.QUOTA_STATUSES.has(status)) {
+      return undefined;
+    }
+    const text = body ?? '';
+    const quotaMatch = OpenCodeAgentClient.QUOTA_EXHAUSTED_PATTERN.test(text);
+    const rateMatch = OpenCodeAgentClient.RATE_LIMITED_PATTERN.test(text);
+    if (!quotaMatch && !rateMatch && status !== 429) {
+      return undefined;
+    }
+    const retryAfterMs = OpenCodeAgentClient.parseRetryAfterMs(headers);
+    const details: LlmQuotaErrorDetails = { upstreamStatus: status, body: text };
+    if (retryAfterMs !== undefined) {
+      details.retryAfterMs = retryAfterMs;
+    }
+    const message = `OpenCode HTTP ${status}: ${text || 'Unknown error'}`;
+    if (quotaMatch) {
+      return new AppError(429, ErrorCodes.LLM_QUOTA_EXHAUSTED, message, details);
+    }
+    return new AppError(429, ErrorCodes.LLM_RATE_LIMITED, message, details);
+  }
+
+  private static parseRetryAfterMs(headers?: Headers | undefined): number | undefined {
+    const raw = headers?.get?.('retry-after') ?? headers?.get?.('Retry-After');
+    if (raw === undefined || raw === null) {
+      return undefined;
+    }
+    const seconds = Number.parseInt(String(raw).trim(), 10);
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      return undefined;
+    }
+    return seconds * 1000;
   }
 
   private async request<T>(
@@ -56,7 +105,8 @@ export class OpenCodeAgentClient implements AgentClient {
       if (!res.ok) {
         opencodeHttpRequestsTotal.labels(method, normalizedPath, String(res.status)).inc();
         const text = await res.text().catch(() => 'Unknown error');
-        throw new Error(`OpenCode HTTP ${res.status}: ${text}`);
+        const quotaError = OpenCodeAgentClient.classifyQuotaError(res.status, text, res.headers);
+        throw quotaError ?? new Error(`OpenCode HTTP ${res.status}: ${text}`);
       }
 
       opencodeHttpRequestsTotal.labels(method, normalizedPath, String(res.status)).inc();

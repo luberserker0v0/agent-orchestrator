@@ -1,8 +1,8 @@
 import { InstanceManager, type InstanceInfo } from '../orchestrator/instance-manager.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
-import { AppError, ErrorCodes } from '../utils/errors.js';
+import { AppError, ErrorCodes, isAppError, type LlmQuotaErrorDetails } from '../utils/errors.js';
 import { parseModelString } from '../utils/model-parser.js';
-import { messagesSentTotal, messageSendDurationSeconds } from '../metrics/registry.js';
+import { messagesSentTotal, messageSendDurationSeconds, llmQuotaExhaustionsTotal } from '../metrics/registry.js';
 
 export interface SendResult {
   messageId: string;
@@ -78,6 +78,19 @@ export class MessageService {
     } catch (err) {
       messagesSentTotal.labels('error').inc();
       messageSendDurationSeconds.observe((performance.now() - start) / 1000);
+      if (
+        isAppError(err) &&
+        (err.code === ErrorCodes.LLM_QUOTA_EXHAUSTED || err.code === ErrorCodes.LLM_RATE_LIMITED)
+      ) {
+        llmQuotaExhaustionsTotal.labels(err.code).inc();
+        const details = err.details as LlmQuotaErrorDetails | undefined;
+        this.conversationState.emitEvent(id, 'conversation.quotaExhausted', {
+          model: rawModel,
+          agent: rawAgent,
+          code: err.code,
+          retryAfterMs: details?.retryAfterMs,
+        });
+      }
       throw err;
     }
   }

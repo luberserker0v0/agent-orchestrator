@@ -11,11 +11,12 @@ vi.mock('../metrics/registry.js', () => {
   return {
     messagesSentTotal: { labels },
     messageSendDurationSeconds: { observe },
+    llmQuotaExhaustionsTotal: { labels },
   };
 });
 
 import { MessageService } from './message-service.js';
-import { AppError } from '../utils/errors.js';
+import { AppError, ErrorCodes } from '../utils/errors.js';
 
 describe('MessageService', () => {
   let service: MessageService;
@@ -169,6 +170,59 @@ describe('MessageService', () => {
       expect(messagesSentTotal.labels).toHaveBeenCalledWith('error');
       expect(messagesSentTotal.labels('error').inc).toHaveBeenCalled();
       expect(messageSendDurationSeconds.observe).toHaveBeenCalled();
+    });
+
+    it('should emit conversation.quotaExhausted and rethrow on LLM quota error', async () => {
+      const { llmQuotaExhaustionsTotal } = await import('../metrics/registry.js');
+      mockReady('ses_1');
+      const quotaError = new AppError(429, ErrorCodes.LLM_QUOTA_EXHAUSTED, 'OpenCode HTTP 429: quota exceeded', {
+        upstreamStatus: 429,
+        retryAfterMs: 60000,
+        body: 'quota exceeded',
+      });
+      mockClient.sendPrompt.mockRejectedValue(quotaError);
+
+      await expect(service.send(testId, 'Hi', 'anthropic/claude-sonnet', 'build')).rejects.toThrow(quotaError);
+
+      expect(llmQuotaExhaustionsTotal.labels).toHaveBeenCalledWith(ErrorCodes.LLM_QUOTA_EXHAUSTED);
+      expect(llmQuotaExhaustionsTotal.labels(ErrorCodes.LLM_QUOTA_EXHAUSTED).inc).toHaveBeenCalled();
+      expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.quotaExhausted', {
+        model: 'anthropic/claude-sonnet',
+        agent: 'build',
+        code: ErrorCodes.LLM_QUOTA_EXHAUSTED,
+        retryAfterMs: 60000,
+      });
+      // Instance untouched: still resolvable, conversation still running (no destroy/transition)
+      expect(mockInstanceManager.getInstance).toHaveReturnedWith({ client: mockClient, sessionId: 'ses_1' });
+    });
+
+    it('should emit conversation.quotaExhausted on rate-limited error', async () => {
+      const { llmQuotaExhaustionsTotal } = await import('../metrics/registry.js');
+      mockReady('ses_1');
+      mockClient.sendPrompt.mockRejectedValue(
+        new AppError(429, ErrorCodes.LLM_RATE_LIMITED, 'OpenCode HTTP 429: too many requests')
+      );
+
+      await expect(service.send(testId, 'Hi')).rejects.toThrow(AppError);
+
+      expect(llmQuotaExhaustionsTotal.labels).toHaveBeenCalledWith(ErrorCodes.LLM_RATE_LIMITED);
+      expect(mockConversationState.emitEvent).toHaveBeenCalledWith(
+        testId,
+        'conversation.quotaExhausted',
+        expect.objectContaining({ code: ErrorCodes.LLM_RATE_LIMITED, retryAfterMs: undefined })
+      );
+    });
+
+    it('should not emit quotaExhausted on generic errors', async () => {
+      mockReady('ses_1');
+      mockClient.sendPrompt.mockRejectedValue(new Error('send failed'));
+
+      await expect(service.send(testId, 'Hi')).rejects.toThrow('send failed');
+
+      const quotaCalls = mockConversationState.emitEvent.mock.calls.filter(
+        ([, type]: [string, string]) => type === 'conversation.quotaExhausted'
+      );
+      expect(quotaCalls).toHaveLength(0);
     });
   });
 

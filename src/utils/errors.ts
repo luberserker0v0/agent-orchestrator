@@ -33,15 +33,24 @@ export const ErrorCodes = {
   CANNOT_MODIFY_ADMIN: 'CANNOT_MODIFY_ADMIN',
   CANNOT_DELETE_ADMIN: 'CANNOT_DELETE_ADMIN',
   INVALID_ROLE_NAME: 'INVALID_ROLE_NAME',
+  LLM_QUOTA_EXHAUSTED: 'LLM_QUOTA_EXHAUSTED',
+  LLM_RATE_LIMITED: 'LLM_RATE_LIMITED',
 } as const;
 
 export type ErrorCode = string;
+
+export interface LlmQuotaErrorDetails {
+  upstreamStatus: number;
+  retryAfterMs?: number;
+  body: string;
+}
 
 export class AppError extends Error {
   constructor(
     public statusCode: number,
     public code: string,
     message: string,
+    public details?: unknown,
   ) {
     super(message);
     this.name = 'AppError';
