@@ -183,7 +183,7 @@ k8s/
 |---|---|---|
 | A. Detection | `LLM_QUOTA_EXHAUSTED`/`RATE_LIMITED` codes + classifier + metric + event | Unit: 429/402/403 bodies → typed errors; other 500s untouched |
 | B. Session persistence | `sessionStorage` config, dual-path layout in all runtimes, durable `sessionId`, mount-verification | E2E: stop on A → resume same `sid` on B |
-| C. Volume lifecycle | Per-conversation PVC provision/mount/GC + `volumeClaimName` in CRDs (spike on `kind`/hostPath first) | Migration of empty + loaded volumes across nodes |
+| C. Volume lifecycle | C1 (no cluster): CRD manifests (`k8s/crd/`) + per-conversation PVC/Pod templates + retention rules. C2 (blocked: needs cluster venue): live detach/remount spike | C1: manifests parse + schemas match §6–§7; C2: remount across nodes + GC |
 | D. Status reporting | `OpencodeInstance` create/patch on lifecycle + quota events; flap guard | Tokens killed on A → `QuotaExhausted` within budget |
 | E. Operator + migration | Controller binary + `Deployment`, full state machine incl. rollback/no-target | Quota on A → conversation continues on B, history intact |
 | F. Refill + hardening | `QuotaPolicy`, probe-to-clear, selection scoring, metrics (`migrations_total{result}`, `quota_exhaustions_total{model}`), chaos tests | Failover + rollback paths green in CI |
