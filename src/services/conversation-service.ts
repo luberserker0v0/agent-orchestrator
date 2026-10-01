@@ -6,7 +6,7 @@ import { ConversationState, type ConversationEvent } from '../orchestrator/conve
 import { SSEBridge } from '../orchestrator/sse-bridge.js';
 import type { AgentClient } from '../agent-runtime/types.js';
 import { logger } from '../utils/logger.js';
-import { AppError, ErrorCodes } from '../utils/errors.js';
+import { AppError, ErrorCodes, isAppError } from '../utils/errors.js';
 import { conversationVolumeClaimName, type K8sStatusReporter } from '../cluster/status-reporter.js';
 
 export interface ConversationData {
@@ -292,6 +292,12 @@ export class ConversationService {
       })
       .catch((err) => {
         logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
+        if (
+          isAppError(err) &&
+          (err.code === ErrorCodes.LLM_QUOTA_EXHAUSTED || err.code === ErrorCodes.LLM_RATE_LIMITED)
+        ) {
+          void this.statusReporter?.reportQuotaError(id, { code: err.code, message: err.message });
+        }
       });
   }
 

@@ -5,7 +5,7 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 import { ConversationService } from './conversation-service.js';
-import { AppError } from '../utils/errors.js';
+import { AppError, ErrorCodes } from '../utils/errors.js';
 
 describe('ConversationService', () => {
   let service: ConversationService;
@@ -246,6 +246,34 @@ describe('ConversationService', () => {
         endpoint: 'http://127.0.0.1:41001',
         volumeClaimName: 'conv-conv-1',
       });
+    });
+
+    it('should report quota errors from background session creation', async () => {
+      const mockReporter = { trackInstance: vi.fn(), untrackInstance: vi.fn(), reportQuotaError: vi.fn() };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+      );
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      const quotaError = new AppError(429, ErrorCodes.LLM_QUOTA_EXHAUSTED, 'OpenCode HTTP 429: quota exceeded');
+      mockInstanceManager.createInstance.mockResolvedValue({
+        port: 41001,
+        client: { createSession: vi.fn().mockRejectedValue(quotaError) },
+      });
+
+      await svc.start(testId);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(mockReporter.reportQuotaError).toHaveBeenCalledWith(
+        testId,
+        expect.objectContaining({ code: ErrorCodes.LLM_QUOTA_EXHAUSTED })
+      );
     });
 
     it('should throw 404 when conversation not found', async () => {
