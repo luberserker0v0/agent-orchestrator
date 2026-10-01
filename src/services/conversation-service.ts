@@ -7,6 +7,7 @@ import { SSEBridge } from '../orchestrator/sse-bridge.js';
 import type { AgentClient } from '../agent-runtime/types.js';
 import { logger } from '../utils/logger.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
+import { conversationVolumeClaimName, type K8sStatusReporter } from '../cluster/status-reporter.js';
 
 export interface ConversationData {
   id: string;
@@ -40,6 +41,8 @@ export class ConversationService {
     private serverConfig: ServerConfig,
     private defaultAgentType: string,
     private sseBridge?: SSEBridge,
+    private statusReporter?: K8sStatusReporter,
+    private getRuntimeType?: (agentTypeId: string) => string | undefined,
   ) {}
 
   async create(id?: string, agentType?: string): Promise<ConversationData> {
@@ -110,6 +113,14 @@ export class ConversationService {
         this.sseBridge.start(id, instance.baseUrl, instance.username, instance.password);
       }
 
+      const runtimeType = this.getRuntimeType?.(state.agentType);
+      void this.statusReporter?.trackInstance({
+        conversationId: id,
+        ...(runtimeType ? { runtimeType } : {}),
+        ...(instance.baseUrl ? { endpoint: instance.baseUrl } : {}),
+        volumeClaimName: conversationVolumeClaimName(id),
+      });
+
       this.ensureSessionInBackground(id, instance.client);
 
       return {
@@ -142,6 +153,7 @@ export class ConversationService {
       await this.instanceManager.destroyInstance(id);
       this.conversationState.removeRunningInstance(id);
       this.conversationState.transition(id, 'stopped');
+      void this.statusReporter?.untrackInstance(id);
     } catch (err) {
       throw err instanceof AppError ? err : new AppError(500, ErrorCodes.INTERNAL_ERROR, (err as Error).message);
     }
@@ -225,6 +237,7 @@ export class ConversationService {
     }
     this.conversationState.transition(id, 'destroyed');
     this.conversationState.remove(id);
+    void this.statusReporter?.untrackInstance(id);
   }
 
   private toConversationData(state: NonNullable<ReturnType<ConversationState['get']>>): ConversationData {

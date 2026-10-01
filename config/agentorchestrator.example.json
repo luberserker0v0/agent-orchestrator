@@ -131,4 +131,15 @@
       "type": "local"  // Currently only "local" is supported
     }
   }
+
+  // ── Cluster (Kubernetes status reporting) ───────────────────────────
+  // Reports OpencodeInstance lifecycle/quota status to the cluster so a
+  // placement controller can migrate conversations off exhausted machines.
+  // Disabled by default; omit or set enabled=false for single-node use.
+  // "cluster": {
+  //   "enabled": true,                // Report to OpencodeInstance CRs (requires CRDs installed)
+  //   "namespace": "ao-instances",    // Namespace for OpencodeInstance objects
+  //   "heartbeatIntervalMs": 60000,   // Status heartbeat interval (0 = disable)
+  //   "quotaFailureThreshold": 2      // Consecutive quota errors before QuotaExhausted
+  // }
 }

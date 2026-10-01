@@ -218,6 +218,36 @@ describe('ConversationService', () => {
       expect(result.port).toBe(41001);
     });
 
+    it('should track instance status on start when reporter is configured', async () => {
+      const mockReporter = { trackInstance: vi.fn(), untrackInstance: vi.fn() };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+        (agentTypeId: string) => (agentTypeId === 'opencode-direct' ? 'direct' : undefined),
+      );
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      mockInstanceManager.createInstance.mockResolvedValue({
+        port: 41001,
+        baseUrl: 'http://127.0.0.1:41001',
+        client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) },
+      });
+
+      await svc.start(testId);
+
+      expect(mockReporter.trackInstance).toHaveBeenCalledWith({
+        conversationId: testId,
+        runtimeType: 'direct',
+        endpoint: 'http://127.0.0.1:41001',
+        volumeClaimName: 'conv-conv-1',
+      });
+    });
+
     it('should throw 404 when conversation not found', async () => {
       mockConversationState.get.mockReturnValue(undefined);
 
@@ -501,6 +531,26 @@ describe('ConversationService', () => {
   });
 
   describe('delete', () => {
+    it('should untrack instance status on delete when reporter is configured', async () => {
+      const mockReporter = { trackInstance: vi.fn(), untrackInstance: vi.fn() };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+      );
+      mockConversationState.has.mockReturnValue(true);
+      mockInstanceManager.getInstance.mockReturnValue(undefined);
+
+      await svc.delete(testId);
+
+      expect(mockReporter.untrackInstance).toHaveBeenCalledWith(testId);
+    });
+
     it('should delete a conversation', async () => {
       mockConversationState.has.mockReturnValue(true);
       mockInstanceManager.destroyInstance.mockResolvedValue(undefined);

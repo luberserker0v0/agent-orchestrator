@@ -151,12 +151,24 @@ export interface WorkspaceConfig {
   storage: StorageConfig;
 }
 
+export interface ClusterConfig {
+  /** Enable Kubernetes OpencodeInstance status reporting. Default false (no behavior change). */
+  enabled?: boolean;
+  /** Namespace for OpencodeInstance objects. Default 'ao-instances'. */
+  namespace?: string;
+  /** Heartbeat interval ms for tracked instances. 0 = disable heartbeats. Default 60000. */
+  heartbeatIntervalMs?: number;
+  /** Consecutive quota errors before phase flips to QuotaExhausted. Default 2. */
+  quotaFailureThreshold?: number;
+}
+
 export interface AgentOrchestratorConfig {
   server: ServerConfig;
   websocket: WebSocketConfig;
   orchestrator: OrchestratorConfig;
   workspace: WorkspaceConfig;
   roles?: RolesConfig;
+  cluster?: ClusterConfig;
 }
 
 const CONFIG_DIR = join(process.cwd(), 'config');
@@ -406,6 +418,21 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       throw new Error(`Config validation failed: workspace.storage.type must be "local", got ${config.workspace.storage.type}`);
     }
   }
+
+  if (config.cluster !== undefined) {
+    if (config.cluster.enabled !== undefined && typeof config.cluster.enabled !== 'boolean') {
+      throw new Error(`Config validation failed: cluster.enabled must be a boolean, got ${config.cluster.enabled}`);
+    }
+    if (config.cluster.namespace !== undefined && (typeof config.cluster.namespace !== 'string' || !config.cluster.namespace)) {
+      throw new Error('Config validation failed: cluster.namespace must be a non-empty string');
+    }
+    if (config.cluster.heartbeatIntervalMs !== undefined && (!Number.isInteger(config.cluster.heartbeatIntervalMs) || config.cluster.heartbeatIntervalMs < 0)) {
+      throw new Error(`Config validation failed: cluster.heartbeatIntervalMs must be a non-negative integer, got ${config.cluster.heartbeatIntervalMs}`);
+    }
+    if (config.cluster.quotaFailureThreshold !== undefined && (!Number.isInteger(config.cluster.quotaFailureThreshold) || config.cluster.quotaFailureThreshold < 1)) {
+      throw new Error(`Config validation failed: cluster.quotaFailureThreshold must be a positive integer, got ${config.cluster.quotaFailureThreshold}`);
+    }
+  }
 }
 
 export function readJSON(path: string): Record<string, unknown> {
@@ -455,6 +482,12 @@ export function defaultConfig(): AgentOrchestratorConfig {
       enforceCanonicalConfig: true,
       maxSizeBytes: 50 * 1024 * 1024,
       storage: { type: 'local' },
+    },
+    cluster: {
+      enabled: false,
+      namespace: 'ao-instances',
+      heartbeatIntervalMs: 60000,
+      quotaFailureThreshold: 2,
     },
   };
 }

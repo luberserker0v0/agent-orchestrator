@@ -234,6 +234,41 @@ describe('MessageService', () => {
       );
       expect(quotaCalls).toHaveLength(0);
     });
+
+    it('should report quota errors to the status reporter', async () => {
+      const mockReporter = { reportQuotaError: vi.fn(), reportSuccess: vi.fn() };
+      const svc = new MessageService(mockInstanceManager, mockConversationState, mockReporter as any);
+      mockReady('ses_1');
+      mockClient.sendPrompt.mockRejectedValue(
+        new AppError(429, ErrorCodes.LLM_QUOTA_EXHAUSTED, 'OpenCode HTTP 429: quota exceeded')
+      );
+
+      await expect(svc.send(testId, 'Hi', 'anthropic/claude-sonnet')).rejects.toThrow(AppError);
+
+      expect(mockReporter.reportQuotaError).toHaveBeenCalledWith(
+        testId,
+        expect.objectContaining({
+          code: ErrorCodes.LLM_QUOTA_EXHAUSTED,
+          model: { providerID: 'anthropic', id: 'claude-sonnet' },
+        })
+      );
+      expect(mockReporter.reportSuccess).not.toHaveBeenCalled();
+    });
+
+    it('should report success to the status reporter', async () => {
+      const mockReporter = { reportQuotaError: vi.fn(), reportSuccess: vi.fn() };
+      const svc = new MessageService(mockInstanceManager, mockConversationState, mockReporter as any);
+      mockReady('ses_1');
+      mockClient.sendPrompt.mockResolvedValue({
+        info: { id: 'msg_1' },
+        parts: [{ type: 'text', text: 'ok' }],
+      });
+
+      await svc.send(testId, 'Hi');
+
+      expect(mockReporter.reportSuccess).toHaveBeenCalledWith(testId);
+      expect(mockReporter.reportQuotaError).not.toHaveBeenCalled();
+    });
   });
 
   describe('getHistory', () => {
