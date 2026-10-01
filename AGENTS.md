@@ -270,13 +270,19 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `portRange.start` | integer | 30000 | First port in the dynamic allocation range |
 | `portRange.end` | integer | 30100 | Last port in the dynamic allocation range |
 | `defaultAgentType` | string | 'opencode-direct' | Default agent type — must match the `id` of one runtime entry in `runtimes[]` |
-| `runtimes` | array | `[{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode', version: '1.17.8' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct` or `docker`), and `config` |
+| `runtimes` | array | `[{ id: 'opencode-direct', type: 'direct', config: { binary: 'opencode', version: '1.17.8' } }]` | Array of runtime entries. Each entry has `id`, `type` (`direct`, `docker`, or `kubernetes`), and `config` |
 | `runtimes[].config.binary` | string | `opencode` | OpenCode CLI command or absolute path |
 | `runtimes[].config.version` | string | (optional) | OpenCode version (used by the version registry) |
 | `runtimes[].config.instanceHost` | string | `'127.0.0.1'` | Hostname used to reach started OpenCode instances (per-runtime, useful for remote Docker hosts) |
 | `runtimes[].config.sessionStorage` | object | (none) | Per-conversation opencode data-dir: `{ sharedRoot, mode?: 'xdg' \| 'sqlite' }`. One subdirectory per conversation id; required for session resume across restarts/migration |
 | `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.8`) |
 | `runtimes[].config.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
+| `runtimes[].config.kubernetes.image` | string | (required for kubernetes) | Container image running `opencode serve` |
+| `runtimes[].config.kubernetes.namespace` | string | `'ao-instances'` | Namespace for instance Pods/Services |
+| `runtimes[].config.kubernetes.instanceHost` | string | (Service DNS) | BaseUrl host override (e.g. `127.0.0.1` with `kubectl port-forward` when the orchestrator runs outside the cluster) |
+| `runtimes[].config.kubernetes.nodeName` | string | (none) | Pin instance Pods to a node (migration target) |
+| `runtimes[].config.kubernetes.sessionMode` | string | `'xdg'` | Session env mapping inside the Pod (`xdg` or `sqlite`); data lives on the per-conversation PVC |
+| `runtimes[].config.kubernetes.podReadyTimeoutMs` | integer | 180000 | Max ms to wait for the instance Pod to become Ready |
 | `healthCheck.retries` | integer | 10 | Number of health check attempts before giving up |
 | `healthCheck.intervalMs` | integer | 500 | Delay between health check retries |
 | `healthCheck.clientTimeoutMs` | integer | 5000 | HTTP client timeout per health check request |

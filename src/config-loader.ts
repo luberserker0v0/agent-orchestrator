@@ -67,6 +67,30 @@ export interface DockerRuntimeConfig {
   sessionStorage?: SessionStorageConfig;
 }
 
+export interface KubernetesRuntimeConfig {
+  /** Container image running `opencode serve` (e.g. `ghcr.io/anomalyco/opencode:1.17.8`) */
+  image: string;
+  /** Namespace for instance Pods/Services. Default 'ao-instances'. */
+  namespace?: string;
+  /**
+   * Hostname used in baseUrl instead of the in-cluster Service DNS.
+   * Set to `127.0.0.1` with a matching `kubectl port-forward` when the
+   * orchestrator runs outside the cluster.
+   */
+  instanceHost?: string;
+  /** Pin instance Pods to a node (migration target). Omit for default scheduling. */
+  nodeName?: string;
+  /** Session env mode inside the Pod (`xdg` default, `sqlite` adds OPENCODE_DB). The data itself lives on the per-conversation PVC. */
+  sessionMode?: 'xdg' | 'sqlite';
+  /** Max ms to wait for the Pod to become Ready. Default 180000. */
+  podReadyTimeoutMs?: number;
+  /** Container CPU/memory requests/limits (e.g. `{ requests: { cpu: '500m' } }`). */
+  resources?: {
+    requests?: { cpu?: string; memory?: string };
+    limits?: { cpu?: string; memory?: string };
+  };
+}
+
 /**
  * Per-conversation opencode session storage. One subdirectory per conversation id
  * is created under `sharedRoot`, so a new instance on any machine resumes the same
@@ -111,7 +135,13 @@ export interface DockerRuntimeEntry {
   config: DockerRuntimeConfig;
 }
 
-export type RuntimeEntry = DirectRuntimeEntry | DockerRuntimeEntry;
+export interface KubernetesRuntimeEntry {
+  id: string;
+  type: 'kubernetes';
+  config: KubernetesRuntimeConfig;
+}
+
+export type RuntimeEntry = DirectRuntimeEntry | DockerRuntimeEntry | KubernetesRuntimeEntry;
 
 export interface SSEConfig {
   /** Enable SSE event forwarding from OpenCode instances */

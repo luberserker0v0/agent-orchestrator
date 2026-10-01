@@ -55,12 +55,15 @@ spec:
         httpGet:
           path: /global/health
           port: server
+          # NOTE: the server requires Basic auth — the operator/rendered Pod
+          # must add an httpHeaders Authorization entry (see KubernetesRuntime).
         initialDelaySeconds: 10
         periodSeconds: 30
       readinessProbe:
         httpGet:
           path: /global/health
           port: server
+          # NOTE: same Basic-auth httpHeaders requirement as above.
         initialDelaySeconds: 5
         periodSeconds: 10
   volumes:
