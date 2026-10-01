@@ -1,0 +1,34 @@
+# Placement controller (Phase E1: dry-run planning only).
+# Run exactly 1 replica until leader election lands (Phase E2).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placement-controller
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+    agentorchestrator.io/component: placement-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      agentorchestrator.io/component: placement-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: agent-orchestrator
+        agentorchestrator.io/component: placement-controller
+    spec:
+      serviceAccountName: placement-controller
+      containers:
+        - name: controller
+          # Must match an orchestrator image tag containing the operator CLI.
+          image: luberserker/agent-orchestrator:latest
+          args: ["operator", "--namespace", "ao-instances", "--interval-ms", "15000"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

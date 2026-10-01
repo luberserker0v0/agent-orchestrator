@@ -147,7 +147,8 @@ class PromiseObjectsAdapter implements StatusObjectsApi {
   }
 }
 
-function buildApiClient(): StatusObjectsApi {
+/** Build a live objects client from the default kubeconfig chain. Throws when unavailable. */
+export function createObjectsClient(): StatusObjectsApi {
   const kc = new k8s.KubeConfig();
   kc.loadFromDefault();
   const cluster = kc.getCurrentCluster();
@@ -207,7 +208,7 @@ export class K8sStatusReporter {
       return new K8sStatusReporter(undefined, resolved);
     }
     try {
-      const api = buildApiClient();
+      const api = createObjectsClient();
       // Fail fast when the CRDs are missing so the operator notices at startup.
       await api.listNamespacedCustomObject(GROUP, VERSION, resolved.namespace, INSTANCES_PLURAL);
       logger.info(`Instance status reporting enabled (namespace: ${resolved.namespace})`);
