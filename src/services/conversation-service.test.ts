@@ -650,9 +650,26 @@ describe('ConversationService', () => {
         getSession: vi.fn().mockResolvedValue({ id: 'ses_old' }),
         createSession: vi.fn(),
       };
-      mockInstanceManager.getInstance.mockReturnValue({ port: 41004, client: mockClient });
+      mockInstanceManager.getInstance.mockReturnValue({
+        port: 41004,
+        baseUrl: 'http://127.0.0.1:41004',
+        client: mockClient,
+      });
       mockInstanceManager.restartInstance.mockResolvedValue(undefined);
-      const { svc, placeable } = k8sService();
+      const mockReporter = { trackInstance: vi.fn(), untrackInstance: vi.fn(), reportMoved: vi.fn() };
+      const placeable = { setNodeOverride: vi.fn(), clearNodeOverride: vi.fn() };
+      mockRuntimeManager.getRuntime.mockReturnValue(placeable);
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+        () => 'kubernetes',
+      );
 
       const result = await svc.migrateInstance(testId, { nodeName: 'worker-2' });
 
@@ -666,6 +683,7 @@ describe('ConversationService', () => {
         'conversation.migrated',
         expect.objectContaining({ nodeName: 'worker-2', resumed: true, sessionId: 'ses_old' }),
       );
+      expect(mockReporter.reportMoved).toHaveBeenCalledWith(testId, { endpoint: 'http://127.0.0.1:41004' });
     });
 
     it('should create a fresh session when resume fails', async () => {

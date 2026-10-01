@@ -290,6 +290,9 @@ export class ConversationService {
         resumed,
         sessionId,
       });
+      if (instance.baseUrl) {
+        void this.statusReporter?.reportMoved(id, { endpoint: instance.baseUrl });
+      }
 
       return {
         id,
