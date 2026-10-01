@@ -1,5 +1,6 @@
-# Template: instance Pod for one conversation. Created by the operator
-# (Phase E); shown here to pin the mount contract.
+# Template: instance Pod for one conversation. Created alongside a same-named
+# ClusterIP Service (stable DNS: opencode-<conv-id>.ao-instances.svc.cluster.local)
+# by KubernetesRuntime (or the operator in Phase E); shown here to pin the mount contract.
 # Replace <conv-id>, <instance-port>, and <opencode-image> before applying.
 # The operator sets ownerReferences -> OpencodeInstance for garbage collection.
 apiVersion: v1
