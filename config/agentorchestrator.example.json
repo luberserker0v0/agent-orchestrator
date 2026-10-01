@@ -98,7 +98,22 @@
           // Same sessionStorage semantics as direct; mounted as /opencode-data in the container.
           // "sessionStorage": { "sharedRoot": "./sessions", "mode": "xdg" }
         }
-      }
+      }  // NOTE: no trailing comma — uncomment the block below to add a kubernetes runtime (add the comma back first)
+      // Kubernetes runtime: spawn one Pod + ClusterIP Service per instance.
+      // Requires the per-conversation PVC (conv-<id>) to exist; mount paths match
+      // the volume layout in k8s/volume/. Uncomment to enable.
+      // {
+      //   "id": "opencode-k8s",
+      //   "type": "kubernetes",
+      //   "config": {
+      //     "image": "ghcr.io/anomalyco/opencode:1.17.8",
+      //     "namespace": "ao-instances",
+      //     "sessionMode": "xdg"
+      //     // "instanceHost": "127.0.0.1",  // + kubectl port-forward when orchestrating from outside
+      //     // "nodeName": "worker-2",        // Pin scheduling (migration target)
+      //     // "podReadyTimeoutMs": 180000
+      //   }
+      // }
     ],
 
     // Health check — how long to wait for an OpenCode instance to become ready

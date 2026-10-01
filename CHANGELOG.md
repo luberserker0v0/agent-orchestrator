@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: slim root README.md to landing page pointing to docs/
 
 ### Added
+- feat(runtime): add `kubernetes` runtime type spawning one Pod + ClusterIP Service per instance with PVC session persistence and node targeting
 - feat(operator): add placement controller (`aor operator`) with route lifecycle and dry-run quota migration planning (RBAC + Deployment manifests in `k8s/operator/`)
 - feat(cluster): add optional Kubernetes OpencodeInstance status reporting (`cluster` config, disabled by default) with lifecycle tracking, quota flap guard, and heartbeats
 - feat(k8s): add OpencodeInstance + ConversationRoute CRDs and per-conversation volume manifests (`k8s/`) for quota-aware placement

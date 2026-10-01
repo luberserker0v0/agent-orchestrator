@@ -64,3 +64,25 @@ export function sessionContainerArgs(resolved: ResolvedSessionStorage): string[]
   }
   return args;
 }
+
+/**
+ * Canonical in-cluster mount root for a conversation volume. Must be identical
+ * on every machine (opencode project hash and session rows key on it).
+ */
+export function conversationMountPath(id: string): string {
+  return `/data/conversations/${sanitizeSessionId(id)}`;
+}
+
+/**
+ * Session env vars for instance Pods mounting the per-conversation PVC at
+ * {@link conversationMountPath}. The data itself lives on the PVC; only the
+ * mode selects the env mapping.
+ */
+export function sessionPodEnv(id: string, mode: 'xdg' | 'sqlite' = 'xdg'): Record<string, string> {
+  const base = `${conversationMountPath(id)}/session`;
+  const env: Record<string, string> = { XDG_DATA_HOME: base };
+  if (mode === 'sqlite') {
+    env.OPENCODE_DB = `${base}/opencode.db`;
+  }
+  return env;
+}

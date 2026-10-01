@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { loadConfig, loadCanonicalConfig, validateSessionStorageConfig } from './config-loader.js';
 import { K8sStatusReporter } from './cluster/status-reporter.js';
+import { KubernetesRuntime } from './agent-runtime/runtimes/kubernetes.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { LocalStorage } from './storage/index.js';
 import type { StorageBackend } from './storage/types.js';
@@ -104,6 +105,19 @@ export async function main(cliArgs?: string[]) {
     if (cfg?.networkMode !== undefined && typeof cfg.networkMode !== 'string')
       errs.push('"networkMode" must be a string');
     errs.push(...validateSessionStorageConfig(cfg?.sessionStorage));
+    return errs;
+  });
+  runtimeFactory.register('kubernetes', KubernetesRuntime, (config) => {
+    const errs: string[] = [];
+    const cfg = config as Record<string, unknown>;
+    if (!cfg?.image || typeof cfg.image !== 'string') errs.push('"image" is required');
+    if (cfg?.namespace !== undefined && typeof cfg.namespace !== 'string') errs.push('"namespace" must be a string');
+    if (cfg?.instanceHost !== undefined && typeof cfg.instanceHost !== 'string') errs.push('"instanceHost" must be a string');
+    if (cfg?.nodeName !== undefined && typeof cfg.nodeName !== 'string') errs.push('"nodeName" must be a string');
+    if (cfg?.sessionMode !== undefined && cfg.sessionMode !== 'xdg' && cfg.sessionMode !== 'sqlite')
+      errs.push('"sessionMode" must be "xdg" or "sqlite"');
+    if (cfg?.podReadyTimeoutMs !== undefined && (!Number.isInteger(cfg.podReadyTimeoutMs) || (cfg.podReadyTimeoutMs as number) <= 0))
+      errs.push('"podReadyTimeoutMs" must be a positive integer');
     return errs;
   });
 

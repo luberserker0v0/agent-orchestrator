@@ -225,7 +225,7 @@ export function createHttpServer(
       let version: string | undefined;
       if (entry.type === 'direct') {
         version = entry.config.version;
-      } else if (entry.type === 'docker') {
+      } else if (entry.type === 'docker' || entry.type === 'kubernetes') {
         version = entry.config.image?.split(':')[1] ?? undefined;
       }
       return {

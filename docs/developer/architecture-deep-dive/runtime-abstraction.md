@@ -208,39 +208,52 @@ runtimeManager.setOnDestroyed((id, reason) => {
 
 ## Adding a New Runtime
 
-To add a new runtime (e.g., Kubernetes pod):
+To add a new runtime (e.g., see `src/agent-runtime/runtimes/kubernetes.ts` for a
+complete example: Pod + Service lifecycle against the Kubernetes API):
 
-1. Implement the `Runtime` interface:
+1. Implement the `AgentRuntime` interface (`src/agent-runtime/types.ts`):
 
 ```typescript
-class KubernetesRuntime implements Runtime {
-  async spawn(config: SpawnConfig): Promise<RuntimeHandle> {
-    // Create pod, wait for ready
+class KubernetesRuntime implements AgentRuntime {
+  readonly type = 'kubernetes';
+  readonly capabilities: AgentCapabilities = { /* ... */ };
+
+  async start(id, workspacePath, auth, healthCheckConfig, runtimeAccess?): Promise<AgentEndpoint> {
+    // Provision the instance, wait for ready + healthy, return { client, port, handle, baseUrl }
   }
-  
-  async kill(handle: RuntimeHandle): Promise<void> {
-    // Delete pod
+
+  async stop(handle?: InstanceHandle): Promise<void> {
+    // Tear the instance down (404-tolerant)
   }
-  
-  async healthCheck(port: number, password: string): Promise<boolean> {
-    // Check pod health
+
+  async restart(id, healthCheckConfig): Promise<AgentEndpoint> {
+    // Recreate the instance, preserving resumable state (sessions, volumes)
+  }
+
+  async cleanupOrphans(): Promise<void> {
+    // Remove instances no longer tracked (best effort)
   }
 }
 ```
 
-2. Register in `src/index.ts`:
+2. Register in `src/index.ts` with a config validator:
 
 ```typescript
-registry.register('kubernetes', new KubernetesRuntime());
+runtimeFactory.register('kubernetes', KubernetesRuntime, (config) => {
+  const errs: string[] = [];
+  // ...validate required fields, return error strings (empty = valid)
+  return errs;
+});
 ```
 
-3. Add config type in `config-loader.ts`:
+3. Add config types in `config-loader.ts`:
 
 ```typescript
 interface KubernetesRuntimeConfig {
-  kubeconfig?: string;
-  namespace: string;
   image: string;
+  namespace?: string;
+  instanceHost?: string;
+  // ...runtime-specific knobs with defaults documented in AGENTS.md
 }
 ```
 
@@ -250,7 +263,7 @@ interface KubernetesRuntimeConfig {
 {
   "orchestrator": {
     "runtimes": [
-      { "id": "oc-k8s", "type": "kubernetes", "config": { "namespace": "default", "image": "..." } }
+      { "id": "oc-k8s", "type": "kubernetes", "config": { "namespace": "ao-instances", "image": "..." } }
     ]
   }
 }
