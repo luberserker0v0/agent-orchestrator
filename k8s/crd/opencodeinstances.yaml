@@ -1,0 +1,100 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: opencodeinstances.agentorchestrator.io
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+spec:
+  group: agentorchestrator.io
+  scope: Namespaced
+  names:
+    plural: opencodeinstances
+    singular: opencodeinstance
+    kind: OpencodeInstance
+    shortNames:
+      - oci
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Reachable
+          type: boolean
+          jsonPath: .status.reachable
+        - name: Node
+          type: string
+          jsonPath: .spec.nodeName
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [conversationId, runtime, endpoint, model, volumeClaimName]
+              properties:
+                conversationId:
+                  type: string
+                  description: AgentOrchestrator conversation this instance serves.
+                nodeName:
+                  type: string
+                  description: Kubernetes node (machine) the instance Pod is scheduled on.
+                runtime:
+                  type: string
+                  enum: [direct, docker, kubernetes]
+                  description: Runtime flavor backing this instance.
+                endpoint:
+                  type: string
+                  description: Base URL to reach the opencode server (baseUrl equivalent).
+                model:
+                  type: object
+                  required: [providerID, id]
+                  properties:
+                    providerID:
+                      type: string
+                    id:
+                      type: string
+                  description: Model identity; migration targets must match exactly.
+                volumeClaimName:
+                  type: string
+                  description: Per-conversation PVC holding workspace/ + session/ at identical paths.
+                quotaPolicyRef:
+                  type: string
+                  default: default
+                  description: Name of the QuotaPolicy governing refill for this instance.
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Ready, QuotaExhausted, RateLimited, Failed, Terminating]
+                reachable:
+                  type: boolean
+                lastHeartbeat:
+                  type: string
+                  format: date-time
+                lastQuotaError:
+                  type: object
+                  properties:
+                    code:
+                      type: integer
+                    message:
+                      type: string
+                    at:
+                      type: string
+                      format: date-time
+                consecutiveFailures:
+                  type: integer
+                  minimum: 0
+                  description: Flap guard counter; phase flips after the threshold (default 2).
+                observedGeneration:
+                  type: integer
+                  format: int64

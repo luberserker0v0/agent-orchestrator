@@ -1,0 +1,25 @@
+# Template: one instance of this PVC exists per conversation.
+# Lifecycle (enforced by the operator, Phase E):
+#   - Created on conversation create, named `conv-<conversationId>`.
+#   - Mounted by at most one instance Pod at a time (ReadWriteOnce).
+#   - Deleted ONLY on explicit conversation DELETE (API, confirm=true).
+#     Never deleted on migration, eviction, or idle timeout.
+#   - Orphan-reaper removes PVCs whose conversation record is gone AND
+#     older than the configured retention window.
+# Replace <conv-id> with the conversation id before applying.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: conv-<conv-id>
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+    agentorchestrator.io/conversation: <conv-id>
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # storageClassName intentionally unset: uses the cluster default.
+  # Any RWO-capable provisioner works (single-writer by lifecycle).

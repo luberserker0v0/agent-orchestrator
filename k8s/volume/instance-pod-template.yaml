@@ -1,0 +1,69 @@
+# Template: instance Pod for one conversation. Created by the operator
+# (Phase E); shown here to pin the mount contract.
+# Replace <conv-id>, <instance-port>, and <opencode-image> before applying.
+# The operator sets ownerReferences -> OpencodeInstance for garbage collection.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: opencode-<conv-id>
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+    agentorchestrator.io/conversation: <conv-id>
+    agentorchestrator.io/component: opencode-instance
+spec:
+  restartPolicy: Never
+  securityContext:
+    # Matches the orchestrator image's `nodejs` uid; avoids chmod hacks.
+    fsGroup: 1001
+  containers:
+    - name: opencode
+      image: <opencode-image>
+      ports:
+        - name: server
+          containerPort: <instance-port>
+      # Absolute paths MUST be identical on every machine: the opencode
+      # project hash and session rows key on the worktree path.
+      workingDir: /data/conversations/<conv-id>/workspace
+      env:
+        - name: XDG_DATA_HOME
+          value: /data/conversations/<conv-id>/session
+        # Uncomment for sqlite mode (OPENCODE_DB=<root>/<id>/opencode.db):
+        # - name: OPENCODE_DB
+        #   value: /data/conversations/<conv-id>/session/opencode.db
+        - name: OPENCODE_SERVER_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: opencode-<conv-id>-auth
+              key: username
+        - name: OPENCODE_SERVER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: opencode-<conv-id>-auth
+              key: password
+      volumeMounts:
+        - name: conversation-data
+          mountPath: /data/conversations/<conv-id>
+      resources:
+        requests:
+          cpu: 500m
+          memory: 512Mi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+      livenessProbe:
+        httpGet:
+          path: /global/health
+          port: server
+        initialDelaySeconds: 10
+        periodSeconds: 30
+      readinessProbe:
+        httpGet:
+          path: /global/health
+          port: server
+        initialDelaySeconds: 5
+        periodSeconds: 10
+  volumes:
+    - name: conversation-data
+      persistentVolumeClaim:
+        claimName: conv-<conv-id>

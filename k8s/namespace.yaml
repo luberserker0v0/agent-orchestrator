@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+    app.kubernetes.io/managed-by: agent-orchestrator-controller

@@ -183,13 +183,18 @@ k8s/
 |---|---|---|
 | A. Detection | `LLM_QUOTA_EXHAUSTED`/`RATE_LIMITED` codes + classifier + metric + event | Unit: 429/402/403 bodies → typed errors; other 500s untouched |
 | B. Session persistence | `sessionStorage` config, dual-path layout in all runtimes, durable `sessionId`, mount-verification | E2E: stop on A → resume same `sid` on B |
-| C. Volume lifecycle | Per-conversation PVC provision/mount/GC + `volumeClaimName` in CRDs (spike on `kind`/hostPath first) | Migration of empty + loaded volumes across nodes |
+| C. Volume lifecycle | C1: CRD manifests (`k8s/crd/`) + per-conversation PVC/Pod templates + retention rules. C2 spike PASSED 2026-09-30 on k3d (`ao-test`: k3s v1.31.5, 1 server + 2 agents, host-shared volume): CRD schemas enforced by apiserver (invalid enum rejected), hostPath PV/PVC bound, Pod A (agent-0) wrote workspace+session data, Pod B (agent-1) remounted and verified all files. GC/retention enforcement deferred to operator (Phase E) | C1: manifests parse + schemas match §6–§7 ✅; C2: cross-node remount ✅ (single-writer RWO detach→attach proven via hostPath-over-shared-dir stand-in; dynamic provisioning untested) |
 | D. Status reporting | `OpencodeInstance` create/patch on lifecycle + quota events; flap guard | Tokens killed on A → `QuotaExhausted` within budget |
 | E. Operator + migration | Controller binary + `Deployment`, full state machine incl. rollback/no-target | Quota on A → conversation continues on B, history intact |
 | F. Refill + hardening | `QuotaPolicy`, probe-to-clear, selection scoring, metrics (`migrations_total{result}`, `quota_exhaustions_total{model}`), chaos tests | Failover + rollback paths green in CI |
 
 ## 12. Known risks
 
+- **Cluster venue (verified 2026-09-30):** k3s v1.35+ requires cgroup v2 and refuses to boot
+  on Docker Desktop WSL2 here (cgroup v1, kernel 5.15) — `kubelet ... cgroup v1 ...
+  unsupported`. Pin k3d to `rancher/k3s:v1.31.5-k3s1` until the host moves to cgroup v2.
+  `k3d-ao-test` cluster (1 server + 2 agents, `/shared` host volume on all nodes) left
+  running for Phases D–F.
 - **RWO detach/attach latency** (30–120s across nodes on some provisioners): show
   `Migrating…` progress events; serve reads from A while alive, else honest `503`.
 - **Absolute-path coupling:** identical mount path on all machines is a hard constraint;

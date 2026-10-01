@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: slim root README.md to landing page pointing to docs/
 
 ### Added
+- feat(k8s): add OpencodeInstance + ConversationRoute CRDs and per-conversation volume manifests (`k8s/`) for quota-aware placement
 - feat(session): add `sessionStorage` runtime config (`{ sharedRoot, mode: 'xdg'|'sqlite' }`) for per-conversation opencode data-dirs (XDG_DATA_HOME/OPENCODE_DB) in direct and docker runtimes
 - feat(session): restart resumes the previous session when the server still has it instead of always creating a fresh one
 - feat(quota): classify upstream LLM 429/402/403 responses into `LLM_QUOTA_EXHAUSTED` (migrate) vs `LLM_RATE_LIMITED` (retryable) with `Retry-After` capture
