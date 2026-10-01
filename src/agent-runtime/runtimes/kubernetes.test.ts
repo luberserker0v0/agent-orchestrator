@@ -28,6 +28,7 @@ interface FakePods {
 }
 
 function createFakePods(): FakePods {
+  const deletedPods = new Set<string>();
   const fake: FakePods = {
     createdPods: [],
     createdServices: [],
@@ -35,13 +36,23 @@ function createFakePods(): FakePods {
     readImpl: async () => ({ phase: 'Running', ready: true }),
     api: null as unknown as InstancePodsApi,
   };
+  const notFound = (): Error => {
+    const err = new Error('not found') as Error & { statusCode: number };
+    err.statusCode = 404;
+    return err;
+  };
   fake.api = {
     createPod: vi.fn(async (namespace: string, body: object) => {
       fake.createdPods.push({ namespace, body: body as Record<string, unknown> });
+      deletedPods.delete(`${namespace}/${((body as Record<string, unknown>).metadata as Record<string, unknown>).name}`);
     }),
-    readPod: vi.fn(async (namespace: string, name: string) => fake.readImpl(namespace, name)),
+    readPod: vi.fn(async (namespace: string, name: string) => {
+      if (deletedPods.has(`${namespace}/${name}`)) throw notFound();
+      return fake.readImpl(namespace, name);
+    }),
     deletePod: vi.fn(async (namespace: string, name: string) => {
       fake.deleted.push(`pod/${namespace}/${name}`);
+      deletedPods.add(`${namespace}/${name}`);
     }),
     createService: vi.fn(async (namespace: string, body: object) => {
       fake.createdServices.push({ namespace, body: body as Record<string, unknown> });
@@ -199,6 +210,30 @@ describe('KubernetesRuntime', () => {
     await expect(rt.restart('missing', HEALTH)).rejects.toThrow('No stored state');
   });
 
+  it('restart force-deletes the Pod and waits for termination before recreating', async () => {
+    const fake = createFakePods();
+    const rt = new KubernetesRuntime(createPortPool(40000, 40001), { image: 'img' }, fake.api);
+    mockFetch.mockResolvedValue(makeHealthyFetch());
+
+    await rt.start('cw', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+    let reads = 0;
+    (fake.api.readPod as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      reads++;
+      if (reads === 4) {
+        const err = new Error('gone') as Error & { statusCode: number };
+        err.statusCode = 404;
+        throw err;
+      }
+      return { phase: 'Running', ready: true };
+    });
+
+    await rt.restart('cw', HEALTH);
+
+    expect(fake.api.deletePod).toHaveBeenCalledWith('ao-instances', 'opencode-cw', { force: true });
+    expect(fake.createdPods).toHaveLength(2);
+  });
+
   it('stop kills Pod and Service, tolerating missing objects', async () => {
     const fake = createFakePods();
     const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
@@ -227,6 +262,41 @@ describe('KubernetesRuntime', () => {
       result.handle!.onExit(resolve);
     });
     expect(code).toBeNull();
+  });
+
+  describe('node overrides', () => {
+    it('prefers setNodeOverride over config nodeName', async () => {
+      const fake = createFakePods();
+      const rt = new KubernetesRuntime(createPortPool(), { image: 'img', nodeName: 'cfg-node' }, fake.api);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      rt.setNodeOverride('cn', 'target-node');
+      await rt.start('cn', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+      expect((fake.createdPods[0].body.spec as Record<string, unknown>).nodeName).toBe('target-node');
+    });
+
+    it('falls back to config nodeName and clears overrides', async () => {
+      const fake = createFakePods();
+      const rt = new KubernetesRuntime(createPortPool(), { image: 'img', nodeName: 'cfg-node' }, fake.api);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      rt.setNodeOverride('cn', 'target-node');
+      rt.clearNodeOverride('cn');
+      await rt.start('cn', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+      expect((fake.createdPods[0].body.spec as Record<string, unknown>).nodeName).toBe('cfg-node');
+    });
+
+    it('omits nodeName when neither override nor config sets it', async () => {
+      const fake = createFakePods();
+      const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.start('cn', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+      expect((fake.createdPods[0].body.spec as Record<string, unknown>)).not.toHaveProperty('nodeName');
+    });
   });
 
   it('cleanupOrphans deletes listed Pods and their Services', async () => {

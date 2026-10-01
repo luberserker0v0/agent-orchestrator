@@ -8,6 +8,7 @@ import type { AgentClient } from '../agent-runtime/types.js';
 import { logger } from '../utils/logger.js';
 import { AppError, ErrorCodes, isAppError } from '../utils/errors.js';
 import { conversationVolumeClaimName, type K8sStatusReporter } from '../cluster/status-reporter.js';
+import type { NodePlaceable } from '../agent-runtime/runtimes/kubernetes.js';
 
 export interface ConversationData {
   id: string;
@@ -30,6 +31,15 @@ export interface StartResult {
   ready: boolean;
   port?: number;
   sessionId?: string;
+}
+
+export interface MigrateTarget {
+  nodeName: string;
+}
+
+export interface MigrateResult extends StartResult {
+  nodeName: string;
+  resumed: boolean;
 }
 
 export class ConversationService {
@@ -219,6 +229,89 @@ export class ConversationService {
     }
   }
 
+  /**
+   * Move a running conversation's instance to another node (quota-aware
+   * placement). Requires a kubernetes runtime: the instance Pod is recreated
+   * on the target node with the same PVC, and the previous session is resumed
+   * (verified) or recreated. The node override is always cleared afterwards.
+   */
+  async migrateInstance(id: string, target: MigrateTarget): Promise<MigrateResult> {
+    const state = this.conversationState.get(id);
+    if (!state) {
+      throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
+    }
+    if (state.status !== 'running') {
+      throw new AppError(409, ErrorCodes.CONVERSATION_NOT_RUNNING, `Conversation is not running (status: ${state.status})`);
+    }
+    if (!target || typeof target.nodeName !== 'string' || !target.nodeName) {
+      throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Body must include a non-empty "nodeName"');
+    }
+    const runtime = this.runtimeManager.getRuntime(state.agentType);
+    if (this.getRuntimeType?.(state.agentType) !== 'kubernetes' || !runtime || typeof (runtime as unknown as NodePlaceable).setNodeOverride !== 'function') {
+      throw new AppError(400, ErrorCodes.MIGRATION_NOT_SUPPORTED, `Migration requires a kubernetes runtime (agent type: ${state.agentType})`);
+    }
+    const placeable = runtime as unknown as NodePlaceable;
+    const previousSessionId = state.sessionId;
+
+    this.conversationState.transition(id, 'restarting');
+    this.conversationState.cancelReadyCheck(id);
+    this.sseBridge?.stop(id);
+    placeable.setNodeOverride(id, target.nodeName);
+    try {
+      const hadInstance = this.instanceManager.getInstance(id) !== undefined;
+
+      let instance: InstanceInfo;
+      if (hadInstance) {
+        try {
+          await this.instanceManager.restartInstance(id);
+          instance = this.instanceManager.getInstance(id)!;
+        } catch {
+          await this.instanceManager.destroyInstance(id).catch(() => {});
+          this.conversationState.removeRunningInstance(id);
+          instance = await this.instanceManager.createInstance(id, state.agentType);
+        }
+      } else {
+        instance = await this.instanceManager.createInstance(id, state.agentType);
+      }
+
+      this.conversationState.clearNeedsRestart(id);
+      this.conversationState.setInstanceInfo(id, { port: instance.port });
+      this.conversationState.setRunningInstance(id, { client: instance.client });
+      this.conversationState.transition(id, 'running');
+      this.conversationState.startReadyCheck(id);
+
+      if (this.sseBridge && instance.baseUrl && instance.username && instance.password) {
+        this.sseBridge.start(id, instance.baseUrl, instance.username, instance.password);
+      }
+
+      const { sessionId, resumed } = await this.resolveSession(id, instance.client, previousSessionId);
+      this.conversationState.emitEvent(id, 'conversation.migrated', {
+        nodeName: target.nodeName,
+        resumed,
+        sessionId,
+      });
+      if (instance.baseUrl) {
+        void this.statusReporter?.reportMoved(id, { endpoint: instance.baseUrl });
+      }
+
+      return {
+        id,
+        agentType: state.agentType,
+        status: 'running',
+        ready: false,
+        port: instance.port,
+        sessionId,
+        nodeName: target.nodeName,
+        resumed,
+      };
+    } catch (err) {
+      this.conversationState.transition(id, 'error', { error: (err as Error).message });
+      throw err instanceof AppError ? err : new AppError(500, ErrorCodes.INTERNAL_ERROR, (err as Error).message);
+    } finally {
+      placeable.clearNodeOverride(id);
+    }
+  }
+
   async delete(id: string): Promise<void> {
     if (!this.conversationState.has(id)) {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
@@ -268,37 +361,39 @@ export class ConversationService {
    * created, preserving the previous behavior.
    */
   private ensureSessionInBackground(id: string, client: AgentClient, resumeSessionId?: string): void {
-    if (resumeSessionId) {
-      client.getSession(resumeSessionId).then(
-        (session) => {
-          this.adoptSession(id, session.id);
-          logger.info(`[OpenCode ${id}] session resumed: ${session.id}`);
-        },
-        () => {
-          logger.warn(`[OpenCode ${id}] previous session ${resumeSessionId} unavailable, creating fresh session`);
-          this.createFreshSession(id, client);
-        },
-      );
-      return;
-    }
-    this.createFreshSession(id, client);
-  }
-
-  private createFreshSession(id: string, client: AgentClient): void {
-    client.createSession({ title: `AgentOrchestrator-${id}` })
-      .then((session) => {
-        this.adoptSession(id, session.id);
-        logger.info(`[OpenCode ${id}] session created: ${session.id}`);
-      })
-      .catch((err) => {
-        logger.error(`[OpenCode ${id}] failed to create session: ${(err as Error).message}`);
+    this.resolveSession(id, client, resumeSessionId).then(
+      ({ sessionId, resumed }) => {
+        logger.info(`[OpenCode ${id}] session ${resumed ? 'resumed' : 'created'}: ${sessionId}`);
+      },
+      (err) => {
+        logger.error(`[OpenCode ${id}] failed to ensure session: ${(err as Error).message}`);
         if (
           isAppError(err) &&
           (err.code === ErrorCodes.LLM_QUOTA_EXHAUSTED || err.code === ErrorCodes.LLM_RATE_LIMITED)
         ) {
           void this.statusReporter?.reportQuotaError(id, { code: err.code, message: err.message });
         }
-      });
+      },
+    );
+  }
+
+  private async resolveSession(
+    id: string,
+    client: AgentClient,
+    resumeSessionId?: string,
+  ): Promise<{ sessionId: string; resumed: boolean }> {
+    if (resumeSessionId) {
+      try {
+        const session = await client.getSession(resumeSessionId);
+        this.adoptSession(id, session.id);
+        return { sessionId: session.id, resumed: true };
+      } catch {
+        logger.warn(`[OpenCode ${id}] previous session ${resumeSessionId} unavailable, creating fresh session`);
+      }
+    }
+    const session = await client.createSession({ title: `AgentOrchestrator-${id}` });
+    this.adoptSession(id, session.id);
+    return { sessionId: session.id, resumed: false };
   }
 
   private adoptSession(id: string, sessionId: string): void {

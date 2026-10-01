@@ -149,6 +149,7 @@ describe('HTTP API Server', () => {
       start: vi.fn().mockResolvedValue({ id: 'conv-001', agentType: 'opencode-direct', status: 'running', ready: false, port: 30000, sessionId: undefined }),
       stop: vi.fn().mockResolvedValue(undefined),
       restart: vi.fn().mockResolvedValue({ id: 'conv-001', agentType: 'opencode-direct', status: 'running', ready: false, port: 30000, sessionId: undefined }),
+      migrateInstance: vi.fn().mockResolvedValue({ id: 'conv-001', agentType: 'opencode-k8s', status: 'running', ready: false, port: 30001, sessionId: 'ses_1', nodeName: 'worker-2', resumed: true }),
       delete: vi.fn().mockResolvedValue(undefined),
       get: vi.fn().mockReturnValue({ id: 'conv-001', status: 'ready', ready: true, needsRestart: false, port: 30000, sessionId: 'ses_1', createdAt: 100, updatedAt: 200 }),
       list: vi.fn().mockReturnValue([]),
@@ -1093,6 +1094,33 @@ describe('HTTP API Server', () => {
 
     expect(res.status).toBe(200);
     expect(mockConversationService.restart).toHaveBeenCalledWith('conv-001');
+  });
+
+  it('POST /api/conversations/:id/migrate migrates to the target node', async () => {
+    const res = await request(server).post('/api/conversations/conv-001/migrate').send({ nodeName: 'worker-2' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.nodeName).toBe('worker-2');
+    expect(res.body.resumed).toBe(true);
+    expect(mockConversationService.migrateInstance).toHaveBeenCalledWith('conv-001', { nodeName: 'worker-2' });
+  });
+
+  it('POST /api/conversations/:id/migrate returns 400 without nodeName', async () => {
+    const res = await request(server).post('/api/conversations/conv-001/migrate').send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('MISSING_FIELD');
+    expect(mockConversationService.migrateInstance).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/conversations/:id/migrate returns 409 when not running', async () => {
+    mockConversationService.migrateInstance.mockRejectedValueOnce(
+      new AppError(409, ErrorCodes.CONVERSATION_NOT_RUNNING, 'Conversation is not running (status: stopped)')
+    );
+
+    const res = await request(server).post('/api/conversations/conv-001/migrate').send({ nodeName: 'worker-2' });
+
+    expect(res.status).toBe(409);
   });
 
   it('POST /api/conversations/:id/restart returns 409 when in prepared status', async () => {

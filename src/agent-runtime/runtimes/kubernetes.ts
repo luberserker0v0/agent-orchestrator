@@ -17,11 +17,17 @@ export interface PodStatusView {
   message?: string;
 }
 
+/** Opt-in node placement for runtimes (migration targets). */
+export interface NodePlaceable {
+  setNodeOverride(id: string, nodeName: string): void;
+  clearNodeOverride(id: string): void;
+}
+
 /** Narrow pod/service surface used by the runtime (structurally compatible). */
 export interface InstancePodsApi {
   createPod(namespace: string, body: object): Promise<unknown>;
   readPod(namespace: string, name: string): Promise<PodStatusView>;
-  deletePod(namespace: string, name: string): Promise<void>;
+  deletePod(namespace: string, name: string, opts?: { force?: boolean }): Promise<void>;
   createService(namespace: string, body: object): Promise<unknown>;
   deleteService(namespace: string, name: string): Promise<void>;
   listInstancePodNames(namespace: string): Promise<string[]>;
@@ -162,7 +168,7 @@ class K8sPodHandle implements InstanceHandle {
   }
 }
 
-export class KubernetesRuntime implements AgentRuntime {
+export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
   readonly type = 'kubernetes';
   readonly capabilities: AgentCapabilities = {
     sessions: true,
@@ -177,6 +183,7 @@ export class KubernetesRuntime implements AgentRuntime {
   private portPool: PortPool;
   private config: KubernetesRuntimeConfig;
   private podsApi?: InstancePodsApi;
+  private nodeOverrides = new Map<string, string>();
   private instanceState = new Map<string, {
     podName: string;
     serviceName: string;
@@ -192,6 +199,19 @@ export class KubernetesRuntime implements AgentRuntime {
 
   private namespace(): string {
     return this.config.namespace ?? DEFAULT_NAMESPACE;
+  }
+
+  /** Pin the next start/restart of `id` to a node. Cleared explicitly. */
+  setNodeOverride(id: string, nodeName: string): void {
+    this.nodeOverrides.set(id, nodeName);
+  }
+
+  clearNodeOverride(id: string): void {
+    this.nodeOverrides.delete(id);
+  }
+
+  private nodeFor(id: string): string | undefined {
+    return this.nodeOverrides.get(id) ?? this.config.nodeName;
   }
 
   private podReadyTimeoutMs(): number {
@@ -269,8 +289,9 @@ export class KubernetesRuntime implements AgentRuntime {
 
     // Delete Pod and Service, then recreate with a fresh port. The Service DNS
     // name stays constant, so baseUrl host is stable; sessions resume from the
-    // PVC (same claim, untouched).
-    await this.deleteIgnoringNotFound(() => api.deletePod(namespace, state.podName));
+    // PVC (same claim, untouched). Pod deletion is asynchronous — wait until
+    // the object is gone, otherwise create hits AlreadyExists ("terminating").
+    await this.deletePodAndWait(namespace, state.podName);
     await this.deleteIgnoringNotFound(() => api.deleteService(namespace, state.serviceName));
     this.instanceState.delete(id);
 
@@ -356,7 +377,7 @@ export class KubernetesRuntime implements AgentRuntime {
       spec: {
         restartPolicy: 'Never',
         securityContext: { fsGroup: 1001 },
-        ...(this.config.nodeName ? { nodeName: this.config.nodeName } : {}),
+        ...(this.nodeFor(id) ? { nodeName: this.nodeFor(id) } : {}),
         containers: [
           {
             name: 'opencode',
@@ -406,6 +427,23 @@ export class KubernetesRuntime implements AgentRuntime {
       if (!isNotFound(err)) throw err;
     }
   }
+
+  private async deletePodAndWait(namespace: string, podName: string, timeoutMs = 60000): Promise<void> {
+    await this.deleteIgnoringNotFound(() => this.api().deletePod(namespace, podName, { force: true }));
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        await this.api().readPod(namespace, podName);
+      } catch (err) {
+        if (isNotFound(err)) return;
+        throw err;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Instance Pod ${podName} did not terminate in time`);
+      }
+      await sleep(1000);
+    }
+  }
 }
 
 class LivePodsApi implements InstancePodsApi {
@@ -428,8 +466,8 @@ class LivePodsApi implements InstancePodsApi {
     };
   }
 
-  async deletePod(namespace: string, name: string): Promise<void> {
-    await this.api.deleteNamespacedPod(name, namespace);
+  async deletePod(namespace: string, name: string, opts?: { force?: boolean }): Promise<void> {
+    await this.api.deleteNamespacedPod(name, namespace, undefined, undefined, opts?.force ? 0 : undefined);
   }
 
   async createService(namespace: string, body: object): Promise<unknown> {

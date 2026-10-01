@@ -52,6 +52,7 @@ describe('ConversationService', () => {
       hasAgentType: vi.fn(),
       listAgentTypes: vi.fn().mockReturnValue(['opencode-direct']),
       getRuntimeValidity: vi.fn().mockReturnValue({ isValid: true }),
+      getRuntime: vi.fn().mockReturnValue(undefined),
     };
 
     mockServerConfig = {
@@ -555,6 +556,164 @@ describe('ConversationService', () => {
       expect(mockInstanceManager.restartInstance).not.toHaveBeenCalled();
       expect(mockInstanceManager.createInstance).toHaveBeenCalledWith(testId, 'opencode-direct');
       expect(result.status).toBe('running');
+    });
+  });
+
+  describe('migrate', () => {
+    const mockState = {
+      id: testId,
+      agentType: 'opencode-k8s',
+      status: 'running',
+      ready: true,
+      sessionId: 'ses_old',
+    };
+
+    beforeEach(() => {
+      mockConversationState.get.mockReset();
+      mockConversationState.emitEvent = vi.fn();
+      mockInstanceManager.createInstance.mockReset();
+      mockInstanceManager.restartInstance.mockReset();
+      mockInstanceManager.getInstance.mockReset();
+      mockRuntimeManager.getRuntime.mockReset();
+    });
+
+    function k8sService() {
+      const placeable = { setNodeOverride: vi.fn(), clearNodeOverride: vi.fn() };
+      mockRuntimeManager.getRuntime.mockReturnValue(placeable);
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        undefined,
+        () => 'kubernetes',
+      );
+      return { svc, placeable };
+    }
+
+    it('should throw 404 when not found', async () => {
+      mockConversationState.get.mockReturnValue(undefined);
+      const { svc } = k8sService();
+
+      await expect(svc.migrateInstance(testId, { nodeName: 'n2' })).rejects.toThrow(AppError);
+    });
+
+    it('should throw 409 when not running', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState, status: 'stopped' });
+      const { svc } = k8sService();
+
+      await expect(svc.migrateInstance(testId, { nodeName: 'n2' })).rejects.toThrow(AppError);
+      try {
+        await svc.migrateInstance(testId, { nodeName: 'n2' });
+      } catch (e: any) {
+        expect(e.statusCode).toBe(409);
+      }
+    });
+
+    it('should throw 400 for missing nodeName', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      const { svc } = k8sService();
+
+      await expect(svc.migrateInstance(testId, { nodeName: '' })).rejects.toThrow(AppError);
+    });
+
+    it('should throw 400 when runtime is not placeable', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      mockRuntimeManager.getRuntime.mockReturnValue({});
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        undefined,
+        () => 'direct',
+      );
+
+      try {
+        await svc.migrateInstance(testId, { nodeName: 'n2' });
+        expect.unreachable('migrateInstance should have thrown');
+      } catch (e: any) {
+        expect(e.code).toBe(ErrorCodes.MIGRATION_NOT_SUPPORTED);
+        expect(e.statusCode).toBe(400);
+      }
+    });
+
+    it('should migrate and resume the previous session', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      const mockClient = {
+        getSession: vi.fn().mockResolvedValue({ id: 'ses_old' }),
+        createSession: vi.fn(),
+      };
+      mockInstanceManager.getInstance.mockReturnValue({
+        port: 41004,
+        baseUrl: 'http://127.0.0.1:41004',
+        client: mockClient,
+      });
+      mockInstanceManager.restartInstance.mockResolvedValue(undefined);
+      const mockReporter = { trackInstance: vi.fn(), untrackInstance: vi.fn(), reportMoved: vi.fn() };
+      const placeable = { setNodeOverride: vi.fn(), clearNodeOverride: vi.fn() };
+      mockRuntimeManager.getRuntime.mockReturnValue(placeable);
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+        () => 'kubernetes',
+      );
+
+      const result = await svc.migrateInstance(testId, { nodeName: 'worker-2' });
+
+      expect(placeable.setNodeOverride).toHaveBeenCalledWith(testId, 'worker-2');
+      expect(placeable.clearNodeOverride).toHaveBeenCalledWith(testId);
+      expect(mockClient.getSession).toHaveBeenCalledWith('ses_old');
+      expect(mockClient.createSession).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ status: 'running', nodeName: 'worker-2', resumed: true, sessionId: 'ses_old' });
+      expect(mockConversationState.emitEvent).toHaveBeenCalledWith(
+        testId,
+        'conversation.migrated',
+        expect.objectContaining({ nodeName: 'worker-2', resumed: true, sessionId: 'ses_old' }),
+      );
+      expect(mockReporter.reportMoved).toHaveBeenCalledWith(testId, { endpoint: 'http://127.0.0.1:41004' });
+    });
+
+    it('should create a fresh session when resume fails', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      const mockClient = {
+        getSession: vi.fn().mockRejectedValue(new Error('gone')),
+        createSession: vi.fn().mockResolvedValue({ id: 'ses_new' }),
+      };
+      mockInstanceManager.getInstance.mockReturnValue({ port: 41004, client: mockClient });
+      mockInstanceManager.restartInstance.mockResolvedValue(undefined);
+      const { svc, placeable } = k8sService();
+
+      const result = await svc.migrateInstance(testId, { nodeName: 'worker-2' });
+
+      expect(result.resumed).toBe(false);
+      expect(result.sessionId).toBe('ses_new');
+      expect(placeable.clearNodeOverride).toHaveBeenCalledWith(testId);
+    });
+
+    it('should transition to error and clear override on failure', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      mockInstanceManager.getInstance.mockReturnValue({ port: 41004, client: {} });
+      mockInstanceManager.restartInstance.mockRejectedValue(new Error('boom'));
+      mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
+      mockInstanceManager.createInstance.mockRejectedValue(new Error('boom'));
+      const { svc, placeable } = k8sService();
+
+      await expect(svc.migrateInstance(testId, { nodeName: 'n2' })).rejects.toThrow();
+      expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'error', { error: 'boom' });
+      expect(placeable.clearNodeOverride).toHaveBeenCalledWith(testId);
     });
   });
 

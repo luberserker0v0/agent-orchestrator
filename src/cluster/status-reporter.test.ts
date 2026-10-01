@@ -203,6 +203,31 @@ describe('K8sStatusReporter', () => {
     reporter.destroy();
   });
 
+  it('reportMoved refreshes endpoint and heartbeat', async () => {
+    const reporter = enabledReporter(api);
+    await reporter.trackInstance({
+      conversationId: 'c1',
+      runtimeType: 'kubernetes',
+      endpoint: 'http://old:30000',
+      volumeClaimName: 'conv-c1',
+    });
+    await reporter.reportMoved('c1', { endpoint: 'http://new:31000' });
+    const replaced = api.calls.replace.at(-1)![1] as {
+      spec: Record<string, unknown>;
+      status: Record<string, unknown>;
+    };
+    expect(replaced.spec.endpoint).toBe('http://new:31000');
+    expect(replaced.spec.volumeClaimName).toBe('conv-c1');
+    expect(replaced.status.lastHeartbeat).toBeDefined();
+    reporter.destroy();
+  });
+
+  it('reportMoved tolerates missing objects', async () => {
+    const reporter = enabledReporter(api);
+    await reporter.reportMoved('ghost', { endpoint: 'http://x:1' });
+    reporter.destroy();
+  });
+
   it('untrackInstance deletes and tolerates 404', async () => {
     const reporter = enabledReporter(api);
     await reporter.trackInstance({ conversationId: 'c1' });

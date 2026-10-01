@@ -309,6 +309,23 @@ export class K8sStatusReporter {
     }
   }
 
+  /** Refresh the reported endpoint after a move (e.g. migration allocated a new port). */
+  async reportMoved(conversationId: string, update: { endpoint: string }): Promise<void> {
+    if (!this.api) return;
+    try {
+      const existing = await this.api.getNamespacedCustomObject(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, conversationId);
+      const current = (existing.body ?? {}) as Record<string, unknown>;
+      const spec = (current.spec && typeof current.spec === 'object' ? (current.spec as Record<string, unknown>) : {});
+      await this.api.replaceNamespacedCustomObject(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, conversationId, {
+        ...current,
+        spec: { ...spec, endpoint: update.endpoint },
+        status: { ...((current.status ?? {}) as Record<string, unknown>), lastHeartbeat: new Date().toISOString() },
+      });
+    } catch (err) {
+      this.warnOnce(`reportMoved(${conversationId}) failed: ${(err as Error).message}`);
+    }
+  }
+
   /** Delete the object (404-tolerant). Called on conversation stop/delete. */
   async untrackInstance(conversationId: string): Promise<void> {
     if (!this.api) return;

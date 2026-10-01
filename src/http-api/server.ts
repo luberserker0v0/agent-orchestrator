@@ -20,7 +20,7 @@ import { WSRouter } from '../websocket/router.js';
 import { logger } from '../utils/logger.js';
 import { metricsRegistry, httpRequestsTotal, httpRequestDurationSeconds } from '../metrics/registry.js';
 import { openapiSpec } from './openapi.js';
-import { ErrorCodes, isAppError, toHttpErrorResponse } from '../utils/errors.js';
+import { AppError, ErrorCodes, isAppError, toHttpErrorResponse } from '../utils/errors.js';
 import { mountDashboard } from './dashboard.js';
 import type { ApiKeyRole } from '../config-loader.js';
 
@@ -127,6 +127,7 @@ export function createHttpServer(
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/start$/, permission: 'conversation:start' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/stop$/, permission: 'conversation:stop' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/restart$/, permission: 'conversation:restart' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/migrate$/, permission: 'conversation:migrate' },
     { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+$/, permission: 'conversation:delete' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/config$/, permission: 'config:write' },
     { method: 'PUT', pattern: /^\/api\/conversations\/[^/]+\/agents$/, permission: 'agent:write' },
@@ -362,6 +363,22 @@ export function createHttpServer(
       res.json(result);
     } catch (err) {
       logger.error(`Failed to restart conversation ${id}:`, err);
+      handleControllerError(res, err);
+    }
+  });
+
+  // Migrate instance to another node (operator/admin only)
+  app.post('/api/conversations/:id/migrate', async (req: Request, res: Response) => {
+    const id = getConversationId(req);
+    try {
+      const nodeName = (req.body as { nodeName?: unknown } | undefined)?.nodeName;
+      if (typeof nodeName !== 'string' || !nodeName) {
+        throw new AppError(400, ErrorCodes.MISSING_FIELD, 'Body must include a non-empty "nodeName"');
+      }
+      const result = await conversationService.migrateInstance(id, { nodeName });
+      res.json(result);
+    } catch (err) {
+      logger.error(`Failed to migrate conversation ${id}:`, err);
       handleControllerError(res, err);
     }
   });
