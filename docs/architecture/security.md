@@ -76,6 +76,7 @@ Permissions use the format `resource:action` (e.g. `conversation:start`, `messag
 | `POST /api/conversations/:id/start` | `conversation:start` | Yes | Yes | No |
 | `POST /api/conversations/:id/stop` | `conversation:stop` | Yes | Yes | No |
 | `POST /api/conversations/:id/restart` | `conversation:restart` | Yes | Yes | No |
+| `POST /api/conversations/:id/migrate` | `conversation:migrate` | Yes | No | No |
 | `DELETE /api/conversations/:id` | `conversation:delete` | Yes | Yes | No |
 | `POST /api/conversations/:id/config` | `config:write` | Yes | Yes | No |
 | `PUT /api/conversations/:id/agents` | `agent:write` | Yes | Yes | No |

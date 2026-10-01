@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process';
 import { logger } from '../utils/logger.js';
-import type { AgentClient, InstanceHandle, HealthCheckConfig, RuntimeAccess } from './types.js';
+import type { AgentClient, AgentRuntime, InstanceHandle, HealthCheckConfig, RuntimeAccess } from './types.js';
 import { RuntimeRegistry } from './registry.js';
 import { PortPool } from '../orchestrator/port-pool.js';
 import { instancesActive, instancesTotalCreated, instancesErrorsTotal, instanceSpawnDurationSeconds } from '../metrics/registry.js';
@@ -159,6 +159,10 @@ export class RuntimeManager {
 
   hasAgentType(type: string): boolean {
     return this.runtimes.has(type);
+  }
+
+  getRuntime(agentTypeId?: string): AgentRuntime | undefined {
+    return this.runtimes.get(agentTypeId ?? this.defaultAgentType);
   }
 
   getRuntimeValidity(id: string): { isValid: boolean; error?: string } | undefined {
