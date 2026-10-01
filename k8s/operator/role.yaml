@@ -1,0 +1,18 @@
+# Least-privilege role for the placement controller (Phase E1: route
+# lifecycle + dry-run planning; execution arrives with Phase E2).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: placement-controller
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+rules:
+  - apiGroups: [agentorchestrator.io]
+    resources: [opencodeinstances, conversationroutes]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Read-only visibility into workloads for future target selection
+  # (Phase E2: PVC attach state, Pod placement).
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims]
+    verbs: [get, list, watch]

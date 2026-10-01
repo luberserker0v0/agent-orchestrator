@@ -79,6 +79,8 @@ Subcommands:
   dashboard              Open dashboard in browser
   runtime list           List configured runtimes
   runtime info <id>      Show runtime info for a specific id
+  operator               Run the placement controller (quota-aware routing)
+                         [--namespace <ns>] [--interval-ms <ms>]
 `);
 }
 
@@ -110,6 +112,35 @@ export async function handleSubcommand(cli: CliOptions): Promise<boolean> {
       return true;
     }
     console.error('Usage: aor runtime list|info <id>');
+    return true;
+  }
+
+  if (cli.subcommand === 'operator') {
+    (async () => {
+      const { runOperator } = await import('./cluster/operator/controller.js');
+      let namespace = 'ao-instances';
+      let intervalMs = 15000;
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--namespace' && i + 1 < args.length) namespace = args[++i];
+        if (args[i] === '--interval-ms' && i + 1 < args.length) intervalMs = Number(args[++i]);
+      }
+      if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+        console.error('Usage: aor operator [--namespace <ns>] [--interval-ms <ms>]');
+        process.exit(1);
+      }
+      const stop = await runOperator({ namespace, intervalMs });
+      // Ref'd keepalive: the controller's poll timer is unref'd so embedded
+      // use never blocks exit; the CLI must stay alive explicitly.
+      const keepAlive = setInterval(() => {}, 60000);
+      const shutdown = () => {
+        clearInterval(keepAlive);
+        stop();
+        process.exit(0);
+      };
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
+      logger.info(`Placement controller running (namespace: ${namespace}, interval: ${intervalMs}ms, dry-run)`);
+    })();
     return true;
   }
 
