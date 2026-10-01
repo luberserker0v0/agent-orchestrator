@@ -39,7 +39,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [conversationId, runtime, endpoint, model, volumeClaimName]
+              required: [conversationId, endpoint, volumeClaimName]
               properties:
                 conversationId:
                   type: string
@@ -50,7 +50,7 @@ spec:
                 runtime:
                   type: string
                   enum: [direct, docker, kubernetes]
-                  description: Runtime flavor backing this instance.
+                  description: Runtime flavor backing this instance (set when known).
                 endpoint:
                   type: string
                   description: Base URL to reach the opencode server (baseUrl equivalent).

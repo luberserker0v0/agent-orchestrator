@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { loadConfig, loadCanonicalConfig, validateSessionStorageConfig } from './config-loader.js';
+import { K8sStatusReporter } from './cluster/status-reporter.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
 import { LocalStorage } from './storage/index.js';
 import type { StorageBackend } from './storage/types.js';
@@ -149,10 +150,12 @@ export async function main(cliArgs?: string[]) {
   const configService = new ConfigService(workspaceFactory, conversationState);
   const agentService = new AgentService(workspaceFactory, conversationState, instanceManager);
   const skillService = new SkillService(workspaceFactory, conversationState);
-  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeManager, config.server, config.orchestrator.defaultAgentType, sseBridge);
+  const statusReporter = await K8sStatusReporter.create(config.cluster);
+  const runtimeTypeById = new Map(config.orchestrator.runtimes.map((entry) => [entry.id, entry.type]));
+  const conversationService = new ConversationService(instanceManager, conversationState, workspaceFactory, runtimeManager, config.server, config.orchestrator.defaultAgentType, sseBridge, statusReporter, (agentTypeId) => runtimeTypeById.get(agentTypeId));
   const fileService = new FileService(workspaceFactory, conversationState);
   const sessionService = new SessionService(instanceManager, conversationState);
-  const messageService = new MessageService(instanceManager, conversationState);
+  const messageService = new MessageService(instanceManager, conversationState, statusReporter);
   const roleService = new RoleService(cli.configPath ?? 'config/agentorchestrator.json', config.roles);
 
   // Clean up orphan resources from previous runs (e.g., after SIGKILL/crash)
@@ -202,6 +205,9 @@ export async function main(cliArgs?: string[]) {
     try {
       // Stop idle sweep timer to prevent interference during shutdown
       instanceManager.destroy();
+
+      // Stop instance status heartbeats
+      statusReporter.destroy();
 
       // Stop accepting new WebSocket connections and close existing ones cleanly
       httpServer.closeWebSockets();

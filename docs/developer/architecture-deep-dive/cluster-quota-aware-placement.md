@@ -190,6 +190,12 @@ k8s/
 
 ## 12. Known risks
 
+- **K8s client (verified 2026-10-01):** `@kubernetes/client-node` v2 rewrote the API
+  (request-builder flavor, deep imports). Pinned `^1.4.0` with the `PromiseCustomObjectsApi`
+  flavor via `KubeConfig.makeApiClient` chain. The generated client hardcodes
+  `application/json-patch+json` for patch calls (no per-call override) — status/spec
+  writes use GET + PUT-replace instead, with `resourceVersion` optimistic concurrency
+  (409 → warn, next event retries).
 - **Cluster venue (verified 2026-09-30):** k3s v1.35+ requires cgroup v2 and refuses to boot
   on Docker Desktop WSL2 here (cgroup v1, kernel 5.15) — `kubelet ... cgroup v1 ...
   unsupported`. Pin k3d to `rancher/k3s:v1.31.5-k3s1` until the host moves to cgroup v2.

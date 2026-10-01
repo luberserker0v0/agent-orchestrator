@@ -3,6 +3,7 @@ import { ConversationState } from '../orchestrator/conversation-state.js';
 import { AppError, ErrorCodes, isAppError, type LlmQuotaErrorDetails } from '../utils/errors.js';
 import { parseModelString } from '../utils/model-parser.js';
 import { messagesSentTotal, messageSendDurationSeconds, llmQuotaExhaustionsTotal } from '../metrics/registry.js';
+import type { K8sStatusReporter } from '../cluster/status-reporter.js';
 
 export interface SendResult {
   messageId: string;
@@ -13,7 +14,8 @@ export interface SendResult {
 export class MessageService {
   constructor(
     private instanceManager: InstanceManager,
-    private conversationState: ConversationState
+    private conversationState: ConversationState,
+    private statusReporter?: K8sStatusReporter,
   ) {}
 
   private ensureReady(id: string): InstanceInfo {
@@ -74,6 +76,7 @@ export class MessageService {
 
       messagesSentTotal.labels('success').inc();
       messageSendDurationSeconds.observe((performance.now() - start) / 1000);
+      void this.statusReporter?.reportSuccess(id);
       return { messageId: response.info.id, text: texts, parts: response.parts };
     } catch (err) {
       if (
@@ -90,6 +93,12 @@ export class MessageService {
           sessionId: instance.sessionId,
           code: err.code,
           retryAfterMs: details?.retryAfterMs,
+        });
+        void this.statusReporter?.reportQuotaError(id, {
+          code: err.code,
+          message: err.message,
+          retryAfterMs: details?.retryAfterMs,
+          ...(model ? { model: { providerID: model.providerID, id: model.modelID } } : {}),
         });
         messageSendDurationSeconds.observe((performance.now() - start) / 1000);
         throw err;

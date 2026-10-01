@@ -287,6 +287,19 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 
 **Validation rule:** `maxInstances` must not exceed the number of available ports (`portRange.end - portRange.start + 1`). The application will refuse to start if this constraint is violated.
 
+## Cluster Configuration
+
+The optional `cluster` section enables Kubernetes `OpencodeInstance` status reporting
+(lifecycle + LLM quota) for quota-aware placement. Disabled by default — omit for
+single-node use. Requires the CRDs in `k8s/crd/` installed in the target namespace.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | false | Report instance status to `OpencodeInstance` CRs. When false (or when no kubeconfig/CRDs are found), reporting silently no-ops and serving is unaffected |
+| `namespace` | string | `'ao-instances'` | Namespace for `OpencodeInstance` objects |
+| `heartbeatIntervalMs` | integer | 60000 | Status heartbeat interval in ms (0 = disable heartbeats) |
+| `quotaFailureThreshold` | integer | 2 | Consecutive quota errors before phase flips to `QuotaExhausted` |
+
 ## Graceful Shutdown
 
 On `SIGINT` or `SIGTERM`, the orchestrator performs a graceful shutdown:

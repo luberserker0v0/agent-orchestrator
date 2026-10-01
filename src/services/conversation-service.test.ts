@@ -5,7 +5,7 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 import { ConversationService } from './conversation-service.js';
-import { AppError } from '../utils/errors.js';
+import { AppError, ErrorCodes } from '../utils/errors.js';
 
 describe('ConversationService', () => {
   let service: ConversationService;
@@ -216,6 +216,64 @@ describe('ConversationService', () => {
       expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'running');
       expect(result.status).toBe('running');
       expect(result.port).toBe(41001);
+    });
+
+    it('should track instance status on start when reporter is configured', async () => {
+      const mockReporter = { trackInstance: vi.fn(), untrackInstance: vi.fn() };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+        (agentTypeId: string) => (agentTypeId === 'opencode-direct' ? 'direct' : undefined),
+      );
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      mockInstanceManager.createInstance.mockResolvedValue({
+        port: 41001,
+        baseUrl: 'http://127.0.0.1:41001',
+        client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_1' }) },
+      });
+
+      await svc.start(testId);
+
+      expect(mockReporter.trackInstance).toHaveBeenCalledWith({
+        conversationId: testId,
+        runtimeType: 'direct',
+        endpoint: 'http://127.0.0.1:41001',
+        volumeClaimName: 'conv-conv-1',
+      });
+    });
+
+    it('should report quota errors from background session creation', async () => {
+      const mockReporter = { trackInstance: vi.fn(), untrackInstance: vi.fn(), reportQuotaError: vi.fn() };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+      );
+      mockConversationState.get.mockReturnValue({ ...mockState });
+      const quotaError = new AppError(429, ErrorCodes.LLM_QUOTA_EXHAUSTED, 'OpenCode HTTP 429: quota exceeded');
+      mockInstanceManager.createInstance.mockResolvedValue({
+        port: 41001,
+        client: { createSession: vi.fn().mockRejectedValue(quotaError) },
+      });
+
+      await svc.start(testId);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(mockReporter.reportQuotaError).toHaveBeenCalledWith(
+        testId,
+        expect.objectContaining({ code: ErrorCodes.LLM_QUOTA_EXHAUSTED })
+      );
     });
 
     it('should throw 404 when conversation not found', async () => {
@@ -501,6 +559,26 @@ describe('ConversationService', () => {
   });
 
   describe('delete', () => {
+    it('should untrack instance status on delete when reporter is configured', async () => {
+      const mockReporter = { trackInstance: vi.fn(), untrackInstance: vi.fn() };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+      );
+      mockConversationState.has.mockReturnValue(true);
+      mockInstanceManager.getInstance.mockReturnValue(undefined);
+
+      await svc.delete(testId);
+
+      expect(mockReporter.untrackInstance).toHaveBeenCalledWith(testId);
+    });
+
     it('should delete a conversation', async () => {
       mockConversationState.has.mockReturnValue(true);
       mockInstanceManager.destroyInstance.mockResolvedValue(undefined);

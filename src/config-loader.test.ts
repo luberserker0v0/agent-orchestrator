@@ -395,6 +395,41 @@ describe('validateConfig', () => {
     });
   });
 
+  describe('cluster validation', () => {
+    it('accepts absent cluster section (reporting disabled)', () => {
+      const config = createValidConfig();
+      delete config.cluster;
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('accepts valid cluster config', () => {
+      const config = createValidConfig({
+        cluster: { enabled: true, namespace: 'ao-instances', heartbeatIntervalMs: 30000, quotaFailureThreshold: 3 },
+      });
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('rejects non-boolean enabled', () => {
+      const config = createValidConfig({ cluster: { enabled: 'yes' } as unknown as { enabled: boolean } });
+      expect(() => validateConfig(config)).toThrow('cluster.enabled must be a boolean');
+    });
+
+    it('rejects empty namespace', () => {
+      const config = createValidConfig({ cluster: { namespace: '' } });
+      expect(() => validateConfig(config)).toThrow('cluster.namespace must be a non-empty string');
+    });
+
+    it('rejects negative heartbeat interval', () => {
+      const config = createValidConfig({ cluster: { heartbeatIntervalMs: -1 } });
+      expect(() => validateConfig(config)).toThrow('cluster.heartbeatIntervalMs must be a non-negative integer');
+    });
+
+    it('rejects zero quota failure threshold', () => {
+      const config = createValidConfig({ cluster: { quotaFailureThreshold: 0 } });
+      expect(() => validateConfig(config)).toThrow('cluster.quotaFailureThreshold must be a positive integer');
+    });
+  });
+
   // ─── RBAC validation ─────────────────────────────────────
 
   it('accepts rbac.enabled: true with apiKeys', () => {
