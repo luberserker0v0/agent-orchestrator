@@ -5,6 +5,7 @@ import {
   sanitizeK8sName,
   instanceObjectName,
   instanceVolumeClaimName,
+  instancePodLabelSelector,
   type InstancePodsApi,
 } from './kubernetes.js';
 
@@ -67,6 +68,12 @@ function createFakePods(): FakePods {
 }
 
 const HEALTH = { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 };
+
+it('uses the conversation label to select only managed instance Pods', () => {
+  expect(instancePodLabelSelector()).toBe(
+    'app.kubernetes.io/part-of=agent-orchestrator,agentorchestrator.io/conversation',
+  );
+});
 
 describe('sanitizeK8sName', () => {
   it('lowercases and strips invalid characters', () => {
@@ -308,5 +315,17 @@ describe('KubernetesRuntime', () => {
 
     expect(fake.deleted).toContain('pod/ao-instances/opencode-old');
     expect(fake.deleted).toContain('svc/ao-instances/opencode-old');
+  });
+
+  it('labels instance Pods distinctly from orchestrator control-plane Pods', async () => {
+    const fake = createFakePods();
+    const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
+    mockFetch.mockResolvedValue(makeHealthyFetch());
+
+    await rt.start('label-check', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+    const metadata = fake.createdPods[0].body.metadata as { labels: Record<string, string> };
+    expect(metadata.labels['app.kubernetes.io/part-of']).toBe('agent-orchestrator');
+    expect(metadata.labels['agentorchestrator.io/conversation']).toBe('label-check');
   });
 });

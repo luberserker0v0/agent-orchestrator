@@ -36,6 +36,7 @@ export interface InstancePodsApi {
 const PART_OF_LABEL = 'app.kubernetes.io/part-of';
 const PART_OF_VALUE = 'agent-orchestrator';
 const CONVERSATION_LABEL = 'agentorchestrator.io/conversation';
+const INSTANCE_POD_SELECTOR = `${PART_OF_LABEL}=${PART_OF_VALUE},${CONVERSATION_LABEL}`;
 const DEFAULT_NAMESPACE = 'ao-instances';
 const DEFAULT_POD_READY_TIMEOUT_MS = 180000;
 const EXIT_POLL_INTERVAL_MS = 2000;
@@ -54,6 +55,10 @@ export function instanceObjectName(id: string): string {
 /** Per-conversation PVC name (matches the plan's `conv-<id>` convention). */
 export function instanceVolumeClaimName(id: string): string {
   return `conv-${sanitizeK8sName(id)}`;
+}
+
+export function instancePodLabelSelector(): string {
+  return INSTANCE_POD_SELECTOR;
 }
 
 function httpStatusOf(err: unknown): number | undefined {
@@ -486,7 +491,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
 }
 
 class LivePodsApi implements InstancePodsApi {
-  constructor(private readonly api: PromiseCoreV1Api, private readonly labelSelector = `${PART_OF_LABEL}=${PART_OF_VALUE}`) {}
+  constructor(private readonly api: PromiseCoreV1Api, private readonly labelSelector = INSTANCE_POD_SELECTOR) {}
 
   async createPod(namespace: string, body: object): Promise<unknown> {
     return this.api.createNamespacedPod(namespace, body);
