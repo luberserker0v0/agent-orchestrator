@@ -87,7 +87,8 @@
       //   "config": {
       //     "image": "ghcr.io/anomalyco/opencode:1.17.8",
       //     "namespace": "ao-instances",
-      //     "sessionMode": "xdg"
+      //     "sessionMode": "xdg",
+      //     "pvcStorage": "10Gi"
       //     // "instanceHost": "127.0.0.1",  // + kubectl port-forward when orchestrating from outside
       //     // "nodeName": "worker-2",        // Pin scheduling (migration target)
       //     // "podReadyTimeoutMs": 180000

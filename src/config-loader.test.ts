@@ -477,6 +477,18 @@ describe('validateConfig', () => {
     expect(() => validateConfig(config)).toThrow('server.rbac.enabled is true but no API keys configured');
   });
 
+  it('rejects placeholder API keys', () => {
+    const config = createValidConfig({
+      server: {
+        port: 8080,
+        host: '127.0.0.1',
+        shutdownTimeoutMs: 15000,
+        apiKeys: [{ key: 'CHANGEME-admin-secret', role: 'admin' }],
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('replace placeholder API keys');
+  });
+
   it('accepts rbac.enabled: false without API keys', () => {
     const config = createValidConfig({
       server: { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000, rbac: { enabled: false } },

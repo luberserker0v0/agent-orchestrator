@@ -25,6 +25,8 @@ export interface NodePlaceable {
 
 /** Narrow pod/service surface used by the runtime (structurally compatible). */
 export interface InstancePodsApi {
+  readPersistentVolumeClaim(namespace: string, name: string): Promise<void>;
+  createPersistentVolumeClaim(namespace: string, body: object): Promise<unknown>;
   createPod(namespace: string, body: object): Promise<unknown>;
   readPod(namespace: string, name: string): Promise<PodStatusView>;
   deletePod(namespace: string, name: string, opts?: { force?: boolean }): Promise<void>;
@@ -76,6 +78,10 @@ function httpStatusOf(err: unknown): number | undefined {
 
 function isNotFound(err: unknown): boolean {
   return httpStatusOf(err) === 404;
+}
+
+function isConflict(err: unknown): boolean {
+  return httpStatusOf(err) === 409;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -310,6 +316,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
 
     try {
+      await this.ensurePersistentVolumeClaim(namespace, id);
       logger.info(`Creating OpenCode instance Pod ${podName} on port ${port} (image: ${this.config.image})`);
       await this.api().createService(namespace, {
         apiVersion: 'v1',
@@ -333,6 +340,8 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       this.instanceState.set(id, { podName, serviceName, port, auth });
       return { client, port, handle, baseUrl };
     } catch (err) {
+      await this.deleteIgnoringNotFound(() => this.api().deletePod(namespace, podName)).catch(() => {});
+      await this.deleteIgnoringNotFound(() => this.api().deleteService(namespace, serviceName)).catch(() => {});
       this.portPool.release(port);
       throw err;
     }
@@ -367,6 +376,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     const client = new OpenCodeAgentClient(baseUrl, state.auth.username, state.auth.password);
 
     try {
+      await this.ensurePersistentVolumeClaim(namespace, id);
       await api.createService(namespace, {
         apiVersion: 'v1',
         kind: 'Service',
@@ -407,6 +417,35 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       logger.warn(`Removing orphan instance Pod ${podName}`);
       await this.deleteIgnoringNotFound(() => this.api().deletePod(namespace, podName));
       await this.deleteIgnoringNotFound(() => this.api().deleteService(namespace, podName));
+    }
+  }
+
+  private async ensurePersistentVolumeClaim(namespace: string, id: string): Promise<void> {
+    const name = instanceVolumeClaimName(id);
+    try {
+      await this.api().readPersistentVolumeClaim(namespace, name);
+      return;
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+
+    try {
+      await this.api().createPersistentVolumeClaim(namespace, {
+        apiVersion: 'v1',
+        kind: 'PersistentVolumeClaim',
+        metadata: {
+          name,
+          labels: { [PART_OF_LABEL]: PART_OF_VALUE, [CONVERSATION_LABEL]: sanitizeK8sName(id) },
+        },
+        spec: {
+          accessModes: ['ReadWriteOnce'],
+          resources: { requests: { storage: this.config.pvcStorage ?? '10Gi' } },
+        },
+      });
+    } catch (err) {
+      // The placement controller may win the create race. Both owners render
+      // the same durable claim, so AlreadyExists is a successful outcome.
+      if (!isConflict(err)) throw err;
     }
   }
 
@@ -492,6 +531,14 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
 
 class LivePodsApi implements InstancePodsApi {
   constructor(private readonly api: PromiseCoreV1Api, private readonly labelSelector = INSTANCE_POD_SELECTOR) {}
+
+  async readPersistentVolumeClaim(namespace: string, name: string): Promise<void> {
+    await this.api.readNamespacedPersistentVolumeClaim(name, namespace);
+  }
+
+  async createPersistentVolumeClaim(namespace: string, body: object): Promise<unknown> {
+    return this.api.createNamespacedPersistentVolumeClaim(namespace, body);
+  }
 
   async createPod(namespace: string, body: object): Promise<unknown> {
     return this.api.createNamespacedPod(namespace, body);

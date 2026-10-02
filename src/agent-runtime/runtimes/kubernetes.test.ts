@@ -22,6 +22,7 @@ function createPortPool(start = 40000, end = 40050): PortPool {
 
 interface FakePods {
   api: InstancePodsApi;
+  createdPVCs: Array<{ namespace: string; body: Record<string, unknown> }>;
   createdPods: Array<{ namespace: string; body: Record<string, unknown> }>;
   createdServices: Array<{ namespace: string; body: Record<string, unknown> }>;
   deleted: string[];
@@ -31,6 +32,7 @@ interface FakePods {
 function createFakePods(): FakePods {
   const deletedPods = new Set<string>();
   const fake: FakePods = {
+    createdPVCs: [],
     createdPods: [],
     createdServices: [],
     deleted: [],
@@ -43,6 +45,16 @@ function createFakePods(): FakePods {
     return err;
   };
   fake.api = {
+    readPersistentVolumeClaim: vi.fn(async (namespace: string, name: string) => {
+      const exists = fake.createdPVCs.some((pvc) =>
+        pvc.namespace === namespace && (pvc.body.metadata as Record<string, unknown>).name === name,
+      );
+      if (!exists) throw notFound();
+    }),
+    createPersistentVolumeClaim: vi.fn(async (namespace: string, body: object) => {
+      fake.createdPVCs.push({ namespace, body: body as Record<string, unknown> });
+      return {};
+    }),
     createPod: vi.fn(async (namespace: string, body: object) => {
       fake.createdPods.push({ namespace, body: body as Record<string, unknown> });
       deletedPods.delete(`${namespace}/${((body as Record<string, unknown>).metadata as Record<string, unknown>).name}`);
@@ -118,6 +130,11 @@ describe('KubernetesRuntime', () => {
 
     const result = await rt.start('conv-1', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
 
+    expect(fake.createdPVCs).toHaveLength(1);
+    expect(fake.createdPVCs[0].body).toMatchObject({
+      metadata: { name: 'conv-conv-1' },
+      spec: { accessModes: ['ReadWriteOnce'], resources: { requests: { storage: '10Gi' } } },
+    });
     expect(fake.createdServices).toHaveLength(1);
     expect(fake.createdPods).toHaveLength(1);
     const pod = fake.createdPods[0].body;
@@ -315,6 +332,18 @@ describe('KubernetesRuntime', () => {
 
     expect(fake.deleted).toContain('pod/ao-instances/opencode-old');
     expect(fake.deleted).toContain('svc/ao-instances/opencode-old');
+  });
+
+  it('reuses an existing conversation PVC', async () => {
+    const fake = createFakePods();
+    fake.createdPVCs.push({ namespace: 'ao-instances', body: { metadata: { name: 'conv-existing' } } });
+    const createPVC = fake.api.createPersistentVolumeClaim as ReturnType<typeof vi.fn>;
+    const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
+    mockFetch.mockResolvedValue(makeHealthyFetch());
+
+    await rt.start('existing', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+    expect(createPVC).not.toHaveBeenCalled();
   });
 
   it('labels instance Pods distinctly from orchestrator control-plane Pods', async () => {

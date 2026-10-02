@@ -85,6 +85,8 @@ export interface KubernetesRuntimeConfig {
   sessionMode?: 'xdg' | 'sqlite';
   /** Max ms to wait for the Pod to become Ready. Default 180000. */
   podReadyTimeoutMs?: number;
+  /** Storage requested for a per-conversation PVC. Default '10Gi'. */
+  pvcStorage?: string;
   /** Container CPU/memory requests/limits (e.g. `{ requests: { cpu: '500m' } }`). */
   resources?: {
     requests?: { cpu?: string; memory?: string };
@@ -305,6 +307,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       }
       if (typeof entry.key !== 'string' || entry.key.length < 8) {
         throw new Error('Config validation failed: each apiKeys entry must have a "key" string of at least 8 characters');
+      }
+      if (/^(?:changeme|replace[-_ ]?me)/i.test(entry.key)) {
+        throw new Error('Config validation failed: replace placeholder API keys before starting');
       }
       if (typeof entry.role !== 'string' || !configuredRoleNames.has(entry.role)) {
         throw new Error(`Config validation failed: apiKeys entry references unknown role "${entry.role}"`);

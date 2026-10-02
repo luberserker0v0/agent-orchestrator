@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- fix(kubernetes): create per-conversation PVCs before instance Pods and grant required PVC/CR status permissions
 - fix(rbac): enforce explicit permissions for every REST and WebSocket operation instead of allowing unmapped routes
 - fix(orchestrator): validate collision-free conversation IDs and reserve capacity during concurrent instance starts
 - fix(websocket): prevent stale replaced-socket close events from unregistering the active connection

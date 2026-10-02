@@ -19,7 +19,7 @@ k8s/
 │   └── deployment.yaml             # controller, 1 replica (leader election pending)
 ├── orchestrator/
 │   ├── serviceaccount.yaml         # orchestrator identity
-│   ├── role.yaml                   # instance Pods/Services, status CRs, PVC reads
+│   ├── role.yaml                   # instance Pods/Services, status CRs, PVC ensure
 │   ├── rolebinding.yaml
 │   ├── secret.yaml                 # agentorchestrator.json (contains API keys — replace placeholders)
 │   ├── workspace-pvc.yaml          # orchestrator's own workspace (20Gi, RWO)
@@ -101,7 +101,8 @@ and enable status reporting so the controller can place and migrate:
         "config": {
           "image": "ghcr.io/anomalyco/opencode:latest",
           "namespace": "ao-instances",
-          "sessionMode": "xdg"
+          "sessionMode": "xdg",
+          "pvcStorage": "10Gi"
           // "instanceHost": "127.0.0.1", // + kubectl port-forward when orchestrating from outside
           // "nodeName": "worker-2",       // pin scheduling (migration target)
         }
@@ -130,12 +131,14 @@ and enable status reporting so the controller can place and migrate:
 
 One RWO PVC per conversation (`conv-<id>`, see `k8s/volume/conversation-pvc-template.yaml`).
 The instance Pod mounts it at `/data/conversations/<id>` (`workspace/` + `session/`).
+The runtime ensures the claim exists before creating the Pod; the controller performs
+the same operation idempotently while reconciling status objects.
 Retention: deleted **only** on explicit conversation DELETE — never on migration,
 eviction, or idle timeout.
 
 ## Placement Controller
 
-Runs `aor operator` (image `luberserker/agent-orchestrator:latest`):
+Runs `aor operator` (image `luberserker/agent-orchestrator:main` or a release tag):
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -149,7 +152,7 @@ Runs `aor operator` (image `luberserker/agent-orchestrator:latest`):
 | `--metrics-port` | `0` (disabled) | Prometheus scrape endpoint |
 | `--pvc-storage` | `10Gi` | Storage request for auto-provisioned per-conversation PVCs |
 
-The controller provisions `conv-<id>` PVCs automatically when instances appear
+The controller ensures `conv-<id>` PVCs exist when instances appear
 (dynamic provisioning via the default `StorageClass`) and deletes route + volume
 when the instance object disappears (conversation DELETE; `stop` keeps a `Stopped`
 object so its volume survives for restart).

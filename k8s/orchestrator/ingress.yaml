@@ -12,7 +12,8 @@ metadata:
   annotations:
     traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
     traefik.ingress.kubernetes.io/service.sticky.cookie.name: "ao-affinity"
-    traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
+    # This example has no TLS block. Set to "true" when TLS is configured.
+    traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "false"
 spec:
   ingressClassName: traefik
   rules:
