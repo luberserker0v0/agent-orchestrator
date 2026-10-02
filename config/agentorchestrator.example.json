@@ -17,33 +17,12 @@
 
   // ── Role Definitions (RBAC) ──────────────────────────────────────
   // Permissions: "resource:action" format, "*" for admin wildcard
-  // Built-in resources: conversation, message, config, agent, file, session, skill, role
-  // Roles are persisted to config file when modified via POST /api/roles
+  // Built-in roles (admin, user, observer) are immutable and need not be listed.
+  // Custom roles are persisted to this section when modified via POST /api/roles
+  // and may be assigned to entries in server.apiKeys.
   "roles": {
-    "admin": {
-      "permissions": ["*"]       // Full access + role management
-    },
-    "user": {
-      "permissions": [           // Conversation services (CRUD + messages)
-        "conversation:start", "conversation:stop", "conversation:restart", "conversation:delete",
-        "message:send",
-        "config:write",
-        "agent:write", "agent:delete",
-        "file:write", "file:delete", "file:copy",
-        "session:create", "session:delete", "session:fork", "session:abort",
-        "skill:import", "skill:delete"
-      ]
-    },
-    "observer": {
-      "permissions": [           // Read-only access
-        "conversation:list", "conversation:get", "conversation:events",
-        "message:history",
-        "config:get",
-        "agent:list", "agent:get",
-        "file:read", "file:list",
-        "session:list", "session:get", "session:children",
-        "skill:list", "skill:get", "skill:info"
-      ]
+    "auditor": {
+      "permissions": ["conversation:list", "conversation:get", "conversation:events"]
     }
   },
 

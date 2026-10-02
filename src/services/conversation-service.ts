@@ -10,6 +10,7 @@ import { llmQuotaExhaustionsTotal } from '../metrics/registry.js';
 import { AppError, ErrorCodes, isAppError } from '../utils/errors.js';
 import { conversationVolumeClaimName, type K8sStatusReporter } from '../cluster/status-reporter.js';
 import type { NodePlaceable } from '../agent-runtime/runtimes/kubernetes.js';
+import { conversationIdRequirement, isValidConversationId } from '../utils/conversation-id.js';
 
 export interface ConversationData {
   id: string;
@@ -58,6 +59,14 @@ export class ConversationService {
 
   async create(id?: string, agentType?: string): Promise<ConversationData> {
     const conversationId = id ?? this.generateId();
+
+    if (!isValidConversationId(conversationId)) {
+      throw new AppError(
+        400,
+        ErrorCodes.INVALID_CONVERSATION_ID,
+        `Invalid conversation id: ${conversationIdRequirement()}`,
+      );
+    }
 
     if (this.conversationState.has(conversationId)) {
       throw new AppError(409, ErrorCodes.CONVERSATION_ALREADY_EXISTS, `Conversation already exists: ${conversationId}`);

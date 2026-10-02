@@ -296,6 +296,15 @@ describe('WSRouter', () => {
     });
     expect(hasReplacedEvent).toBe(true);
     expect(mockWs2.close).not.toHaveBeenCalled();
+
+    // The old socket can report its close asynchronously after the replacement
+    // is installed. That stale event must not unregister the new connection.
+    mockWs1.emit('close');
+    mockWs2.emit('message', Buffer.from(JSON.stringify({
+      jsonrpc: '2.0', id: 99, method: 'conversation.status', params: {},
+    })));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mockWs2.send).toHaveBeenCalledWith(expect.stringContaining('"id":99'));
   });
 
   it('handles message.send', async () => {
@@ -358,6 +367,7 @@ describe('WSRouter', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(mockMessageService.send).toHaveBeenCalledWith('conv-001', 'Hello', undefined, undefined);
+    expect(mockRoleService.hasPermission).not.toHaveBeenCalled();
   });
 
   it('handles message.history', async () => {

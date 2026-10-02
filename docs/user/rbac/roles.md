@@ -20,13 +20,15 @@ Can perform most operations but cannot manage roles. Suitable for regular users 
 
 | Resource | Permissions |
 |----------|-------------|
-| Conversation | `conversation:start`, `conversation:stop`, `conversation:restart`, `conversation:delete` |
-| Message | `message:send` |
-| Config | `config:write` |
-| Agent | `agent:write`, `agent:delete` |
-| File | `file:write`, `file:delete`, `file:copy` |
-| Session | `session:create`, `session:delete`, `session:fork`, `session:abort` |
-| Skill | `skill:import`, `skill:delete` |
+| Runtime/Role | `runtime:list`, `role:read` |
+| Conversation | read permissions plus `conversation:start`, `conversation:stop`, `conversation:restart`, `conversation:delete` |
+| Message | `message:send`, `message:history` |
+| Config | `config:write`, `config:get` |
+| Agent | `agent:write`, `agent:delete`, `agent:list`, `agent:get` |
+| File | `file:write`, `file:delete`, `file:copy`, `file:read`, `file:list` |
+| Session | create/delete/fork/abort plus list/get/children |
+| Provider | `provider:list` |
+| Skill | import/delete plus list/get/info |
 
 **Use for:** Regular users who need to create and manage conversations.
 
@@ -142,8 +144,19 @@ Define custom roles in the `roles` section of your config:
 }
 ```
 
+Assign the custom role to an API key:
+
+```jsonc
+{
+  "server": {
+    "apiKeys": [
+      { "key": "deployer-secret-123456", "role": "deployer" }
+    ]
+  }
+}
+```
+
 **Notes:**
 - Role names must start with a letter and contain only alphanumeric, hyphen, or underscore characters (max 64 characters)
-- The `admin` role cannot be modified or deleted
-- Built-in roles (`admin`, `user`, `observer`) cannot be overridden
+- Built-in roles (`admin`, `user`, `observer`) cannot be modified, deleted, or overridden
 - Custom roles are persisted to the config file automatically

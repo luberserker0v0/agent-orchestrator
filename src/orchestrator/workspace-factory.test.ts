@@ -140,16 +140,16 @@ describe('WorkspaceFactory', () => {
   // ─── cleanupOrphans ──────────────────────────────────────
 
   describe('cleanupOrphans', () => {
-    it('should remove all directories in basePath', async () => {
+    it('should preserve conversation directories and remove temporary artifacts', async () => {
       const factory = createFactory();
       mkdirSync(join(TEST_BASE_PATH, 'orphan-1'), { recursive: true });
-      mkdirSync(join(TEST_BASE_PATH, 'orphan-2'), { recursive: true });
+      mkdirSync(join(TEST_BASE_PATH, '.tmp-interrupted'), { recursive: true });
       expect(existsSync(join(TEST_BASE_PATH, 'orphan-1'))).toBe(true);
 
       await factory.cleanupOrphans();
 
-      expect(existsSync(join(TEST_BASE_PATH, 'orphan-1'))).toBe(false);
-      expect(existsSync(join(TEST_BASE_PATH, 'orphan-2'))).toBe(false);
+      expect(existsSync(join(TEST_BASE_PATH, 'orphan-1'))).toBe(true);
+      expect(existsSync(join(TEST_BASE_PATH, '.tmp-interrupted'))).toBe(false);
     });
 
     it('should not throw when basePath is empty', async () => {
@@ -180,12 +180,12 @@ describe('WorkspaceFactory', () => {
 
     it('should handle errors gracefully', async () => {
       const factory = createFactory();
-      mkdirSync(join(TEST_BASE_PATH, 'orphan-a'), { recursive: true });
-      mkdirSync(join(TEST_BASE_PATH, 'orphan-b'), { recursive: true });
+      mkdirSync(join(TEST_BASE_PATH, '.tmp-a'), { recursive: true });
+      mkdirSync(join(TEST_BASE_PATH, '.tmp-b'), { recursive: true });
 
       await expect(factory.cleanupOrphans()).resolves.not.toThrow();
-      expect(existsSync(join(TEST_BASE_PATH, 'orphan-a'))).toBe(false);
-      expect(existsSync(join(TEST_BASE_PATH, 'orphan-b'))).toBe(false);
+      expect(existsSync(join(TEST_BASE_PATH, '.tmp-a'))).toBe(false);
+      expect(existsSync(join(TEST_BASE_PATH, '.tmp-b'))).toBe(false);
     });
   });
 
@@ -428,6 +428,15 @@ describe('WorkspaceFactory', () => {
       await factory.writeFile('conv-size', 'test.txt', 'hello');
 
       expect(await factory.getWorkspaceSize('conv-size')).toBeGreaterThan(0);
+    });
+
+    it('charges only the size delta when replacing a file', async () => {
+      const factory = createFactory({ maxSizeBytes: 10 });
+      await factory.create('conv-replace');
+      await factory.writeFile('conv-replace', 'test.txt', '12345678');
+
+      await expect(factory.writeFile('conv-replace', 'test.txt', 'abcdefgh')).resolves.not.toThrow();
+      expect(await factory.readFile('conv-replace', 'test.txt')).toBe('abcdefgh');
     });
 
     it('should return configured maxSizeBytes via getMaxSizeBytes', () => {

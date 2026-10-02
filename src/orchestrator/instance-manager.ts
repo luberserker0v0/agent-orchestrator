@@ -16,6 +16,7 @@ export class InstanceManager {
   private workspaceFactory: WorkspaceFactory;
   private runtimeManager: RuntimeManager;
   private idleSweepTimer?: NodeJS.Timeout;
+  private pendingStarts = new Set<string>();
 
   constructor(config: OrchestratorConfig, workspaceFactory: WorkspaceFactory, runtimeManager: RuntimeManager) {
     this.config = config;
@@ -25,37 +26,45 @@ export class InstanceManager {
   }
 
   async createInstance(id: string, agentType?: string): Promise<InstanceInfo> {
-    if (this.runtimeManager.has(id)) {
+    if (this.runtimeManager.has(id) || this.pendingStarts.has(id)) {
       throw new Error(`Instance already exists: ${id}`);
     }
 
-    // Strict maxInstances enforcement: evict LRU if at capacity
-    if (this.runtimeManager.size >= this.config.maxInstances) {
-      await this.evictLRU();
-    }
+    // Reserve capacity synchronously before the first await. Without this,
+    // simultaneous starts all observe the same map size and can exceed the
+    // configured hard limit.
+    this.pendingStarts.add(id);
 
-    const resolvedAgentType = agentType ?? this.config.defaultAgentType;
-    let workspace;
     try {
-      if (await this.workspaceFactory.hasWorkspace(id)) {
-        workspace = await this.workspaceFactory.ensure(id);
-      } else {
-        workspace = await this.workspaceFactory.create(id, resolvedAgentType);
+      if (this.runtimeManager.size + this.pendingStarts.size > this.config.maxInstances) {
+        await this.evictLRU();
       }
-    } catch (err) {
-      throw new Error(`Failed to create workspace: ${(err as Error).message}`, { cause: err });
+
+      const resolvedAgentType = agentType ?? this.config.defaultAgentType;
+      let workspace;
+      try {
+        if (await this.workspaceFactory.hasWorkspace(id)) {
+          workspace = await this.workspaceFactory.ensure(id);
+        } else {
+          workspace = await this.workspaceFactory.create(id, resolvedAgentType);
+        }
+      } catch (err) {
+        throw new Error(`Failed to create workspace: ${(err as Error).message}`, { cause: err });
+      }
+
+      const password = generatePassword();
+
+      return await this.runtimeManager.start(
+        id,
+        workspace.path,
+        { username: 'opencode', password },
+        this.config.healthCheck,
+        resolvedAgentType,
+        workspace.runtimeAccess,
+      );
+    } finally {
+      this.pendingStarts.delete(id);
     }
-
-    const password = generatePassword();
-
-    return this.runtimeManager.start(
-      id,
-      workspace.path,
-      { username: 'opencode', password },
-      this.config.healthCheck,
-      resolvedAgentType,
-      workspace.runtimeAccess,
-    );
   }
 
   getInstance(id: string): InstanceInfo | undefined {
@@ -97,11 +106,12 @@ export class InstanceManager {
 
   private async evictLRU(): Promise<void> {
     const lruId = this.runtimeManager.getLRUCandidateId();
-    if (lruId) {
-      instanceEvictionsTotal.inc();
-      logger.warn(`LRU eviction: destroying instance ${lruId}`);
-      await this.runtimeManager.destroyInstance(lruId);
+    if (!lruId) {
+      throw new Error('Maximum instance capacity is reserved by instances that are still starting');
     }
+    instanceEvictionsTotal.inc();
+    logger.warn(`LRU eviction: destroying instance ${lruId}`);
+    await this.runtimeManager.destroyInstance(lruId);
   }
 
   private startIdleSweep(): void {

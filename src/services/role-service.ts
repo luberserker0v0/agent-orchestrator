@@ -1,6 +1,6 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { parse as parseJSONC } from 'jsonc-parser';
-import type { ApiKeyRole, RolesConfig } from '../config-loader.js';
+import type { BuiltinApiKeyRole, RolesConfig } from '../config-loader.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
@@ -10,24 +10,30 @@ export interface RoleDefinition {
   builtin: boolean;
 }
 
-const BUILTIN_ROLES: Record<ApiKeyRole, string[]> = {
+const BUILTIN_ROLES: Record<BuiltinApiKeyRole, string[]> = {
   admin: ['*'],
   user: [
+    'runtime:list', 'role:read',
+    'conversation:list', 'conversation:get', 'conversation:events',
     'conversation:start', 'conversation:stop', 'conversation:restart', 'conversation:delete',
-    'message:send',
-    'config:write',
-    'agent:write', 'agent:delete',
-    'file:write', 'file:delete', 'file:copy',
+    'message:send', 'message:history',
+    'config:write', 'config:get',
+    'agent:write', 'agent:delete', 'agent:list', 'agent:get',
+    'file:write', 'file:delete', 'file:copy', 'file:read', 'file:list',
     'session:create', 'session:delete', 'session:fork', 'session:abort',
-    'skill:import', 'skill:delete',
+    'session:list', 'session:get', 'session:children',
+    'provider:list',
+    'skill:import', 'skill:delete', 'skill:list', 'skill:get', 'skill:info',
   ],
   observer: [
+    'runtime:list', 'role:read',
     'conversation:list', 'conversation:get', 'conversation:events',
     'message:history',
     'config:get',
     'agent:list', 'agent:get',
     'file:read', 'file:list',
     'session:list', 'session:get', 'session:children',
+    'provider:list',
     'skill:list', 'skill:get', 'skill:info',
   ],
 };
@@ -81,8 +87,8 @@ export class RoleService {
     if (!existing) {
       throw new AppError(404, ErrorCodes.ROLE_NOT_FOUND, `Role "${name}" not found`);
     }
-    if (existing.builtin && name === 'admin') {
-      throw new AppError(403, ErrorCodes.CANNOT_MODIFY_ADMIN, 'Cannot modify admin role');
+    if (existing.builtin) {
+      throw new AppError(403, ErrorCodes.CANNOT_MODIFY_BUILTIN_ROLE, `Cannot modify built-in role "${name}"`);
     }
 
     existing.permissions = permissions;
@@ -96,8 +102,8 @@ export class RoleService {
     if (!existing) {
       throw new AppError(404, ErrorCodes.ROLE_NOT_FOUND, `Role "${name}" not found`);
     }
-    if (name === 'admin') {
-      throw new AppError(403, ErrorCodes.CANNOT_DELETE_ADMIN, 'Cannot delete admin role');
+    if (existing.builtin) {
+      throw new AppError(403, ErrorCodes.CANNOT_DELETE_BUILTIN_ROLE, `Cannot delete built-in role "${name}"`);
     }
 
     this.roles.delete(name);
@@ -130,6 +136,7 @@ export class RoleService {
       rolesObj[name] = { permissions: def.permissions };
     }
 
+    const temporaryPath = `${this.configPath}.${process.pid}.tmp`;
     try {
       let config: Record<string, unknown>;
       if (existsSync(this.configPath)) {
@@ -140,9 +147,16 @@ export class RoleService {
       }
 
       config['roles'] = rolesObj;
-      writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
+      writeFileSync(temporaryPath, JSON.stringify(config, null, 2), 'utf-8');
+      renameSync(temporaryPath, this.configPath);
     } catch (err) {
       logger.error(`Failed to persist roles to config: ${(err as Error).message}`);
+      try {
+        rmSync(temporaryPath, { force: true });
+      } catch {
+        // Best-effort cleanup; preserve the original persistence error.
+      }
+      throw new AppError(500, ErrorCodes.INTERNAL_ERROR, 'Failed to persist role configuration');
     }
   }
 }

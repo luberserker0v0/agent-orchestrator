@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- fix(rbac): enforce explicit permissions for every REST and WebSocket operation instead of allowing unmapped routes
+- fix(orchestrator): validate collision-free conversation IDs and reserve capacity during concurrent instance starts
+- fix(websocket): prevent stale replaced-socket close events from unregistering the active connection
+- fix(storage): preserve durable workspaces during startup cleanup and account for replacement size in quota checks
+- fix(kubernetes): restrict orphan cleanup to conversation instance Pods and use explicit container commands for orchestrator/operator Deployments
+- fix(rbac): make custom roles assignable to API keys and reject mutation of immutable built-in roles
+
 ### Changed
+- conversation IDs must be 1-52 lowercase letters, digits, or hyphens and must start and end with an alphanumeric character
+- Kubernetes manifests now invoke `node dist/index.js` explicitly so container arguments work independently of image `CMD`
 - docs: restructure documentation into user/developer/architecture paths
 - docs: translate all documentation to English (deprecate Chinese files)
 - docs: fix Express version (4.x → 5.x) in AGENTS.md

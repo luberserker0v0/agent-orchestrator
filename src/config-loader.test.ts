@@ -164,7 +164,18 @@ describe('validateConfig', () => {
         apiKeys: [{ key: 'valid-key-1234', role: 'superuser' as any }],
       },
     });
-    expect(() => validateConfig(config)).toThrow('must be "admin", "user", or "observer"');
+    expect(() => validateConfig(config)).toThrow('references unknown role "superuser"');
+  });
+
+  it('accepts an API key assigned to a configured custom role', () => {
+    const config = createValidConfig({
+      roles: { deployer: { permissions: ['conversation:start'] } },
+      server: {
+        ...createValidConfig().server,
+        apiKeys: [{ key: 'custom-role-key', role: 'deployer' }],
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
   });
 
   it('rejects duplicate apiKeys', () => {

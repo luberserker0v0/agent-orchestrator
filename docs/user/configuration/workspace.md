@@ -57,6 +57,14 @@ When `false`, the workspace must contain its own `opencode.json` or the instance
 Each conversation gets its own workspace directory:
 
 ```
+
+Conversation workspaces persist across orchestrator restarts. Startup cleanup
+removes only `.tmp-*` artifacts left by interrupted storage operations. A
+workspace is removed when its conversation is explicitly deleted.
+
+Conversation IDs are also used in filesystem and Kubernetes resource names.
+They must contain 1-52 lowercase letters, digits, or hyphens and must start and
+end with a letter or digit.
 workspace/
   {conversation-id}/
     opencode.json          # OpenCode configuration

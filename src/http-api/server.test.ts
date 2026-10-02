@@ -435,6 +435,34 @@ describe('HTTP API Server', () => {
       expect(res.status).toBe(200);
       expect(res.body.role).toBe('observer');
     });
+
+    it.each([
+      ['POST', '/api/conversations/conv-001/message'],
+      ['PATCH', '/api/conversations/conv-001/config'],
+      ['DELETE', '/api/conversations/conv-001/agent/config'],
+      ['DELETE', '/api/conversations/conv-001/agents/my-agent/skills/my-skill'],
+    ])('denies observer mutation %s %s', async (method, path) => {
+      mockRoleService.hasPermission.mockImplementation((_role: string, permission: string) =>
+        permission.endsWith(':get') || permission.endsWith(':list') || permission.endsWith(':history'),
+      );
+      const srv = createRbacServer(true, [{ key: 'observer-key-1234', role: 'observer' }]);
+      const res = await request(srv)[method.toLowerCase() as 'post'](path)
+        .set('Authorization', 'Bearer observer-key-1234')
+        .send({ text: 'hello' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+    });
+
+    it('requires declared read permission for POST-based file reads', async () => {
+      mockRoleService.hasPermission.mockReturnValue(false);
+      const srv = createRbacServer(true, [{ key: 'observer-key-1234', role: 'observer' }]);
+      const res = await request(srv)
+        .post('/api/conversations/conv-001/files/read')
+        .set('Authorization', 'Bearer observer-key-1234')
+        .send({ path: 'notes.txt' });
+      expect(res.status).toBe(403);
+      expect(mockFileService.read).not.toHaveBeenCalled();
+    });
   });
 
   it('POST /api/conversations prepares workspace', async () => {

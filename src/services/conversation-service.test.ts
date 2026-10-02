@@ -71,6 +71,17 @@ describe('ConversationService', () => {
   });
 
   describe('create', () => {
+    it.each(['a..b', 'a_b', 'Uppercase', '../escape', '-leading', 'trailing-']) (
+      'rejects invalid conversation id %s',
+      async (id) => {
+        await expect(service.create(id)).rejects.toMatchObject({
+          statusCode: 400,
+          code: ErrorCodes.INVALID_CONVERSATION_ID,
+        });
+        expect(mockWorkspaceFactory.create).not.toHaveBeenCalled();
+      },
+    );
+
     it('should create a conversation with generated id', async () => {
       mockConversationState.has.mockReturnValue(false);
       mockRuntimeManager.hasAgentType.mockReturnValue(true);

@@ -18,13 +18,22 @@ import { AppError, ErrorCodes } from '../utils/errors.js';
 
 const WS_METHOD_PERMISSIONS: Record<string, string> = {
   'message.send': 'message:send',
+  'message.history': 'message:history',
   'config.update': 'config:write', 'config.patch': 'config:write',
+  'config.get': 'config:get',
   'agent.register': 'agent:write', 'agent.delete': 'agent:delete',
+  'agent.list': 'agent:list', 'agent.get': 'agent:get',
   'agent.config.write': 'agent:write', 'agent.config.delete': 'agent:delete',
+  'agent.config.get': 'agent:get',
   'file.write': 'file:write', 'file.delete': 'file:delete', 'file.copy': 'file:copy',
+  'file.read': 'file:read', 'file.list': 'file:list',
   'session.create': 'session:create', 'session.delete': 'session:delete',
   'session.fork': 'session:fork', 'session.abort': 'session:abort',
+  'session.list': 'session:list', 'session.get': 'session:get', 'session.children': 'session:children',
+  'providers.list': 'provider:list',
   'skills.import': 'skill:import', 'skills.delete': 'skill:delete',
+  'skills.list': 'skill:list', 'skills.get': 'skill:get', 'skills.info': 'skill:info',
+  'conversation.status': 'conversation:get',
   'conversation.start': 'conversation:start', 'conversation.stop': 'conversation:stop',
   'conversation.restart': 'conversation:restart', 'conversation.delete': 'conversation:delete',
 };
@@ -156,20 +165,32 @@ export class WSRouter {
     this.eventUnsubscribers.set(conversationId, unsub);
 
     ws.on('close', () => {
+      wsConnectionsActive.dec();
+      // A replaced socket may close after its successor is registered. Only
+      // the connection that still owns this conversation may clear shared
+      // routing state.
+      if (this.connections.get(conversationId) !== connection) {
+        logger.info(`Replaced WS connection closed: ${conversationId}`);
+        return;
+      }
       this.connections.delete(conversationId);
       this.connectionRoles.delete(conversationId);
-      this.eventUnsubscribers.get(conversationId)?.();
-      this.eventUnsubscribers.delete(conversationId);
-      wsConnectionsActive.dec();
+      unsub();
+      if (this.eventUnsubscribers.get(conversationId) === unsub) {
+        this.eventUnsubscribers.delete(conversationId);
+      }
       logger.info(`WS connection closed: ${conversationId}`);
     });
   }
 
   private async handleMessage(conversationId: string, method: string, params: unknown): Promise<unknown> {
-    const role = this.connectionRoles.get(conversationId);
-    if (role) {
+    if (this.rbacEnabled) {
+      const role = this.connectionRoles.get(conversationId);
       const permission = WS_METHOD_PERMISSIONS[method];
-      if (permission && !this.roleService.hasPermission(role, permission)) {
+      if (!permission) {
+        throw new AppError(400, ErrorCodes.INVALID_REQUEST_BODY, `Unknown method: ${method}`);
+      }
+      if (!role || !this.roleService.hasPermission(role, permission)) {
         throw new AppError(403, ErrorCodes.FORBIDDEN, 'Insufficient permissions');
       }
     }

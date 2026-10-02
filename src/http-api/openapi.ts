@@ -32,7 +32,7 @@ export const openapiSpec: Record<string, unknown> = {
       post: {
         tags: ['Conversations'],
         summary: 'Create a conversation (prepare workspace, do not start OpenCode)',
-        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string', description: 'Conversation ID (auto-generated if omitted)' } } } } } },
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string', pattern: '^[a-z0-9](?:[a-z0-9-]{0,50}[a-z0-9])?$', maxLength: 52, description: 'Conversation ID (auto-generated if omitted)' } } } } } },
         responses: {
           '201': { description: 'Conversation created', content: { 'application/json': { schema: { $ref: '#/components/schemas/ConversationCreated' } } } },
           '409': { description: 'Conversation already exists', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
