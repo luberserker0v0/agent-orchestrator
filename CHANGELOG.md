@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat(session): restart resumes the previous session when the server still has it instead of always creating a fresh one
 - feat(quota): classify upstream LLM 429/402/403 responses into `LLM_QUOTA_EXHAUSTED` (migrate) vs `LLM_RATE_LIMITED` (retryable) with `Retry-After` capture
 - feat(quota): emit `conversation.quotaExhausted` event with model/agent/code/retryAfterMs on quota errors without destroying the instance
-- feat(quota): add `agentorchestrator_llm_quota_exhaustions_total{code}` Prometheus metric for quota/rate-limit detection
+- feat(quota): add `agentorchestrator_llm_quota_exhaustions_total{code,model}` Prometheus metric for quota/rate-limit detection
 - feat(rbac): add role-based access control with `server.apiKeys` config array supporting `admin` and `observer` roles
 - feat(rbac): backward-compatible `server.apiKey` treated as admin role when `apiKeys` is not set
 - feat(rbac): `/api/auth/role` endpoint returns the role of the current API key
