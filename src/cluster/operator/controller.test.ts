@@ -66,12 +66,20 @@ function createFake(stores: { instances: Map<string, object>; routes: Map<string
   } as unknown as StatusObjectsApi & { calls: string[] };
 }
 
-function controllerWith(stores: { instances: Map<string, object>; routes: Map<string, object> }): {
+function controllerWith(
+  stores: { instances: Map<string, object>; routes: Map<string, object> },
+  options?: { refill?: { defaultWindowMs: number; perModel?: Record<string, number> } },
+): {
   controller: PlacementController;
   api: StatusObjectsApi & { calls: string[] };
 } {
   const api = createFake(stores);
-  const controller = new PlacementController(api, { namespace: 'ao-instances', intervalMs: 0, dryRun: true });
+  const controller = new PlacementController(api, {
+    namespace: 'ao-instances',
+    intervalMs: 0,
+    dryRun: true,
+    ...(options?.refill ? { refill: options.refill } : {}),
+  });
   return { controller, api };
 }
 
@@ -147,7 +155,15 @@ describe('PlacementController', () => {
       return controllerWith(current).api;
     }
 
+    async function migrationCounter(result: string): Promise<number> {
+      const { migrationsTotal } = await import('../../metrics/registry.js');
+      const snapshot = await migrationsTotal.get();
+      return snapshot.values.filter((v) => (v.labels as Record<string, string>).result === result).reduce((sum, v) => sum + v.value, 0);
+    }
+
     it('migrates via the owner and flips the route Active with history', async () => {
+      const { migrationsTotal } = await import('../../metrics/registry.js');
+      migrationsTotal.reset();
       stores.instances.set('a', {
         ...instanceBody(),
         metadata: { name: 'a' },
@@ -176,6 +192,7 @@ describe('PlacementController', () => {
       expect(history).toHaveLength(1);
       expect(history[0].from).toBe('a');
       expect(history[0].reason).toContain('n1->n2');
+      expect(await migrationCounter('completed')).toBe(1);
     });
 
     it('records an error when reportedBy is missing', async () => {
@@ -240,6 +257,61 @@ describe('PlacementController', () => {
       expect(summary.migrationsPlanned).toEqual([{ from: 'a', reason: 'no healthy target node' }]);
       const route = stores.routes.get('a') as { status: Record<string, unknown> };
       expect(route.status.phase).toBe('Active');
+    });
+  });
+
+  describe('refill', () => {
+    it('flips QuotaExhausted back to Ready once the window elapsed', async () => {
+      const old = new Date(Date.now() - 2000).toISOString();
+      stores.instances.set('a', {
+        ...instanceBody(),
+        metadata: { name: 'a' },
+        status: { phase: 'QuotaExhausted', consecutiveFailures: 2, lastQuotaError: { at: old } },
+      });
+      const { controller } = controllerWith(stores, { refill: { defaultWindowMs: 1000 } });
+      const summary = await controller.reconcileOnce();
+      expect(summary.refillsCompleted).toEqual(['a']);
+      const instance = stores.instances.get('a') as { status: Record<string, unknown> };
+      expect(instance.status.phase).toBe('Ready');
+      expect(instance.status.consecutiveFailures).toBe(0);
+    });
+
+    it('leaves recent quota errors alone', async () => {
+      stores.instances.set('a', {
+        ...instanceBody(),
+        metadata: { name: 'a' },
+        status: { phase: 'QuotaExhausted', lastQuotaError: { at: new Date().toISOString() } },
+      });
+      const { controller } = controllerWith(stores, { refill: { defaultWindowMs: 60_000 } });
+      const summary = await controller.reconcileOnce();
+      expect(summary.refillsCompleted).toEqual([]);
+      const instance = stores.instances.get('a') as { status: Record<string, unknown> };
+      expect(instance.status.phase).toBe('QuotaExhausted');
+    });
+  });
+
+  describe('convergence', () => {
+    it('creates the route on pass one and plans migration on pass two', async () => {
+      stores.instances.set('a', {
+        ...instanceBody(),
+        metadata: { name: 'a' },
+        spec: { nodeName: 'n1', model: MODEL },
+        status: { phase: 'QuotaExhausted' },
+      });
+      stores.instances.set('b', {
+        ...instanceBody(),
+        metadata: { name: 'b' },
+        spec: { nodeName: 'n2', model: MODEL },
+        status: { phase: 'Ready' },
+      });
+      const { controller } = controllerWith(stores);
+      const first = await controller.reconcileOnce();
+      expect(first.routesCreated.sort()).toEqual(['a', 'b']);
+      expect(first.migrationsPlanned).toEqual([]);
+      const second = await controller.reconcileOnce();
+      expect(second.migrationsPlanned).toEqual([
+        { from: 'a', target: 'b', reason: expect.stringContaining('n1 -> n2') },
+      ]);
     });
   });
 });

@@ -82,6 +82,8 @@ Subcommands:
   operator               Run the placement controller (quota-aware routing)
                          [--namespace <ns>] [--interval-ms <ms>]
                          [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>]
+                         [--refill-window-ms <ms>] [--model-refill-window <provider/model=ms>]
+                         [--metrics-port <port>]
 `);
 }
 
@@ -124,18 +126,29 @@ export async function handleSubcommand(cli: CliOptions): Promise<boolean> {
       let execute = false;
       let apiKey: string | undefined;
       let migrateTimeoutMs = 300000;
+      let refillWindowMs = 24 * 60 * 60 * 1000;
+      let metricsPort = 0;
+      const modelRefillWindows: Record<string, number> = {};
       for (let i = 0; i < args.length; i++) {
         if (args[i] === '--namespace' && i + 1 < args.length) namespace = args[++i];
         if (args[i] === '--interval-ms' && i + 1 < args.length) intervalMs = Number(args[++i]);
         if (args[i] === '--execute') execute = true;
         if (args[i] === '--api-key' && i + 1 < args.length) apiKey = args[++i];
         if (args[i] === '--migrate-timeout-ms' && i + 1 < args.length) migrateTimeoutMs = Number(args[++i]);
+        if (args[i] === '--refill-window-ms' && i + 1 < args.length) refillWindowMs = Number(args[++i]);
+        if (args[i] === '--model-refill-window' && i + 1 < args.length) {
+          const [model, ms] = args[++i].split('=');
+          if (model && Number.isFinite(Number(ms)) && Number(ms) > 0) {
+            modelRefillWindows[model] = Number(ms);
+          }
+        }
+        if (args[i] === '--metrics-port' && i + 1 < args.length) metricsPort = Number(args[++i]);
       }
-      if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(migrateTimeoutMs) || migrateTimeoutMs <= 0) {
-        console.error('Usage: aor operator [--namespace <ns>] [--interval-ms <ms>] [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>]');
+      if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(migrateTimeoutMs) || migrateTimeoutMs <= 0 || !Number.isFinite(refillWindowMs) || refillWindowMs <= 0 || !Number.isFinite(metricsPort) || metricsPort < 0) {
+        console.error('Usage: aor operator [--namespace <ns>] [--interval-ms <ms>] [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>] [--refill-window-ms <ms>] [--model-refill-window <provider/model=ms>] [--metrics-port <port>]');
         process.exit(1);
       }
-      const stop = await runOperator({ namespace, intervalMs, execute, ...(apiKey ? { apiKey } : {}), migrateTimeoutMs });
+      const stop = await runOperator({ namespace, intervalMs, execute, ...(apiKey ? { apiKey } : {}), migrateTimeoutMs, refill: { defaultWindowMs: refillWindowMs, perModel: modelRefillWindows }, ...(metricsPort > 0 ? { metricsPort } : {}) });
       // Ref'd keepalive: the controller's poll timer is unref'd so embedded
       // use never blocks exit; the CLI must stay alive explicitly.
       const keepAlive = setInterval(() => {}, 60000);

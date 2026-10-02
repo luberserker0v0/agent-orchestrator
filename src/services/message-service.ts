@@ -83,8 +83,8 @@ export class MessageService {
         isAppError(err) &&
         (err.code === ErrorCodes.LLM_QUOTA_EXHAUSTED || err.code === ErrorCodes.LLM_RATE_LIMITED)
       ) {
+        llmQuotaExhaustionsTotal.labels(err.code, model ? `${model.providerID}/${model.modelID}` : '').inc();
         messagesSentTotal.labels('quota_exhausted').inc();
-        llmQuotaExhaustionsTotal.labels(err.code).inc();
         const details = err.details as LlmQuotaErrorDetails | undefined;
         this.conversationState.setLastError(id, err.message);
         this.conversationState.emitEvent(id, 'conversation.quotaExhausted', {
