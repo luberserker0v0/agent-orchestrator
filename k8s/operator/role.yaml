@@ -11,8 +11,7 @@ rules:
   - apiGroups: [agentorchestrator.io]
     resources: [opencodeinstances, conversationroutes]
     verbs: [get, list, watch, create, update, patch, delete]
-  # Read-only visibility into workloads for future target selection
-  # (Phase E2: PVC attach state, Pod placement).
+  # Read-only visibility into workloads for target selection and debugging.
   - apiGroups: [""]
     resources: [pods, persistentvolumeclaims]
     verbs: [get, list, watch]

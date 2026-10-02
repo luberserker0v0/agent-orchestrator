@@ -190,6 +190,12 @@ export interface ClusterConfig {
   heartbeatIntervalMs?: number;
   /** Consecutive quota errors before phase flips to QuotaExhausted. Default 2. */
   quotaFailureThreshold?: number;
+  /**
+   * Base URL this orchestrator is reachable at (for operator-triggered
+   * migration calls). Defaults to `http://<server.host>:<server.port>` once
+   * the actual port is known. Override when behind ingress/port-forwarding.
+   */
+  advertiseBaseUrl?: string;
 }
 
 export interface AgentOrchestratorConfig {
@@ -461,6 +467,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     }
     if (config.cluster.quotaFailureThreshold !== undefined && (!Number.isInteger(config.cluster.quotaFailureThreshold) || config.cluster.quotaFailureThreshold < 1)) {
       throw new Error(`Config validation failed: cluster.quotaFailureThreshold must be a positive integer, got ${config.cluster.quotaFailureThreshold}`);
+    }
+    if (config.cluster.advertiseBaseUrl !== undefined && (typeof config.cluster.advertiseBaseUrl !== 'string' || !config.cluster.advertiseBaseUrl)) {
+      throw new Error('Config validation failed: cluster.advertiseBaseUrl must be a non-empty string');
     }
   }
 }

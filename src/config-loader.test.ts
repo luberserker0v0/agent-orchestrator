@@ -428,6 +428,11 @@ describe('validateConfig', () => {
       const config = createValidConfig({ cluster: { quotaFailureThreshold: 0 } });
       expect(() => validateConfig(config)).toThrow('cluster.quotaFailureThreshold must be a positive integer');
     });
+
+    it('rejects empty advertiseBaseUrl', () => {
+      const config = createValidConfig({ cluster: { advertiseBaseUrl: '' } });
+      expect(() => validateConfig(config)).toThrow('cluster.advertiseBaseUrl must be a non-empty string');
+    });
   });
 
   // ─── RBAC validation ─────────────────────────────────────

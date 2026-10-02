@@ -210,7 +210,7 @@ describe('KubernetesRuntime', () => {
     await expect(rt.restart('missing', HEALTH)).rejects.toThrow('No stored state');
   });
 
-  it('restart force-deletes the Pod and waits for termination before recreating', async () => {
+  it('restart deletes gracefully and waits for termination before recreating', async () => {
     const fake = createFakePods();
     const rt = new KubernetesRuntime(createPortPool(40000, 40001), { image: 'img' }, fake.api);
     mockFetch.mockResolvedValue(makeHealthyFetch());
@@ -230,7 +230,7 @@ describe('KubernetesRuntime', () => {
 
     await rt.restart('cw', HEALTH);
 
-    expect(fake.api.deletePod).toHaveBeenCalledWith('ao-instances', 'opencode-cw', { force: true });
+    expect(fake.api.deletePod).toHaveBeenCalledWith('ao-instances', 'opencode-cw');
     expect(fake.createdPods).toHaveLength(2);
   });
 

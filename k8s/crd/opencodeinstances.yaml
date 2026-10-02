@@ -91,6 +91,9 @@ spec:
                     at:
                       type: string
                       format: date-time
+                reportedBy:
+                  type: string
+                  description: Base URL of the owning orchestrator (migration trigger target).
                 consecutiveFailures:
                   type: integer
                   minimum: 0

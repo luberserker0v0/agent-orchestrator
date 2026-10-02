@@ -305,6 +305,7 @@ single-node use. Requires the CRDs in `k8s/crd/` installed in the target namespa
 | `namespace` | string | `'ao-instances'` | Namespace for `OpencodeInstance` objects |
 | `heartbeatIntervalMs` | integer | 60000 | Status heartbeat interval in ms (0 = disable heartbeats) |
 | `quotaFailureThreshold` | integer | 2 | Consecutive quota errors before phase flips to `QuotaExhausted` |
+| `advertiseBaseUrl` | string | `http://<host>:<port>` | Owner URL for operator-triggered migration calls (defaults to server host:port once known) |
 
 ## Graceful Shutdown
 

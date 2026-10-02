@@ -155,6 +155,7 @@
   //   "enabled": true,                // Report to OpencodeInstance CRs (requires CRDs installed)
   //   "namespace": "ao-instances",    // Namespace for OpencodeInstance objects
   //   "heartbeatIntervalMs": 60000,   // Status heartbeat interval (0 = disable)
-  //   "quotaFailureThreshold": 2      // Consecutive quota errors before QuotaExhausted
+  //   "quotaFailureThreshold": 2,     // Consecutive quota errors before QuotaExhausted
+  //   "advertiseBaseUrl": "http://orchestrator.ao-instances.svc.cluster.local:8080"  // Owner URL for operator-triggered migration (defaults to server host:port)
   // }
 }

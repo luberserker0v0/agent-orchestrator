@@ -512,7 +512,7 @@ describe('ConversationService', () => {
       await service.restart(testId);
 
       expect(mockConversationState.cancelReadyCheck).toHaveBeenCalledWith(testId);
-      expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId);
+      expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId, 'opencode-direct');
       expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith(testId);
       expect(mockInstanceManager.createInstance).toHaveBeenCalledWith(testId, 'opencode-direct');
     });
@@ -529,7 +529,21 @@ describe('ConversationService', () => {
       await service.restart(testId);
 
       expect(mockConversationState.cancelReadyCheck).toHaveBeenCalledWith(testId);
-      expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId);
+      expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId, 'opencode-direct');
+    });
+
+    it('should pass the conversation agent type (not the default) to restartInstance', async () => {
+      mockConversationState.get.mockReturnValue({ ...mockState, status: 'running', agentType: 'opencode-k8s' });
+      mockInstanceManager.restartInstance.mockResolvedValue(undefined);
+      mockInstanceManager.getInstance.mockReturnValue({
+        port: 41004,
+        process: {},
+        client: { createSession: vi.fn().mockResolvedValue({ id: 'ses_4' }) },
+      });
+
+      await service.restart(testId);
+
+      expect(mockInstanceManager.restartInstance).toHaveBeenCalledWith(testId, 'opencode-k8s');
     });
 
     it('should transition to error on failure', async () => {

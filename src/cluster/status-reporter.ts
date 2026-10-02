@@ -16,6 +16,7 @@ export interface StatusReporterConfig {
   namespace: string;
   heartbeatIntervalMs: number;
   quotaFailureThreshold: number;
+  advertiseBaseUrl?: string;
 }
 
 /** Minimal surface of CustomObjectsApi used by the reporter (structurally compatible). */
@@ -168,6 +169,7 @@ export function resolveReporterConfig(config?: ClusterConfig): StatusReporterCon
     namespace: config?.namespace ?? 'ao-instances',
     heartbeatIntervalMs: config?.heartbeatIntervalMs ?? 60000,
     quotaFailureThreshold: config?.quotaFailureThreshold ?? 2,
+    ...(config?.advertiseBaseUrl ? { advertiseBaseUrl: config.advertiseBaseUrl } : {}),
   };
 }
 
@@ -181,6 +183,7 @@ export class K8sStatusReporter {
   private readonly api?: StatusObjectsApi;
   private readonly namespace: string;
   private readonly threshold: number;
+  private advertiseBaseUrl?: string;
   private readonly tracked = new Map<string, TrackedState>();
   private heartbeatTimer?: NodeJS.Timeout;
   private warned = false;
@@ -189,6 +192,7 @@ export class K8sStatusReporter {
     this.api = api;
     this.namespace = config.namespace;
     this.threshold = config.quotaFailureThreshold;
+    this.advertiseBaseUrl = config.advertiseBaseUrl;
     if (api && config.heartbeatIntervalMs > 0) {
       this.heartbeatTimer = setInterval(() => {
         void this.heartbeatAll();
@@ -221,6 +225,11 @@ export class K8sStatusReporter {
 
   isEnabled(): boolean {
     return this.api !== undefined;
+  }
+
+  /** Set/override the advertised owner URL (called once the server port is known). */
+  setAdvertiseBaseUrl(url: string): void {
+    this.advertiseBaseUrl = url;
   }
 
   trackedCount(): number {
@@ -368,6 +377,7 @@ export class K8sStatusReporter {
     const merged = {
       ...(current.status && typeof current.status === 'object' ? (current.status as Record<string, unknown>) : {}),
       ...status,
+      ...(this.advertiseBaseUrl ? { reportedBy: this.advertiseBaseUrl } : {}),
     };
     await this.api!.replaceNamespacedCustomObjectStatus(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, name, {
       ...current,
