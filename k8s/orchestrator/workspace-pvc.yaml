@@ -1,0 +1,16 @@
+# Orchestrator's own workspace volume (conversation files API, canonical
+# configs). Separate from per-conversation conv-<id> PVCs, which the operator
+# provisions on demand.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ao-workspace
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

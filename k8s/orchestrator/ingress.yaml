@@ -1,0 +1,28 @@
+# External access with sticky sessions (required for WebSocket + per-conversation
+# affinity with >1 replica). Targets Traefik, the default k3s ingress controller.
+# For NGINX use nginx.ingress.kubernetes.io/affinity: "cookie" instead.
+# Replace the host and wire TLS (cert-manager annotation or explicit tls block).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-orchestrator
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+  annotations:
+    traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.name: "ao-affinity"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: agentorchestrator.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-orchestrator
+                port:
+                  number: 8080

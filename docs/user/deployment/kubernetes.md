@@ -17,6 +17,16 @@ k8s/
 │   ├── rolebinding.yaml
 │   ├── clusterrole.yaml            # nodes get/list/watch (target selection) + binding
 │   └── deployment.yaml             # controller, 1 replica (leader election pending)
+├── orchestrator/
+│   ├── serviceaccount.yaml         # orchestrator identity
+│   ├── role.yaml                   # instance Pods/Services, status CRs, PVC reads
+│   ├── rolebinding.yaml
+│   ├── secret.yaml                 # agentorchestrator.json (contains API keys — replace placeholders)
+│   ├── workspace-pvc.yaml          # orchestrator's own workspace (20Gi, RWO)
+│   ├── deployment.yaml             # server, 1 replica (sticky routing required if scaled)
+│   ├── service.yaml                # ClusterIP :8080
+│   ├── ingress.yaml                # Traefik sticky-cookie ingress (set host + TLS)
+│   └── servicemonitor.yaml         # Prometheus scraping (requires prometheus-operator)
 └── volume/
     ├── conversation-pvc-template.yaml  # per-conversation RWO PVC (10Gi default)
     └── instance-pod-template.yaml      # instance Pod shape (mounts, probes, fsGroup)
@@ -36,7 +46,18 @@ k8s/
 ```bash
 kubectl apply -f k8s/namespace.yaml -f k8s/crd/
 kubectl apply -f k8s/operator/
+# Edit k8s/orchestrator/secret.yaml (API keys), then:
+kubectl apply -f k8s/orchestrator/
 ```
+
+## Running the Orchestrator In-Cluster
+
+`k8s/orchestrator/` deploys the API server itself: `Secret`-mounted config
+(`agentorchestrator.json` with a `kubernetes` runtime + `cluster.enabled`),
+own workspace PVC (`ao-workspace`), `ClusterIP` Service, Traefik sticky ingress
+(set `agentorchestrator.example.com` + TLS), and a `ServiceMonitor`.
+Scale beyond 1 replica only with sticky routing — conversation state is
+per-Pod until shared state lands (see limitations).
 
 ## Architecture
 

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: slim root README.md to landing page pointing to docs/
 
 ### Added
+- feat(k8s): orchestrator Deployment/Service/Config-Secret/RBAC, sticky Traefik Ingress, ServiceMonitor, and per-conversation workspace PVC
 - feat(operator): time-based quota refill (per-model windows), load-aware candidate/node scoring, migration + quota-model metrics, `/metrics` endpoint, convergence coverage
 - feat(operator): auto-provision per-conversation PVCs on instance appear with GC on delete (`--pvc-storage`, `Stopped` phase preserves volumes across stop/restart)
 - feat(operator): execute quota migrations (route flips, owner migrate calls with rollback, node inventory, `--execute` mode)
@@ -98,6 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- fix(k8s): allow kubernetes default runtime with local workspace storage in containers (sessions travel via PVCs); extracted testable container/storage guard
 - fix(e2e): add StorageBackend to WorkspaceFactory in e2e server helper (pre-existing crash)
 - fix(e2e): add setOnDestroyed callback to e2e server helper (pre-existing — state never transitioned to stopped on eviction/crash/timeout)
 - fix(docker): add `dashboard/` directory to Dockerfile template — dashboard was inaccessible in Docker containers

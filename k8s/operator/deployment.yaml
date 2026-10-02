@@ -23,7 +23,8 @@ spec:
       containers:
         - name: controller
           # Must match an orchestrator image tag containing the operator CLI.
-          image: luberserker/agent-orchestrator:latest
+          # CD publishes branch/semver tags (e.g. :main, :1.2.3) — there is no :latest tag.
+          image: luberserker/agent-orchestrator:main
           args: ["operator", "--namespace", "ao-instances", "--interval-ms", "15000"]
           resources:
             requests:

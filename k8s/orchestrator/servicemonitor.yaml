@@ -1,0 +1,18 @@
+# Prometheus scraping for orchestrator + instance metrics.
+# Requires prometheus-operator (ServiceMonitor CRD) in the cluster;
+# otherwise omit this file (the /metrics endpoint works regardless).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: agent-orchestrator
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+spec:
+  selector:
+    matchLabels:
+      agentorchestrator.io/component: orchestrator
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
