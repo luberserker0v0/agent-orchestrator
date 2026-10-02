@@ -164,7 +164,7 @@ export class ConversationService {
       await this.instanceManager.destroyInstance(id);
       this.conversationState.removeRunningInstance(id);
       this.conversationState.transition(id, 'stopped');
-      void this.statusReporter?.untrackInstance(id);
+      void this.statusReporter?.reportStopped(id);
     } catch (err) {
       throw err instanceof AppError ? err : new AppError(500, ErrorCodes.INTERNAL_ERROR, (err as Error).message);
     }

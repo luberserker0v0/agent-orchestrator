@@ -75,7 +75,7 @@ spec:
               properties:
                 phase:
                   type: string
-                  enum: [Pending, Ready, QuotaExhausted, RateLimited, Failed, Terminating]
+                  enum: [Pending, Ready, QuotaExhausted, RateLimited, Failed, Terminating, Stopped]
                 reachable:
                   type: boolean
                 lastHeartbeat:

@@ -69,6 +69,7 @@ function createFake(stores: { instances: Map<string, object>; routes: Map<string
 function controllerWith(
   stores: { instances: Map<string, object>; routes: Map<string, object> },
   options?: { refill?: { defaultWindowMs: number; perModel?: Record<string, number> } },
+  volumes?: import('./executor.js').VolumeObjectsApi,
 ): {
   controller: PlacementController;
   api: StatusObjectsApi & { calls: string[] };
@@ -79,8 +80,38 @@ function controllerWith(
     intervalMs: 0,
     dryRun: true,
     ...(options?.refill ? { refill: options.refill } : {}),
-  });
+  }, undefined, volumes);
   return { controller, api };
+}
+
+function volumeFake(state: { claims: Set<string> }): import('./executor.js').VolumeObjectsApi & {
+  readPersistentVolumeClaim: ReturnType<typeof vi.fn>;
+  createPersistentVolumeClaim: ReturnType<typeof vi.fn>;
+  deletePersistentVolumeClaim: ReturnType<typeof vi.fn>;
+} {
+  const notFound = (): Error => {
+    const err = new Error('not found') as Error & { statusCode: number };
+    err.statusCode = 404;
+    return err;
+  };
+  return {
+    readPersistentVolumeClaim: vi.fn(async (_ns: string, name: string) => {
+      if (!state.claims.has(name)) throw notFound();
+      return {};
+    }),
+    createPersistentVolumeClaim: vi.fn(async (_ns: string, body: object) => {
+      const name = ((body as { metadata: { name: string } }).metadata.name);
+      state.claims.add(name);
+      return {};
+    }),
+    deletePersistentVolumeClaim: vi.fn(async (_ns: string, name: string) => {
+      if (!state.claims.delete(name)) throw notFound();
+    }),
+  } as unknown as import('./executor.js').VolumeObjectsApi & {
+    readPersistentVolumeClaim: ReturnType<typeof vi.fn>;
+    createPersistentVolumeClaim: ReturnType<typeof vi.fn>;
+    deletePersistentVolumeClaim: ReturnType<typeof vi.fn>;
+  };
 }
 
 describe('PlacementController', () => {
@@ -312,6 +343,41 @@ describe('PlacementController', () => {
       expect(second.migrationsPlanned).toEqual([
         { from: 'a', target: 'b', reason: expect.stringContaining('n1 -> n2') },
       ]);
+    });
+  });
+
+  describe('volumes', () => {
+    it('provisions a PVC for instances without one', async () => {
+      stores.instances.set('a', instanceBody());
+      const volumes = volumeFake({ claims: new Set() });
+      const { controller } = controllerWith(stores, undefined, volumes);
+      const summary = await controller.reconcileOnce();
+      expect(summary.volumesProvisioned).toEqual(['conv-a']);
+      expect(summary.routesCreated).toEqual(['a']);
+      const created = volumes.createPersistentVolumeClaim.mock.calls[0][1] as {
+        metadata: { name: string };
+        spec: { resources: { requests: { storage: string } } };
+      };
+      expect(created.metadata.name).toBe('conv-a');
+      expect(created.spec.resources.requests.storage).toBe('10Gi');
+    });
+
+    it('skips provisioning when the PVC already exists', async () => {
+      stores.instances.set('a', instanceBody());
+      const volumes = volumeFake({ claims: new Set(['conv-a']) });
+      const { controller } = controllerWith(stores, undefined, volumes);
+      const summary = await controller.reconcileOnce();
+      expect(summary.volumesProvisioned).toEqual([]);
+      expect(volumes.createPersistentVolumeClaim).not.toHaveBeenCalled();
+    });
+
+    it('deletes route and volume when the instance is gone', async () => {
+      stores.routes.set('ghost', routeBody());
+      const volumes = volumeFake({ claims: new Set(['conv-ghost']) });
+      const { controller } = controllerWith(stores, undefined, volumes);
+      const summary = await controller.reconcileOnce();
+      expect(summary.routesDeleted).toEqual(['ghost']);
+      expect(summary.volumesDeleted).toEqual(['conv-ghost']);
     });
   });
 });

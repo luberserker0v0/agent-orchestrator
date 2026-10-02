@@ -126,6 +126,12 @@ Runs `aor operator` (image `luberserker/agent-orchestrator:latest`):
 | `--refill-window-ms` | `86400000` | Quota refill window |
 | `--model-refill-window` | — | Per-model override (`provider/model=ms`, repeatable) |
 | `--metrics-port` | `0` (disabled) | Prometheus scrape endpoint |
+| `--pvc-storage` | `10Gi` | Storage request for auto-provisioned per-conversation PVCs |
+
+The controller provisions `conv-<id>` PVCs automatically when instances appear
+(dynamic provisioning via the default `StorageClass`) and deletes route + volume
+when the instance object disappears (conversation DELETE; `stop` keeps a `Stopped`
+object so its volume survives for restart).
 
 Quota flow: LLM 429/402/403 → typed `LLM_QUOTA_EXHAUSTED` → instance flips to
 `QuotaExhausted` after the flap threshold → controller migrates the Pod to a healthy

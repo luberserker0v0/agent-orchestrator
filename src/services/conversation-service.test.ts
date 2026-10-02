@@ -371,6 +371,27 @@ describe('ConversationService', () => {
       expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'stopped');
     });
 
+    it('should mark the instance Stopped (not delete it) when reporter is configured', async () => {
+      const mockReporter = { trackInstance: vi.fn(), reportStopped: vi.fn(), untrackInstance: vi.fn() };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-direct',
+        undefined,
+        mockReporter as any,
+      );
+      mockConversationState.get.mockReturnValue({ id: testId, status: 'running' });
+      mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
+
+      await svc.stop(testId);
+
+      expect(mockReporter.reportStopped).toHaveBeenCalledWith(testId);
+      expect(mockReporter.untrackInstance).not.toHaveBeenCalled();
+    });
+
     it('should throw 404 when not found', async () => {
       mockConversationState.get.mockReturnValue(undefined);
 

@@ -247,6 +247,17 @@ describe('K8sStatusReporter', () => {
     reporter.destroy();
   });
 
+  it('reportStopped marks Stopped without deleting', async () => {
+    const reporter = enabledReporter(api);
+    await reporter.trackInstance({ conversationId: 'c1' });
+    await reporter.reportStopped('c1');
+    const last = api.calls.replaceStatus.at(-1)![1] as { status: Record<string, unknown> };
+    expect(last.status.phase).toBe('Stopped');
+    expect(last.status.reachable).toBe(false);
+    expect(api.calls.delete ?? []).toHaveLength(0);
+    reporter.destroy();
+  });
+
   it('untrackInstance deletes and tolerates 404', async () => {
     const reporter = enabledReporter(api);
     await reporter.trackInstance({ conversationId: 'c1' });
