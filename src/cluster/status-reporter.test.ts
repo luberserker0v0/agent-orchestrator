@@ -228,6 +228,25 @@ describe('K8sStatusReporter', () => {
     reporter.destroy();
   });
 
+  it('propagates reportedBy into status patches once set', async () => {
+    const reporter = enabledReporter(api);
+    await reporter.trackInstance({ conversationId: 'c1' });
+    reporter.setAdvertiseBaseUrl('http://owner:8080');
+    await reporter.reportQuotaError('c1', { code: 'LLM_RATE_LIMITED', message: 'slow' });
+    const last = api.calls.replaceStatus.at(-1)![1] as { status: Record<string, unknown> };
+    expect(last.status.phase).toBe('RateLimited');
+    expect(last.status.reportedBy).toBe('http://owner:8080');
+    reporter.destroy();
+  });
+
+  it('omits reportedBy when never set', async () => {
+    const reporter = enabledReporter(api);
+    await reporter.trackInstance({ conversationId: 'c1' });
+    const first = api.calls.replaceStatus.at(-1)![1] as { status: Record<string, unknown> };
+    expect(first.status).not.toHaveProperty('reportedBy');
+    reporter.destroy();
+  });
+
   it('untrackInstance deletes and tolerates 404', async () => {
     const reporter = enabledReporter(api);
     await reporter.trackInstance({ conversationId: 'c1' });

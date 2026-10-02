@@ -96,6 +96,12 @@ describe('parseCliArgs', () => {
     expect(result.subcommandArgs).toEqual([]);
   });
 
+  it('detects operator subcommand with flags', () => {
+    const result = parseCliArgs(['operator', '--namespace', 'ao-instances', '--execute', '--interval-ms', '8000']);
+    expect(result.subcommand).toBe('operator');
+    expect(result.subcommandArgs).toEqual(['--namespace', 'ao-instances', '--execute', '--interval-ms', '8000']);
+  });
+
   it('handles port at end of args (no value after flag)', () => {
     const result = parseCliArgs(['--port']);
     expect(result.port).toBeUndefined();
