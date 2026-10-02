@@ -2,7 +2,8 @@ import { logger } from '../../utils/logger.js';
 import { createObjectsClient, type StatusObjectsApi } from '../status-reporter.js';
 import { planMigration, rankNodes, isRefillDue, refillWindowMs, type MigrationCandidate, type RefillPolicy } from './placement.js';
 import { migrationsTotal } from '../../metrics/registry.js';
-import { createLiveExecutor, type Executor } from './executor.js';
+import { createLiveExecutor, createLiveVolumes, conversationVolumeBody, type Executor, type VolumeObjectsApi } from './executor.js';
+import { conversationVolumeClaimName } from '../status-reporter.js';
 
 const GROUP = 'agentorchestrator.io';
 const VERSION = 'v1alpha1';
@@ -20,6 +21,8 @@ export interface ControllerOptions {
   dryRun: boolean;
   /** Time-based quota refill policy. Default 24h for all models. */
   refill?: RefillPolicy;
+  /** Storage request for auto-provisioned per-conversation PVCs. Default '10Gi'. */
+  pvcStorage?: string;
 }
 
 export interface RunOperatorOptions {
@@ -30,6 +33,7 @@ export interface RunOperatorOptions {
   migrateTimeoutMs?: number;
   refill?: RefillPolicy;
   metricsPort?: number;
+  pvcStorage?: string;
 }
 
 export interface InstanceView {
@@ -69,11 +73,26 @@ export interface ReconcileSummary {
   routesDeleted: string[];
   migrationsPlanned: PlannedMigration[];
   refillsCompleted: string[];
+  volumesProvisioned: string[];
+  volumesDeleted: string[];
   errors: string[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function isNotFoundLike(err: unknown): boolean {
+  const e = err as {
+    statusCode?: unknown;
+    code?: unknown;
+    status?: unknown;
+    response?: { httpStatusCode?: unknown };
+  };
+  for (const candidate of [e?.statusCode, e?.response?.httpStatusCode, e?.code, e?.status]) {
+    if (candidate === 404) return true;
+  }
+  return false;
 }
 
 function toInstanceView(name: string, body: unknown): InstanceView {
@@ -125,6 +144,7 @@ export class PlacementController {
     private readonly api: StatusObjectsApi,
     private readonly options: ControllerOptions,
     private readonly executor?: Executor,
+    private readonly volumes?: VolumeObjectsApi,
   ) {}
 
   start(): void {
@@ -145,7 +165,7 @@ export class PlacementController {
 
   /** One reconcile pass: refill, route lifecycle, migration planning/execution. Never throws. */
   async reconcileOnce(): Promise<ReconcileSummary> {
-    const summary: ReconcileSummary = { routesCreated: [], routesDeleted: [], migrationsPlanned: [], refillsCompleted: [], errors: [] };
+    const summary: ReconcileSummary = { routesCreated: [], routesDeleted: [], migrationsPlanned: [], refillsCompleted: [], volumesProvisioned: [], volumesDeleted: [], errors: [] };
     const { namespace } = this.options;
     let instances: InstanceView[];
     let routes: RouteView[];
@@ -189,6 +209,7 @@ export class PlacementController {
     for (const instance of instances) {
       if (routeByName.has(instance.name)) continue;
       try {
+        await this.ensureVolume(instance.name, summary);
         await this.api.createNamespacedCustomObject(GROUP, VERSION, namespace, ROUTES_PLURAL, {
           apiVersion: `${GROUP}/${VERSION}`,
           kind: 'ConversationRoute',
@@ -210,7 +231,10 @@ export class PlacementController {
 
     for (const route of routes) {
       if (instanceByName.has(route.name)) continue;
+      // The instance object is gone only on explicit conversation DELETE
+      // (stop keeps a Stopped object), so its volume goes with it.
       try {
+        await this.deleteVolume(route.name, summary);
         await this.api.deleteNamespacedCustomObject(GROUP, VERSION, namespace, ROUTES_PLURAL, route.name);
         summary.routesDeleted.push(route.name);
         logger.info(`[operator] route deleted for ${route.name} (instance gone)`);
@@ -340,6 +364,34 @@ export class PlacementController {
     }
   }
 
+  private async ensureVolume(conversationId: string, summary: ReconcileSummary): Promise<void> {
+    if (!this.volumes) return;
+    const claim = conversationVolumeClaimName(conversationId);
+    try {
+      await this.volumes.readPersistentVolumeClaim(this.options.namespace, claim);
+    } catch (err) {
+      if (!isNotFoundLike(err)) throw err;
+      await this.volumes.createPersistentVolumeClaim(
+        this.options.namespace,
+        conversationVolumeBody(conversationId, this.options.pvcStorage ?? '10Gi'),
+      );
+      summary.volumesProvisioned.push(claim);
+      logger.info(`[operator] volume provisioned for ${conversationId}`);
+    }
+  }
+
+  private async deleteVolume(conversationId: string, summary: ReconcileSummary): Promise<void> {
+    if (!this.volumes) return;
+    const claim = conversationVolumeClaimName(conversationId);
+    try {
+      await this.volumes.deletePersistentVolumeClaim(this.options.namespace, claim);
+      summary.volumesDeleted.push(claim);
+      logger.info(`[operator] volume deleted for ${conversationId}`);
+    } catch (err) {
+      if (!isNotFoundLike(err)) throw err;
+    }
+  }
+
   private async setInstanceStatus(name: string, status: Record<string, unknown>): Promise<void> {
     const existing = await this.api.getNamespacedCustomObject(GROUP, VERSION, this.options.namespace, INSTANCES_PLURAL, name);
     const current = (existing.body ?? {}) as Record<string, unknown>;
@@ -394,10 +446,12 @@ export async function runOperator(options?: RunOperatorOptions): Promise<() => v
       intervalMs: options?.intervalMs ?? 15000,
       dryRun: !execute,
       ...(options?.refill ? { refill: options.refill } : {}),
+      ...(options?.pvcStorage ? { pvcStorage: options.pvcStorage } : {}),
     },
     execute
       ? createLiveExecutor({ ...(options?.apiKey ? { apiKey: options.apiKey } : {}), ...(options?.migrateTimeoutMs ? { timeoutMs: options.migrateTimeoutMs } : {}) })
       : undefined,
+    createLiveVolumes(),
   );
   let stopMetrics: (() => void) | undefined;
   if (options?.metricsPort) {

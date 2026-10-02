@@ -1,0 +1,72 @@
+# Orchestrator server (HTTP + WebSocket API). Start with 1 replica; scale up
+# only once shared conversation state exists (currently in-memory per Pod —
+# see plan doc "Known risks"). Sticky routing is required with >1 replica.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-orchestrator
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+    agentorchestrator.io/component: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      agentorchestrator.io/component: orchestrator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: agent-orchestrator
+        agentorchestrator.io/component: orchestrator
+    spec:
+      serviceAccountName: agent-orchestrator
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: orchestrator
+          # CD publishes branch/semver tags (e.g. :main, :1.2.3) — there is no :latest tag.
+          image: luberserker/agent-orchestrator:main
+          args: ["node", "dist/index.js", "--config", "/app/config/agentorchestrator.json"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: AGENTORCHESTRATOR_WORKSPACE_BASEPATH
+              value: /data/workspace
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/agentorchestrator.json
+              subPath: agentorchestrator.json
+              readOnly: true
+            - name: workspace
+              mountPath: /data/workspace
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: config
+          secret:
+            secretName: agent-orchestrator-config
+            items:
+              - key: agentorchestrator.json
+                path: agentorchestrator.json
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: ao-workspace

@@ -27,6 +27,28 @@ import { logger } from './utils/logger.js';
 import { parseCliArgs, printHelp, handleSubcommand } from './cli.js';
 import { isRunningInContainer } from './utils/is-container.js';
 
+/**
+ * Validate container + runtime + storage compatibility for in-container boot.
+ * Returns an error message when the combination cannot work, undefined otherwise.
+ * The kubernetes runtime is exempt: instance sessions travel via per-conversation
+ * PVCs, not the orchestrator's local filesystem (workspace file APIs diverge — warned separately).
+ */
+export function validateContainerRuntimeStorage(
+  defaultRuntimeType: string | undefined,
+  storageType: string,
+): string | undefined {
+  if (storageType !== 'local') return undefined;
+  if (!defaultRuntimeType || defaultRuntimeType === 'direct' || defaultRuntimeType === 'kubernetes') {
+    return undefined;
+  }
+  return (
+    'AO is running inside a container with default runtime type "' + defaultRuntimeType + '" ' +
+    'but workspace.storage is "local". Container-based agent instances cannot access ' +
+    'the AO container\'s local filesystem. Set workspace.storage to a non-local type ' +
+    '(e.g., "docker-volume") that supports volume sharing between containers.'
+  );
+}
+
 export async function main(cliArgs?: string[]) {
   const cli = parseCliArgs(cliArgs ?? process.argv.slice(2));
 
@@ -61,12 +83,16 @@ export async function main(cliArgs?: string[]) {
     const defaultEntry = config.orchestrator.runtimes.find(
       r => r.id === config.orchestrator.defaultAgentType
     );
-    if (defaultEntry && defaultEntry.type !== 'direct' && config.workspace.storage.type === 'local') {
-      throw new Error(
-        'AO is running inside a container with default runtime type "' + defaultEntry.type + '" ' +
-        'but workspace.storage is "local". Container-based agent instances cannot access ' +
-        'the AO container\'s local filesystem. Set workspace.storage to a non-local type ' +
-        '(e.g., "docker-volume") that supports volume sharing between containers.'
+    const problem = validateContainerRuntimeStorage(
+      defaultEntry?.type,
+      config.workspace.storage.type,
+    );
+    if (problem) throw new Error(problem);
+    if (defaultEntry?.type === 'kubernetes' && config.workspace.storage.type === 'local') {
+      logger.warn(
+        'AO is running inside a container with Kubernetes runtime and local workspace storage. ' +
+        'Instance sessions travel via per-conversation PVCs, but workspace file APIs operate on ' +
+        'the orchestrator local disk — files written via the API are not visible inside instances.'
       );
     }
     if (defaultEntry?.type === 'docker' && !defaultEntry.config.instanceHost) {

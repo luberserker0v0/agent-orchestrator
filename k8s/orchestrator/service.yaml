@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-orchestrator
+  namespace: ao-instances
+  labels:
+    app.kubernetes.io/part-of: agent-orchestrator
+    agentorchestrator.io/component: orchestrator
+spec:
+  type: ClusterIP
+  selector:
+    agentorchestrator.io/component: orchestrator
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

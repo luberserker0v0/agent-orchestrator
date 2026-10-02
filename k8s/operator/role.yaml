@@ -15,3 +15,7 @@ rules:
   - apiGroups: [""]
     resources: [pods, persistentvolumeclaims]
     verbs: [get, list, watch]
+  # Per-conversation volume lifecycle (provision on appear, GC on delete).
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, delete]

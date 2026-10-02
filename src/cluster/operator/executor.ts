@@ -3,6 +3,7 @@ import * as k8s from '@kubernetes/client-node';
 // root in client-node v1.x. Pin to ^1.x where this path is stable.
 import { PromiseCoreV1Api } from '@kubernetes/client-node/dist/gen/types/PromiseAPI.js';
 import { logger } from '../../utils/logger.js';
+import { conversationVolumeClaimName } from '../status-reporter.js';
 
 /** Minimal node inventory surface (structurally compatible). */
 export interface CoreNodesApi {
@@ -115,6 +116,51 @@ export function createLiveExecutor(options?: { apiKey?: string; timeoutMs?: numb
   return {
     nodes: new K8sNodeInventory(createCoreApi()),
     migrate: createMigrateCaller({ ...(options ?? {}) }),
+  };
+}
+
+/** Build a live volume client from the default kubeconfig chain. Throws when unavailable. */
+export function createLiveVolumes(): VolumeObjectsApi {
+  return new K8sVolumeObjects(createCoreApi());
+}
+
+/** Minimal PVC surface for per-conversation volume lifecycle (structurally compatible). */
+export interface VolumeObjectsApi {
+  readPersistentVolumeClaim(namespace: string, name: string): Promise<unknown>;
+  createPersistentVolumeClaim(namespace: string, body: object): Promise<unknown>;
+  deletePersistentVolumeClaim(namespace: string, name: string): Promise<void>;
+}
+
+export class K8sVolumeObjects implements VolumeObjectsApi {
+  constructor(private readonly api: PromiseCoreV1Api) {}
+
+  async readPersistentVolumeClaim(namespace: string, name: string): Promise<unknown> {
+    return this.api.readNamespacedPersistentVolumeClaim(name, namespace);
+  }
+
+  async createPersistentVolumeClaim(namespace: string, body: object): Promise<unknown> {
+    return this.api.createNamespacedPersistentVolumeClaim(namespace, body);
+  }
+
+  async deletePersistentVolumeClaim(namespace: string, name: string): Promise<void> {
+    await this.api.deleteNamespacedPersistentVolumeClaim(name, namespace);
+  }
+}
+
+/** PVC body for a conversation volume (RWO, default provisioner). */
+export function conversationVolumeBody(conversationId: string, storage: string): object {
+  const claim = conversationVolumeClaimName(conversationId);
+  return {
+    apiVersion: 'v1',
+    kind: 'PersistentVolumeClaim',
+    metadata: {
+      name: claim,
+      labels: { 'app.kubernetes.io/part-of': 'agent-orchestrator', 'agentorchestrator.io/conversation': conversationId },
+    },
+    spec: {
+      accessModes: ['ReadWriteOnce'],
+      resources: { requests: { storage } },
+    },
   };
 }
 

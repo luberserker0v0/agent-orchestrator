@@ -83,7 +83,7 @@ Subcommands:
                          [--namespace <ns>] [--interval-ms <ms>]
                          [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>]
                          [--refill-window-ms <ms>] [--model-refill-window <provider/model=ms>]
-                         [--metrics-port <port>]
+                         [--metrics-port <port>] [--pvc-storage <size>]
 `);
 }
 
@@ -128,6 +128,7 @@ export async function handleSubcommand(cli: CliOptions): Promise<boolean> {
       let migrateTimeoutMs = 300000;
       let refillWindowMs = 24 * 60 * 60 * 1000;
       let metricsPort = 0;
+      let pvcStorage = '10Gi';
       const modelRefillWindows: Record<string, number> = {};
       for (let i = 0; i < args.length; i++) {
         if (args[i] === '--namespace' && i + 1 < args.length) namespace = args[++i];
@@ -143,12 +144,13 @@ export async function handleSubcommand(cli: CliOptions): Promise<boolean> {
           }
         }
         if (args[i] === '--metrics-port' && i + 1 < args.length) metricsPort = Number(args[++i]);
+        if (args[i] === '--pvc-storage' && i + 1 < args.length) pvcStorage = args[++i];
       }
       if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(migrateTimeoutMs) || migrateTimeoutMs <= 0 || !Number.isFinite(refillWindowMs) || refillWindowMs <= 0 || !Number.isFinite(metricsPort) || metricsPort < 0) {
         console.error('Usage: aor operator [--namespace <ns>] [--interval-ms <ms>] [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>] [--refill-window-ms <ms>] [--model-refill-window <provider/model=ms>] [--metrics-port <port>]');
         process.exit(1);
       }
-      const stop = await runOperator({ namespace, intervalMs, execute, ...(apiKey ? { apiKey } : {}), migrateTimeoutMs, refill: { defaultWindowMs: refillWindowMs, perModel: modelRefillWindows }, ...(metricsPort > 0 ? { metricsPort } : {}) });
+      const stop = await runOperator({ namespace, intervalMs, execute, ...(apiKey ? { apiKey } : {}), migrateTimeoutMs, refill: { defaultWindowMs: refillWindowMs, perModel: modelRefillWindows }, ...(metricsPort > 0 ? { metricsPort } : {}), pvcStorage });
       // Ref'd keepalive: the controller's poll timer is unref'd so embedded
       // use never blocks exit; the CLI must stay alive explicitly.
       const keepAlive = setInterval(() => {}, 60000);

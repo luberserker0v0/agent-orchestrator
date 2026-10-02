@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { K8sNodeInventory, createMigrateCaller } from './executor.js';
+import { K8sNodeInventory, K8sVolumeObjects, conversationVolumeBody, createMigrateCaller } from './executor.js';
 
 describe('K8sNodeInventory', () => {
   it('returns sorted Ready node names excluding a node', async () => {
@@ -68,5 +68,34 @@ describe('createMigrateCaller', () => {
     const caller = createMigrateCaller({ timeoutMs: 50, fetchFn: fetchFn as unknown as typeof fetch });
 
     await expect(caller.callMigrate('http://owner:8080', 'c', 'n')).rejects.toThrow();
+  });
+});
+
+describe('conversationVolumeBody', () => {
+  it('builds an RWO claim with the plan naming', () => {
+    const body = conversationVolumeBody('abc', '10Gi') as {
+      metadata: { name: string };
+      spec: { accessModes: string[]; resources: { requests: { storage: string } } };
+    };
+    expect(body.metadata.name).toBe('conv-abc');
+    expect(body.spec.accessModes).toEqual(['ReadWriteOnce']);
+    expect(body.spec.resources.requests.storage).toBe('10Gi');
+  });
+});
+
+describe('K8sVolumeObjects', () => {
+  it('delegates to the core API with namespace first', async () => {
+    const coreApi = {
+      readNamespacedPersistentVolumeClaim: vi.fn(async () => ({})),
+      createNamespacedPersistentVolumeClaim: vi.fn(async () => ({})),
+      deleteNamespacedPersistentVolumeClaim: vi.fn(async () => undefined),
+    };
+    const volumes = new K8sVolumeObjects(coreApi as never);
+    await volumes.readPersistentVolumeClaim('ns', 'conv-a');
+    await volumes.createPersistentVolumeClaim('ns', { kind: 'PersistentVolumeClaim' });
+    await volumes.deletePersistentVolumeClaim('ns', 'conv-a');
+    expect(coreApi.readNamespacedPersistentVolumeClaim).toHaveBeenCalledWith('conv-a', 'ns');
+    expect(coreApi.createNamespacedPersistentVolumeClaim).toHaveBeenCalledWith('ns', { kind: 'PersistentVolumeClaim' });
+    expect(coreApi.deleteNamespacedPersistentVolumeClaim).toHaveBeenCalledWith('conv-a', 'ns');
   });
 });

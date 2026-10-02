@@ -335,6 +335,22 @@ export class K8sStatusReporter {
     }
   }
 
+  /** Mark the instance Stopped (conversation stopped, volume retained for restart). */
+  async reportStopped(conversationId: string): Promise<void> {
+    if (!this.api) return;
+    try {
+      await this.patchStatus(conversationId, {
+        phase: 'Stopped',
+        reachable: false,
+        lastHeartbeat: new Date().toISOString(),
+      });
+      const tracked = this.tracked.get(conversationId);
+      if (tracked) tracked.lastPhase = 'Stopped';
+    } catch (err) {
+      this.warnOnce(`reportStopped(${conversationId}) failed: ${(err as Error).message}`);
+    }
+  }
+
   /** Delete the object (404-tolerant). Called on conversation stop/delete. */
   async untrackInstance(conversationId: string): Promise<void> {
     if (!this.api) return;
