@@ -141,4 +141,105 @@ describe('PlacementController', () => {
     }).reconcileOnce();
     expect(summary.errors).toHaveLength(1);
   });
+
+  describe('execute mode', () => {
+    function apiFor(current: { instances: Map<string, object>; routes: Map<string, object> }): StatusObjectsApi & { calls: string[] } {
+      return controllerWith(current).api;
+    }
+
+    it('migrates via the owner and flips the route Active with history', async () => {
+      stores.instances.set('a', {
+        ...instanceBody(),
+        metadata: { name: 'a' },
+        spec: { conversationId: 'a', nodeName: 'n1', endpoint: 'http://old:1', model: MODEL, volumeClaimName: 'conv-a' },
+        status: { phase: 'QuotaExhausted', reportedBy: 'http://owner:8080' },
+      });
+      stores.routes.set('a', {
+        ...routeBody(),
+        metadata: { name: 'a' },
+        status: { phase: 'Active', currentInstanceRef: 'a' },
+      });
+      const nodes = { listReadyNodeNames: vi.fn(async () => ['n2']) };
+      const migrate = { callMigrate: vi.fn(async () => ({ resumed: true, sessionId: 's1', nodeName: 'n2' })) };
+      const api = apiFor(stores);
+      const controller = new PlacementController(api, { namespace: 'ao-instances', intervalMs: 0, dryRun: false }, { nodes, migrate });
+
+      const summary = await controller.reconcileOnce();
+
+      expect(migrate.callMigrate).toHaveBeenCalledWith('http://owner:8080', 'a', 'n2');
+      expect(summary.migrationsPlanned).toEqual([{ from: 'a', target: 'n2', reason: expect.stringContaining('resumed=true') }]);
+      expect(summary.errors).toEqual([]);
+      const route = stores.routes.get('a') as { status: Record<string, unknown> };
+      expect(route.status.phase).toBe('Active');
+      expect(route.status.currentInstanceRef).toBe('a');
+      const history = route.status.migrationHistory as Array<{ from: string; to: string; reason: string }>;
+      expect(history).toHaveLength(1);
+      expect(history[0].from).toBe('a');
+      expect(history[0].reason).toContain('n1->n2');
+    });
+
+    it('records an error when reportedBy is missing', async () => {
+      stores.instances.set('a', instanceBody({ status: { phase: 'QuotaExhausted' } }));
+      stores.routes.set('a', routeBody({ status: { phase: 'Active', currentInstanceRef: 'a' } }));
+      const api = apiFor(stores);
+      const controller = new PlacementController(
+        api,
+        { namespace: 'ao-instances', intervalMs: 0, dryRun: false },
+        { nodes: { listReadyNodeNames: vi.fn(async () => ['n2']) }, migrate: { callMigrate: vi.fn() } },
+      );
+
+      const summary = await controller.reconcileOnce();
+
+      expect(summary.errors).toEqual([expect.stringContaining('reportedBy')]);
+    });
+
+    it('leaves the route Migrating with a reason when the migrate call fails', async () => {
+      stores.instances.set('a', {
+        ...instanceBody(),
+        metadata: { name: 'a' },
+        spec: { nodeName: 'n1' },
+        status: { phase: 'QuotaExhausted', reportedBy: 'http://owner:8080' },
+      });
+      stores.routes.set('a', routeBody({ status: { phase: 'Active', currentInstanceRef: 'a' } }));
+      const api = apiFor(stores);
+      const migrate = { callMigrate: vi.fn(async () => { throw new Error('owner down'); }) };
+      const controller = new PlacementController(
+        api,
+        { namespace: 'ao-instances', intervalMs: 0, dryRun: false },
+        { nodes: { listReadyNodeNames: vi.fn(async () => ['n2']) }, migrate },
+      );
+
+      const summary = await controller.reconcileOnce();
+
+      expect(summary.errors).toEqual([expect.stringContaining('migration of a failed')]);
+      const route = stores.routes.get('a') as { status: Record<string, unknown> };
+      expect(route.status.phase).toBe('Migrating');
+      const conditions = route.status.conditions as Array<{ reason: string }>;
+      expect(conditions[0].reason).toBe('MigrationFailed');
+    });
+
+    it('waits without writes when no target node exists', async () => {
+      stores.instances.set('a', {
+        ...instanceBody(),
+        metadata: { name: 'a' },
+        spec: { nodeName: 'n1' },
+        status: { phase: 'QuotaExhausted', reportedBy: 'http://owner:8080' },
+      });
+      stores.routes.set('a', routeBody({ status: { phase: 'Active', currentInstanceRef: 'a' } }));
+      const api = apiFor(stores);
+      const migrate = { callMigrate: vi.fn() };
+      const controller = new PlacementController(
+        api,
+        { namespace: 'ao-instances', intervalMs: 0, dryRun: false },
+        { nodes: { listReadyNodeNames: vi.fn(async () => []) }, migrate },
+      );
+
+      const summary = await controller.reconcileOnce();
+
+      expect(migrate.callMigrate).not.toHaveBeenCalled();
+      expect(summary.migrationsPlanned).toEqual([{ from: 'a', reason: 'no healthy target node' }]);
+      const route = stores.routes.get('a') as { status: Record<string, unknown> };
+      expect(route.status.phase).toBe('Active');
+    });
+  });
 });

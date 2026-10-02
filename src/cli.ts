@@ -81,6 +81,7 @@ Subcommands:
   runtime info <id>      Show runtime info for a specific id
   operator               Run the placement controller (quota-aware routing)
                          [--namespace <ns>] [--interval-ms <ms>]
+                         [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>]
 `);
 }
 
@@ -120,15 +121,21 @@ export async function handleSubcommand(cli: CliOptions): Promise<boolean> {
       const { runOperator } = await import('./cluster/operator/controller.js');
       let namespace = 'ao-instances';
       let intervalMs = 15000;
+      let execute = false;
+      let apiKey: string | undefined;
+      let migrateTimeoutMs = 300000;
       for (let i = 0; i < args.length; i++) {
         if (args[i] === '--namespace' && i + 1 < args.length) namespace = args[++i];
         if (args[i] === '--interval-ms' && i + 1 < args.length) intervalMs = Number(args[++i]);
+        if (args[i] === '--execute') execute = true;
+        if (args[i] === '--api-key' && i + 1 < args.length) apiKey = args[++i];
+        if (args[i] === '--migrate-timeout-ms' && i + 1 < args.length) migrateTimeoutMs = Number(args[++i]);
       }
-      if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
-        console.error('Usage: aor operator [--namespace <ns>] [--interval-ms <ms>]');
+      if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(migrateTimeoutMs) || migrateTimeoutMs <= 0) {
+        console.error('Usage: aor operator [--namespace <ns>] [--interval-ms <ms>] [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>]');
         process.exit(1);
       }
-      const stop = await runOperator({ namespace, intervalMs });
+      const stop = await runOperator({ namespace, intervalMs, execute, ...(apiKey ? { apiKey } : {}), migrateTimeoutMs });
       // Ref'd keepalive: the controller's poll timer is unref'd so embedded
       // use never blocks exit; the CLI must stay alive explicitly.
       const keepAlive = setInterval(() => {}, 60000);
@@ -139,7 +146,7 @@ export async function handleSubcommand(cli: CliOptions): Promise<boolean> {
       };
       process.on('SIGINT', shutdown);
       process.on('SIGTERM', shutdown);
-      logger.info(`Placement controller running (namespace: ${namespace}, interval: ${intervalMs}ms, dry-run)`);
+      logger.info(`Placement controller running (namespace: ${namespace}, interval: ${intervalMs}ms, ${execute ? 'execute' : 'dry-run'})`);
     })();
     return true;
   }

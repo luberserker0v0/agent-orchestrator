@@ -183,6 +183,9 @@ export async function main(cliArgs?: string[]) {
     if (addr && typeof addr === 'object') {
       config.server.port = addr.port;
     }
+    if (!config.cluster?.advertiseBaseUrl) {
+      statusReporter.setAdvertiseBaseUrl(`http://${config.server.host}:${config.server.port}`);
+    }
     logger.info(`AgentOrchestrator listening on http://${config.server.host}:${config.server.port}`);
     logger.info(`WebSocket endpoint: ws://${config.server.host}:${config.server.port}/ws/{conversationId}`);
     logger.info(`Dashboard: http://${config.server.host}:${config.server.port}/dashboard`);

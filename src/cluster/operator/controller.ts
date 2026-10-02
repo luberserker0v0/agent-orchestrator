@@ -1,6 +1,7 @@
 import { logger } from '../../utils/logger.js';
 import { createObjectsClient, type StatusObjectsApi } from '../status-reporter.js';
 import { planMigration, type MigrationCandidate } from './placement.js';
+import { createLiveExecutor, type Executor } from './executor.js';
 
 const GROUP = 'agentorchestrator.io';
 const VERSION = 'v1alpha1';
@@ -12,10 +13,18 @@ export interface ControllerOptions {
   /** Reconcile interval in ms. */
   intervalMs: number;
   /**
-   * Dry-run mode (E1): migration decisions are logged, never written.
-   * Execution (route phase flips) arrives with Phase E2.
+   * Dry-run mode: migration decisions are logged, never written.
+   * Execute mode (!dryRun) performs route flips + migrate calls.
    */
   dryRun: boolean;
+}
+
+export interface RunOperatorOptions {
+  namespace?: string;
+  intervalMs?: number;
+  execute?: boolean;
+  apiKey?: string;
+  migrateTimeoutMs?: number;
 }
 
 export interface InstanceView {
@@ -24,13 +33,23 @@ export interface InstanceView {
   model?: { providerID: string; id: string };
   endpoint?: string;
   phase?: string;
+  reportedBy?: string;
+}
+
+export interface MigrationHistoryEntry {
+  from: string;
+  to: string;
+  reason: string;
+  at: string;
 }
 
 export interface RouteView {
   name: string;
   phase?: string;
   currentInstanceRef?: string;
+  currentEndpoint?: string;
   desiredInstanceRef?: string;
+  migrationHistory?: MigrationHistoryEntry[];
 }
 
 export interface PlannedMigration {
@@ -63,6 +82,7 @@ function toInstanceView(name: string, body: unknown): InstanceView {
       : {}),
     ...(typeof spec.endpoint === 'string' ? { endpoint: spec.endpoint } : {}),
     ...(typeof status.phase === 'string' ? { phase: status.phase } : {}),
+    ...(typeof status.reportedBy === 'string' ? { reportedBy: status.reportedBy } : {}),
   };
 }
 
@@ -70,11 +90,21 @@ function toRouteView(name: string, body: unknown): RouteView {
   const obj = asRecord(body);
   const spec = asRecord(obj.spec);
   const status = asRecord(obj.status);
+  const history = Array.isArray(status.migrationHistory)
+    ? (status.migrationHistory as unknown[]).flatMap((entry) => {
+        const rec = asRecord(entry);
+        return typeof rec.from === 'string' && typeof rec.to === 'string' && typeof rec.reason === 'string' && typeof rec.at === 'string'
+          ? [{ from: rec.from, to: rec.to, reason: rec.reason, at: rec.at }]
+          : [];
+      })
+    : undefined;
   return {
     name,
     ...(typeof status.phase === 'string' ? { phase: status.phase } : {}),
     ...(typeof status.currentInstanceRef === 'string' ? { currentInstanceRef: status.currentInstanceRef } : {}),
+    ...(typeof status.currentEndpoint === 'string' ? { currentEndpoint: status.currentEndpoint } : {}),
     ...(typeof spec.desiredInstanceRef === 'string' ? { desiredInstanceRef: spec.desiredInstanceRef } : {}),
+    ...(history ? { migrationHistory: history } : {}),
   };
 }
 
@@ -84,6 +114,7 @@ export class PlacementController {
   constructor(
     private readonly api: StatusObjectsApi,
     private readonly options: ControllerOptions,
+    private readonly executor?: Executor,
   ) {}
 
   start(): void {
@@ -105,7 +136,7 @@ export class PlacementController {
   /** One reconcile pass: route lifecycle + dry-run migration planning. Never throws. */
   async reconcileOnce(): Promise<ReconcileSummary> {
     const summary: ReconcileSummary = { routesCreated: [], routesDeleted: [], migrationsPlanned: [], errors: [] };
-    const { namespace, dryRun } = this.options;
+    const { namespace } = this.options;
     let instances: InstanceView[];
     let routes: RouteView[];
     try {
@@ -160,6 +191,10 @@ export class PlacementController {
       if (instance.phase !== 'QuotaExhausted') continue;
       const route = routeByName.get(instance.name);
       if (!route || route.phase !== 'Active' || route.desiredInstanceRef) continue;
+      if (!this.options.dryRun) {
+        await this.executeMigration(instance, summary);
+        continue;
+      }
       const candidates: MigrationCandidate[] = instances
         .filter((c) => c.name !== instance.name)
         .map((c) => ({ name: c.name, ...(c.nodeName ? { nodeName: c.nodeName } : {}), ...(c.model ? { model: c.model } : {}), phase: c.phase ?? 'Unknown' }));
@@ -173,7 +208,7 @@ export class PlacementController {
       );
       if (decision.action === 'migrate') {
         summary.migrationsPlanned.push({ from: instance.name, target: decision.target, reason: decision.reason });
-        logger.info(`[operator]${dryRun ? ' [dry-run]' : ''} would migrate ${instance.name} -> ${decision.target} (${decision.reason})`);
+        logger.info(`[operator] [dry-run] would migrate ${instance.name} -> ${decision.target} (${decision.reason})`);
       } else {
         summary.migrationsPlanned.push({ from: instance.name, reason: decision.reason });
         logger.info(`[operator] no migration target for ${instance.name} (${decision.reason})`);
@@ -181,6 +216,92 @@ export class PlacementController {
     }
 
     return summary;
+  }
+
+  /**
+   * Execute a quota migration: flip the route to Migrating, call the owning
+   * orchestrator's migrate endpoint on a healthy node, then flip back to
+   * Active with history. Failures leave the route Migrating with a reason so
+   * the next pass skips it (no migrate storms); recovery is manual or via
+   * refill (Phase F).
+   */
+  private async executeMigration(instance: InstanceView, summary: ReconcileSummary): Promise<void> {
+    const name = instance.name;
+    const { namespace } = this.options;
+    if (!this.executor) {
+      summary.errors.push(`execute mode needs an executor (nodes+migrate clients)`);
+      return;
+    }
+    if (!instance.reportedBy) {
+      summary.errors.push(`no reportedBy owner for ${name}, cannot trigger migration`);
+      return;
+    }
+    let nodes: string[];
+    try {
+      nodes = await this.executor.nodes.listReadyNodeNames(instance.nodeName);
+    } catch (err) {
+      summary.errors.push(`node listing failed: ${(err as Error).message}`);
+      return;
+    }
+    if (nodes.length === 0) {
+      summary.migrationsPlanned.push({ from: name, reason: 'no healthy target node' });
+      logger.info(`[operator] no healthy target node for ${name}, waiting`);
+      return;
+    }
+    const targetNode = nodes[0];
+    const at = (ms: number): string => new Date(ms).toISOString();
+    try {
+      await this.setRouteStatus(name, {
+        phase: 'Migrating',
+        conditions: [{ type: 'Routable', status: 'False', reason: 'MigrationInProgress', message: `moving to ${targetNode}`, lastTransitionTime: at(Date.now()) }],
+      });
+      const result = await this.executor.migrate.callMigrate(instance.reportedBy, name, targetNode);
+      const refreshed = await this.api.getNamespacedCustomObject(GROUP, VERSION, namespace, INSTANCES_PLURAL, name);
+      const refreshedSpec = asRecord((refreshed.body as Record<string, unknown>).spec);
+      await this.setRouteStatus(name, {
+        phase: 'Active',
+        currentInstanceRef: name,
+        ...(typeof refreshedSpec.endpoint === 'string' ? { currentEndpoint: refreshedSpec.endpoint } : {}),
+        conditions: [{ type: 'Routable', status: 'True', reason: 'MigrationCompleted', message: `moved to ${targetNode}, resumed=${result.resumed}`, lastTransitionTime: at(Date.now()) }],
+        migrationHistory: [
+          ...(await this.currentHistory(name)),
+          {
+            from: name,
+            to: name,
+            reason: `QuotaExhausted(${instance.nodeName ?? '?'}->${targetNode})`,
+            at: at(Date.now()),
+          },
+        ],
+      });
+      summary.migrationsPlanned.push({ from: name, target: targetNode, reason: `migrated, resumed=${result.resumed}` });
+      logger.info(`[operator] migrated ${name} -> ${targetNode} (resumed=${result.resumed})`);
+    } catch (err) {
+      try {
+        await this.setRouteStatus(name, {
+          phase: 'Migrating',
+          conditions: [{ type: 'Routable', status: 'False', reason: 'MigrationFailed', message: (err as Error).message, lastTransitionTime: at(Date.now()) }],
+        });
+      } catch {
+        // Best effort; the error below already records the failure.
+      }
+      summary.errors.push(`migration of ${name} failed: ${(err as Error).message}`);
+    }
+  }
+
+  private async currentHistory(name: string): Promise<MigrationHistoryEntry[]> {
+    try {
+      const existing = await this.api.getNamespacedCustomObject(GROUP, VERSION, this.options.namespace, ROUTES_PLURAL, name);
+      const status = asRecord(((existing.body ?? {}) as Record<string, unknown>).status);
+      if (!Array.isArray(status.migrationHistory)) return [];
+      return (status.migrationHistory as unknown[]).flatMap((entry) => {
+        const rec = asRecord(entry);
+        return typeof rec.from === 'string' && typeof rec.to === 'string' && typeof rec.reason === 'string' && typeof rec.at === 'string'
+          ? [{ from: rec.from, to: rec.to, reason: rec.reason, at: rec.at }]
+          : [];
+      });
+    } catch {
+      return [];
+    }
   }
 
   private async setRouteStatus(name: string, status: Record<string, unknown>): Promise<void> {
@@ -208,13 +329,20 @@ function itemsOf(list: { body: object }): Array<[string, unknown]> {
  * `stop()` is called. Resolves with the stop function once the first
  * reconcile pass completes.
  */
-export async function runOperator(options?: Partial<ControllerOptions>): Promise<() => void> {
+export async function runOperator(options?: RunOperatorOptions): Promise<() => void> {
   const namespace = options?.namespace ?? 'ao-instances';
-  const controller = new PlacementController(createObjectsClient(), {
-    namespace,
-    intervalMs: options?.intervalMs ?? 15000,
-    dryRun: options?.dryRun ?? true,
-  });
+  const execute = options?.execute ?? false;
+  const controller = new PlacementController(
+    createObjectsClient(),
+    {
+      namespace,
+      intervalMs: options?.intervalMs ?? 15000,
+      dryRun: !execute,
+    },
+    execute
+      ? createLiveExecutor({ ...(options?.apiKey ? { apiKey: options.apiKey } : {}), ...(options?.migrateTimeoutMs ? { timeoutMs: options.migrateTimeoutMs } : {}) })
+      : undefined,
+  );
   controller.start();
   return () => controller.stop();
 }

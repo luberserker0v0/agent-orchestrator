@@ -77,6 +77,46 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Delete a Pod and wait until it is gone. Tries graceful termination first
+ * (clean SQLite checkpoint on the PVC), then force-deletes so callers never
+ * observe a Terminating pod on recreate.
+ */
+async function deletePodAndWait(api: InstancePodsApi, namespace: string, podName: string, timeoutMs = 60000): Promise<void> {
+  try {
+    await api.deletePod(namespace, podName);
+  } catch (err) {
+    if (!isNotFound(err)) throw err;
+    return;
+  }
+  const half = Math.floor(timeoutMs / 2);
+  try {
+    await waitForPodGone(api, namespace, podName, half);
+    return;
+  } catch {
+    await api.deletePod(namespace, podName, { force: true }).catch((err: unknown) => {
+      if (!isNotFound(err)) throw err;
+    });
+    await waitForPodGone(api, namespace, podName, half);
+  }
+}
+
+async function waitForPodGone(api: InstancePodsApi, namespace: string, podName: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      await api.readPod(namespace, podName);
+    } catch (err) {
+      if (isNotFound(err)) return;
+      throw err;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Instance Pod ${podName} did not terminate in time`);
+    }
+    await sleep(1000);
+  }
+}
+
 class K8sPodHandle implements InstanceHandle {
   private _exitCode: number | null = null;
   private exited = false;
@@ -98,8 +138,8 @@ class K8sPodHandle implements InstanceHandle {
   }
 
   async kill(): Promise<void> {
-    await this.deleteIgnoringNotFound(() => this.api.deletePod(this.namespace, this.podName));
     await this.deleteIgnoringNotFound(() => this.api.deleteService(this.namespace, this.serviceName));
+    await deletePodAndWait(this.api, this.namespace, this.podName);
     this.finish(null);
   }
 
@@ -143,6 +183,22 @@ class K8sPodHandle implements InstanceHandle {
         }
       }
       await sleep(EXIT_POLL_INTERVAL_MS);
+    }
+  }
+
+  private async waitForGone(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        await this.api.readPod(this.namespace, this.podName);
+      } catch (err) {
+        if (isNotFound(err)) return;
+        throw err;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Instance Pod ${this.podName} did not terminate in time`);
+      }
+      await sleep(1000);
     }
   }
 
@@ -291,7 +347,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     // name stays constant, so baseUrl host is stable; sessions resume from the
     // PVC (same claim, untouched). Pod deletion is asynchronous — wait until
     // the object is gone, otherwise create hits AlreadyExists ("terminating").
-    await this.deletePodAndWait(namespace, state.podName);
+    await deletePodAndWait(api, namespace, state.podName);
     await this.deleteIgnoringNotFound(() => api.deleteService(namespace, state.serviceName));
     this.instanceState.delete(id);
 
@@ -425,23 +481,6 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       await fn();
     } catch (err) {
       if (!isNotFound(err)) throw err;
-    }
-  }
-
-  private async deletePodAndWait(namespace: string, podName: string, timeoutMs = 60000): Promise<void> {
-    await this.deleteIgnoringNotFound(() => this.api().deletePod(namespace, podName, { force: true }));
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      try {
-        await this.api().readPod(namespace, podName);
-      } catch (err) {
-        if (isNotFound(err)) return;
-        throw err;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(`Instance Pod ${podName} did not terminate in time`);
-      }
-      await sleep(1000);
     }
   }
 }

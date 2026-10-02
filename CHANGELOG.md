@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: slim root README.md to landing page pointing to docs/
 
 ### Added
+- feat(operator): execute quota migrations (route flips, owner migrate calls with rollback, node inventory, `--execute` mode)
+- feat(cluster): report owner base URL (`reportedBy`, `cluster.advertiseBaseUrl`) for operator-triggered migration
 - feat(migrate): add `POST /api/conversations/:id/migrate` (admin-only `conversation:migrate` permission) moving a running instance to another node with verified session resume
 - feat(runtime): add node placement overrides (`setNodeOverride`/`clearNodeOverride`) consumed on next start/restart
 - feat(runtime): add `kubernetes` runtime type spawning one Pod + ClusterIP Service per instance with PVC session persistence and node targeting

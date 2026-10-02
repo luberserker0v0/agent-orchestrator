@@ -78,8 +78,8 @@ export class InstanceManager {
     return this.runtimeManager.destroyInstance(id);
   }
 
-  async restartInstance(id: string): Promise<void> {
-    return this.runtimeManager.restartInstance(id, this.config.defaultAgentType, this.config.healthCheck);
+  async restartInstance(id: string, agentType?: string): Promise<void> {
+    return this.runtimeManager.restartInstance(id, agentType ?? this.config.defaultAgentType, this.config.healthCheck);
   }
 
   cleanupOrphanContainers(): Promise<void> {

@@ -191,7 +191,7 @@ export class ConversationService {
       if (hadInstance) {
         this.conversationState.cancelReadyCheck(id);
         try {
-          await this.instanceManager.restartInstance(id);
+          await this.instanceManager.restartInstance(id, state.agentType);
           instance = this.instanceManager.getInstance(id)!;
         } catch {
           await this.instanceManager.destroyInstance(id).catch(() => {});
@@ -263,7 +263,7 @@ export class ConversationService {
       let instance: InstanceInfo;
       if (hadInstance) {
         try {
-          await this.instanceManager.restartInstance(id);
+          await this.instanceManager.restartInstance(id, state.agentType);
           instance = this.instanceManager.getInstance(id)!;
         } catch {
           await this.instanceManager.destroyInstance(id).catch(() => {});
