@@ -187,7 +187,7 @@ describe('MessageService', () => {
 
       expect(messagesSentTotal.labels).toHaveBeenCalledWith('quota_exhausted');
       expect(messagesSentTotal.labels('quota_exhausted').inc).toHaveBeenCalled();
-      expect(llmQuotaExhaustionsTotal.labels).toHaveBeenCalledWith(ErrorCodes.LLM_QUOTA_EXHAUSTED);
+      expect(llmQuotaExhaustionsTotal.labels).toHaveBeenCalledWith(ErrorCodes.LLM_QUOTA_EXHAUSTED, 'anthropic/claude-sonnet');
       expect(llmQuotaExhaustionsTotal.labels(ErrorCodes.LLM_QUOTA_EXHAUSTED).inc).toHaveBeenCalled();
       expect(mockConversationState.setLastError).toHaveBeenCalledWith(testId, quotaError.message);
       expect(mockConversationState.emitEvent).toHaveBeenCalledWith(testId, 'conversation.quotaExhausted', {
@@ -211,7 +211,7 @@ describe('MessageService', () => {
       await expect(service.send(testId, 'Hi')).rejects.toThrow(AppError);
 
       expect(messagesSentTotal.labels).toHaveBeenCalledWith('quota_exhausted');
-      expect(llmQuotaExhaustionsTotal.labels).toHaveBeenCalledWith(ErrorCodes.LLM_RATE_LIMITED);
+      expect(llmQuotaExhaustionsTotal.labels).toHaveBeenCalledWith(ErrorCodes.LLM_RATE_LIMITED, '');
       expect(mockConversationState.setLastError).toHaveBeenCalledWith(
         testId,
         'OpenCode HTTP 429: too many requests'

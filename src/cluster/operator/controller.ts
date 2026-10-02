@@ -1,6 +1,7 @@
 import { logger } from '../../utils/logger.js';
 import { createObjectsClient, type StatusObjectsApi } from '../status-reporter.js';
-import { planMigration, type MigrationCandidate } from './placement.js';
+import { planMigration, rankNodes, isRefillDue, refillWindowMs, type MigrationCandidate, type RefillPolicy } from './placement.js';
+import { migrationsTotal } from '../../metrics/registry.js';
 import { createLiveExecutor, type Executor } from './executor.js';
 
 const GROUP = 'agentorchestrator.io';
@@ -17,6 +18,8 @@ export interface ControllerOptions {
    * Execute mode (!dryRun) performs route flips + migrate calls.
    */
   dryRun: boolean;
+  /** Time-based quota refill policy. Default 24h for all models. */
+  refill?: RefillPolicy;
 }
 
 export interface RunOperatorOptions {
@@ -25,6 +28,8 @@ export interface RunOperatorOptions {
   execute?: boolean;
   apiKey?: string;
   migrateTimeoutMs?: number;
+  refill?: RefillPolicy;
+  metricsPort?: number;
 }
 
 export interface InstanceView {
@@ -34,6 +39,7 @@ export interface InstanceView {
   endpoint?: string;
   phase?: string;
   reportedBy?: string;
+  lastQuotaErrorAt?: string;
 }
 
 export interface MigrationHistoryEntry {
@@ -62,6 +68,7 @@ export interface ReconcileSummary {
   routesCreated: string[];
   routesDeleted: string[];
   migrationsPlanned: PlannedMigration[];
+  refillsCompleted: string[];
   errors: string[];
 }
 
@@ -83,6 +90,9 @@ function toInstanceView(name: string, body: unknown): InstanceView {
     ...(typeof spec.endpoint === 'string' ? { endpoint: spec.endpoint } : {}),
     ...(typeof status.phase === 'string' ? { phase: status.phase } : {}),
     ...(typeof status.reportedBy === 'string' ? { reportedBy: status.reportedBy } : {}),
+    ...(typeof asRecord(status.lastQuotaError).at === 'string'
+      ? { lastQuotaErrorAt: asRecord(status.lastQuotaError).at as string }
+      : {}),
   };
 }
 
@@ -133,9 +143,9 @@ export class PlacementController {
     }
   }
 
-  /** One reconcile pass: route lifecycle + dry-run migration planning. Never throws. */
+  /** One reconcile pass: refill, route lifecycle, migration planning/execution. Never throws. */
   async reconcileOnce(): Promise<ReconcileSummary> {
-    const summary: ReconcileSummary = { routesCreated: [], routesDeleted: [], migrationsPlanned: [], errors: [] };
+    const summary: ReconcileSummary = { routesCreated: [], routesDeleted: [], migrationsPlanned: [], refillsCompleted: [], errors: [] };
     const { namespace } = this.options;
     let instances: InstanceView[];
     let routes: RouteView[];
@@ -153,6 +163,28 @@ export class PlacementController {
 
     const routeByName = new Map(routes.map((r) => [r.name, r]));
     const instanceByName = new Map(instances.map((i) => [i.name, i]));
+
+    // Time-based refill first: quota windows that elapsed clear back to Ready
+    // so later passes (and the planner) see recovered capacity.
+    const refillPolicy = this.options.refill ?? { defaultWindowMs: 24 * 60 * 60 * 1000 };
+    const nowMs = Date.now();
+    for (const instance of instances) {
+      if (instance.phase !== 'QuotaExhausted') continue;
+      if (!isRefillDue(instance.lastQuotaErrorAt, nowMs, refillWindowMs(refillPolicy, instance.model))) continue;
+      try {
+        await this.setInstanceStatus(instance.name, {
+          phase: 'Ready',
+          reachable: true,
+          consecutiveFailures: 0,
+          lastHeartbeat: new Date(nowMs).toISOString(),
+        });
+        instance.phase = 'Ready';
+        summary.refillsCompleted.push(instance.name);
+        logger.info(`[operator] quota refilled for ${instance.name}, back to Ready`);
+      } catch (err) {
+        summary.errors.push(`refill ${instance.name} failed: ${(err as Error).message}`);
+      }
+    }
 
     for (const instance of instances) {
       if (routeByName.has(instance.name)) continue;
@@ -192,7 +224,7 @@ export class PlacementController {
       const route = routeByName.get(instance.name);
       if (!route || route.phase !== 'Active' || route.desiredInstanceRef) continue;
       if (!this.options.dryRun) {
-        await this.executeMigration(instance, summary);
+        await this.executeMigration(instance, summary, loadByNode(instances));
         continue;
       }
       const candidates: MigrationCandidate[] = instances
@@ -205,6 +237,7 @@ export class PlacementController {
           ...(instance.model ? { model: instance.model } : {}),
         },
         candidates,
+        loadByNode(instances),
       );
       if (decision.action === 'migrate') {
         summary.migrationsPlanned.push({ from: instance.name, target: decision.target, reason: decision.reason });
@@ -225,7 +258,7 @@ export class PlacementController {
    * the next pass skips it (no migrate storms); recovery is manual or via
    * refill (Phase F).
    */
-  private async executeMigration(instance: InstanceView, summary: ReconcileSummary): Promise<void> {
+  private async executeMigration(instance: InstanceView, summary: ReconcileSummary, load: Map<string, number>): Promise<void> {
     const name = instance.name;
     const { namespace } = this.options;
     if (!this.executor) {
@@ -245,10 +278,11 @@ export class PlacementController {
     }
     if (nodes.length === 0) {
       summary.migrationsPlanned.push({ from: name, reason: 'no healthy target node' });
+      migrationsTotal.labels('no_target').inc();
       logger.info(`[operator] no healthy target node for ${name}, waiting`);
       return;
     }
-    const targetNode = nodes[0];
+    const targetNode = rankNodes(nodes, load)[0];
     const at = (ms: number): string => new Date(ms).toISOString();
     try {
       await this.setRouteStatus(name, {
@@ -274,6 +308,7 @@ export class PlacementController {
         ],
       });
       summary.migrationsPlanned.push({ from: name, target: targetNode, reason: `migrated, resumed=${result.resumed}` });
+      migrationsTotal.labels('completed').inc();
       logger.info(`[operator] migrated ${name} -> ${targetNode} (resumed=${result.resumed})`);
     } catch (err) {
       try {
@@ -284,6 +319,7 @@ export class PlacementController {
       } catch {
         // Best effort; the error below already records the failure.
       }
+      migrationsTotal.labels('failed').inc();
       summary.errors.push(`migration of ${name} failed: ${(err as Error).message}`);
     }
   }
@@ -304,6 +340,16 @@ export class PlacementController {
     }
   }
 
+  private async setInstanceStatus(name: string, status: Record<string, unknown>): Promise<void> {
+    const existing = await this.api.getNamespacedCustomObject(GROUP, VERSION, this.options.namespace, INSTANCES_PLURAL, name);
+    const current = (existing.body ?? {}) as Record<string, unknown>;
+    const currentStatus = asRecord(current.status);
+    await this.api.replaceNamespacedCustomObjectStatus(GROUP, VERSION, this.options.namespace, INSTANCES_PLURAL, name, {
+      ...current,
+      status: { ...currentStatus, ...status },
+    });
+  }
+
   private async setRouteStatus(name: string, status: Record<string, unknown>): Promise<void> {
     const existing = await this.api.getNamespacedCustomObject(GROUP, VERSION, this.options.namespace, ROUTES_PLURAL, name);
     const current = (existing.body ?? {}) as Record<string, unknown>;
@@ -313,6 +359,15 @@ export class PlacementController {
       status: { ...currentStatus, ...status },
     });
   }
+}
+
+function loadByNode(instances: InstanceView[]): Map<string, number> {
+  const load = new Map<string, number>();
+  for (const instance of instances) {
+    if (!instance.nodeName) continue;
+    load.set(instance.nodeName, (load.get(instance.nodeName) ?? 0) + 1);
+  }
+  return load;
 }
 
 function itemsOf(list: { body: object }): Array<[string, unknown]> {
@@ -338,11 +393,21 @@ export async function runOperator(options?: RunOperatorOptions): Promise<() => v
       namespace,
       intervalMs: options?.intervalMs ?? 15000,
       dryRun: !execute,
+      ...(options?.refill ? { refill: options.refill } : {}),
     },
     execute
       ? createLiveExecutor({ ...(options?.apiKey ? { apiKey: options.apiKey } : {}), ...(options?.migrateTimeoutMs ? { timeoutMs: options.migrateTimeoutMs } : {}) })
       : undefined,
   );
+  let stopMetrics: (() => void) | undefined;
+  if (options?.metricsPort) {
+    const { startMetricsServer } = await import('./metrics-server.js');
+    const server = await startMetricsServer(options.metricsPort);
+    stopMetrics = () => server.close();
+  }
   controller.start();
-  return () => controller.stop();
+  return () => {
+    controller.stop();
+    stopMetrics?.();
+  };
 }

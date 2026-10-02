@@ -6,6 +6,7 @@ import { ConversationState, type ConversationEvent } from '../orchestrator/conve
 import { SSEBridge } from '../orchestrator/sse-bridge.js';
 import type { AgentClient } from '../agent-runtime/types.js';
 import { logger } from '../utils/logger.js';
+import { llmQuotaExhaustionsTotal } from '../metrics/registry.js';
 import { AppError, ErrorCodes, isAppError } from '../utils/errors.js';
 import { conversationVolumeClaimName, type K8sStatusReporter } from '../cluster/status-reporter.js';
 import type { NodePlaceable } from '../agent-runtime/runtimes/kubernetes.js';
@@ -371,6 +372,7 @@ export class ConversationService {
           isAppError(err) &&
           (err.code === ErrorCodes.LLM_QUOTA_EXHAUSTED || err.code === ErrorCodes.LLM_RATE_LIMITED)
         ) {
+          llmQuotaExhaustionsTotal.labels(err.code, '').inc();
           void this.statusReporter?.reportQuotaError(id, { code: err.code, message: err.message });
         }
       },
