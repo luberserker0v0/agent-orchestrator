@@ -15,13 +15,22 @@ export function kubectlJson<T>(args: string[], timeout = 30_000): T {
   return JSON.parse(kubectl([...args, '-o', 'json'], timeout)) as T;
 }
 
+export function kubectlApply(body: object, timeout = 30_000): void {
+  execFileSync('kubectl', ['--context', K8S_CONTEXT, 'apply', '-f', '-'], {
+    encoding: 'utf8',
+    input: JSON.stringify(body),
+    timeout,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+}
+
 export function resourceExists(kind: string, name: string): boolean {
-  try {
-    kubectl(['-n', K8S_NAMESPACE, 'get', kind, name], 10_000);
-    return true;
-  } catch {
-    return false;
-  }
+  return kubectl([
+    '-n', K8S_NAMESPACE,
+    'get', kind, name,
+    '--ignore-not-found=true',
+    '-o', 'name',
+  ], 10_000) !== '';
 }
 
 export function deleteResource(kind: string, name: string): void {

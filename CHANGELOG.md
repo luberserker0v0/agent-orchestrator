@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- fix(kubernetes): wait for failed instance Pods to finish terminating before allowing an immediate recovery start
 - fix(orchestrator): serialize per-conversation lifecycle mutations so stop/delete cannot race an in-flight start or restart
 - fix(kubernetes): report actual Pod placement, reconcile stopped/restarted routes, and remove runtime PVCs on failed start or explicit delete
 - fix(kubernetes): create per-conversation PVCs before instance Pods and grant required PVC/CR status permissions
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(rbac): make custom roles assignable to API keys and reject mutation of immutable built-in roles
 
 ### Changed
+- Isolated k3d test images exclude local orchestrator and canonical OpenCode configuration files
 - Kubernetes and shared E2E TypeScript is now linted and type-checked by `npm run preflight`
 - conversation IDs must be 1-52 lowercase letters, digits, or hyphens and must start and end with an alphanumeric character
 - Kubernetes manifests now invoke `node dist/index.js` explicitly so container arguments work independently of image `CMD`
@@ -30,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: slim root README.md to landing page pointing to docs/
 
 ### Added
+- test(kubernetes): add an isolated two-worker k3d suite for execute-mode cross-node migration, failure quarantine, and manual recovery
 - test(kubernetes): add opt-in k3d lifecycle, persistence, migration, and failed-start cleanup E2E coverage
 - feat(k8s): orchestrator Deployment/Service/Config-Secret/RBAC, sticky Traefik Ingress, ServiceMonitor, and per-conversation workspace PVC
 - feat(operator): time-based quota refill (per-model windows), load-aware candidate/node scoring, migration + quota-model metrics, `/metrics` endpoint, convergence coverage

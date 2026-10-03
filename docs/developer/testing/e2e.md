@@ -8,6 +8,8 @@ End-to-end tests validate complete API workflows against a running server.
 - **Direct runtime tests:** OpenCode CLI installed
 - **Kubernetes tests:** deployed AgentOrchestrator manifests in a k3d cluster,
   with the current kubeconfig context set to that cluster
+- **Isolated k3d migration tests:** Docker, k3d, and kubectl installed and available
+  on `PATH`; no pre-existing cluster or kubeconfig context is required
 
 ## Running
 
@@ -23,6 +25,9 @@ npm run test:e2e:runtime
 
 # Kubernetes lifecycle tests (defaults to context k3d-ao-test)
 npm run test:e2e:kubernetes
+
+# Isolated execute-mode, cross-node Kubernetes migration tests
+npm run test:e2e:k3d
 
 # Watch mode
 npm run test:e2e:watch
@@ -41,6 +46,43 @@ npx vitest run --config e2e/vitest.config.e2e.ts e2e/scenarios/lifecycle/lifecyc
 | `e2e/scenarios/runtime/direct-runtime.test.ts` | Process spawn, env vars, SIGTERM | Direct only |
 | `e2e/scenarios/runtime/docker-runtime.test.ts` | Container lifecycle, port mapping | Docker only |
 | `e2e/scenarios/kubernetes/` | Live Pod/Service/PVC/CR lifecycle and rollback | Kubernetes only |
+
+## Isolated k3d Migration Suite
+
+`npm run test:e2e:k3d` provisions a disposable k3d cluster with one server and
+two worker nodes. The runner builds the current AgentOrchestrator image, imports
+it and the OpenCode image into every node, deploys an execute-mode placement
+controller, and uses a generated API key and isolated kubeconfig. It does not
+change the host's current kubeconfig context.
+
+The workers share a dedicated Docker volume mounted at `/shared`. The tests use
+static host-path PVs backed by that mount so the same RWO conversation PVC and
+its workspace/session data remain available after a Pod moves between nodes.
+
+The suite verifies both paths:
+
+- Successful source-worker to target-worker migration, including the same PVC,
+  resumed session and sentinel data, route/history/event updates, and no repeat
+  migration after convergence.
+- Failed placement on a synthetic Ready node with no kubelet, including
+  `MigrationFailed` quarantine, retained PVC data, no retry storm, and manual
+  recovery on a real worker.
+
+The runner deletes its cluster, shared volume, locally built images, and
+temporary files after the run. Use these environment variables for soak testing
+or failure diagnosis:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `K3D_E2E_REPEAT` | `1` | Run the migration suite this many times against the same isolated cluster; must be a positive integer |
+| `K3D_E2E_KEEP` | unset | Set to `1` to retain the cluster, shared volume, images, and temporary files after the run |
+
+For example:
+
+```bash
+K3D_E2E_REPEAT=10 npm run test:e2e:k3d
+K3D_E2E_KEEP=1 npm run test:e2e:k3d
+```
 
 ## Pattern
 

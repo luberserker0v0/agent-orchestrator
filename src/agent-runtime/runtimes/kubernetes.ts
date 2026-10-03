@@ -343,7 +343,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       this.instanceState.set(id, { podName, serviceName, port, auth });
       return { client, port, handle, baseUrl, nodeName: readyPod.nodeName };
     } catch (err) {
-      await this.deleteIgnoringNotFound(() => this.api().deletePod(namespace, podName)).catch(() => {});
+      await deletePodAndWait(this.api(), namespace, podName).catch(() => {});
       await this.deleteIgnoringNotFound(() => this.api().deleteService(namespace, serviceName)).catch(() => {});
       if (createdPVC) {
         await this.deleteIgnoringNotFound(() =>
@@ -407,7 +407,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       this.instanceState.set(id, { podName: state.podName, serviceName: state.serviceName, port, auth: state.auth });
       return { client, port, handle, baseUrl, nodeName: readyPod.nodeName };
     } catch (err) {
-      await this.deleteIgnoringNotFound(() => api.deletePod(namespace, state.podName)).catch(() => {});
+      await deletePodAndWait(api, namespace, state.podName).catch(() => {});
       await this.deleteIgnoringNotFound(() => api.deleteService(namespace, state.serviceName)).catch(() => {});
       if (createdPVC) {
         await this.deleteIgnoringNotFound(() =>

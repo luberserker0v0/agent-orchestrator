@@ -198,15 +198,48 @@ describe('KubernetesRuntime', () => {
     }
   });
 
-  it('throws when Pod enters Failed phase', async () => {
+  it('waits for a failed Pod to disappear before rejecting start', async () => {
     const fake = createFakePods();
-    fake.readImpl = async () => ({ phase: 'Failed', ready: false });
+    let deletionRequested = false;
+    let confirmPodGone!: () => void;
+    const podGone = new Promise<void>((resolve) => {
+      confirmPodGone = resolve;
+    });
+    (fake.api.deletePod as ReturnType<typeof vi.fn>).mockImplementation(async (namespace: string, name: string) => {
+      fake.deleted.push(`pod/${namespace}/${name}`);
+      deletionRequested = true;
+    });
+    (fake.api.readPod as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (!deletionRequested) return { phase: 'Failed', ready: false };
+      await podGone;
+      const err = new Error('gone') as Error & { statusCode: number };
+      err.statusCode = 404;
+      throw err;
+    });
     const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
     mockFetch.mockResolvedValue(makeHealthyFetch());
 
-    await expect(rt.start('cf', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH)).rejects.toThrow(
-      'entered phase Failed',
+    let settled = false;
+    const outcome = rt.start('cf', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH).then(
+      () => {
+        settled = true;
+        return new Error('start unexpectedly resolved');
+      },
+      (err: unknown) => {
+        settled = true;
+        return err as Error;
+      },
     );
+
+    await vi.waitFor(() => {
+      expect(fake.api.deletePod).toHaveBeenCalledWith('ao-instances', 'opencode-cf');
+      expect(fake.api.readPod).toHaveBeenCalledTimes(2);
+    });
+    expect(settled).toBe(false);
+
+    confirmPodGone();
+    const error = await outcome;
+    expect(error.message).toContain('entered phase Failed');
   });
 
   it('throws on Pod ready timeout and releases the port', async () => {
@@ -303,6 +336,63 @@ describe('KubernetesRuntime', () => {
 
     expect(fake.api.deletePod).toHaveBeenCalledWith('ao-instances', 'opencode-cw');
     expect(fake.createdPods).toHaveLength(2);
+  });
+
+  it('waits for a failed replacement Pod to disappear before rejecting restart', async () => {
+    const fake = createFakePods();
+    const rt = new KubernetesRuntime(createPortPool(40000, 40001), { image: 'img' }, fake.api);
+    mockFetch.mockResolvedValue(makeHealthyFetch());
+
+    await rt.start('restart-failure', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+    let deleteCalls = 0;
+    let confirmPodGone!: () => void;
+    const podGone = new Promise<void>((resolve) => {
+      confirmPodGone = resolve;
+    });
+    (fake.api.deletePod as ReturnType<typeof vi.fn>).mockImplementation(async (namespace: string, name: string) => {
+      fake.deleted.push(`pod/${namespace}/${name}`);
+      deleteCalls++;
+    });
+    (fake.api.readPod as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (fake.createdPods.length === 1 && deleteCalls === 1) {
+        const err = new Error('gone') as Error & { statusCode: number };
+        err.statusCode = 404;
+        throw err;
+      }
+      if (fake.createdPods.length === 2 && deleteCalls === 1) {
+        return { phase: 'Failed', ready: false };
+      }
+      if (fake.createdPods.length === 2 && deleteCalls === 2) {
+        await podGone;
+        const err = new Error('gone') as Error & { statusCode: number };
+        err.statusCode = 404;
+        throw err;
+      }
+      return { phase: 'Running', ready: true };
+    });
+
+    let settled = false;
+    const outcome = rt.restart('restart-failure', HEALTH).then(
+      () => {
+        settled = true;
+        return new Error('restart unexpectedly resolved');
+      },
+      (err: unknown) => {
+        settled = true;
+        return err as Error;
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(fake.api.deletePod).toHaveBeenCalledTimes(2);
+      expect(fake.api.readPod).toHaveBeenCalledTimes(4);
+    });
+    expect(settled).toBe(false);
+
+    confirmPodGone();
+    const error = await outcome;
+    expect(error.message).toContain('entered phase Failed');
   });
 
   it('stop kills Pod and Service, tolerating missing objects', async () => {

@@ -29,6 +29,7 @@
     "test:e2e:direct": "vitest run --config e2e/vitest.config.e2e.ts",
     "test:e2e:runtime": "cross-env E2E_RUNTIME=docker vitest run --config e2e/vitest.config.runtime.ts",
     "test:e2e:kubernetes": "vitest run --config e2e/vitest.config.kubernetes.ts",
+    "test:e2e:k3d": "tsx e2e/kubernetes/run-k3d.ts",
     "test:e2e": "npm run test:e2e:docker",
     "test:e2e:watch": "cross-env E2E_RUNTIME=docker vitest --config e2e/vitest.config.e2e.ts",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json",
