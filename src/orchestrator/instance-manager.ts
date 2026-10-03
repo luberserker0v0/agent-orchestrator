@@ -95,6 +95,10 @@ export class InstanceManager {
     return this.runtimeManager.cleanupOrphanContainers();
   }
 
+  deletePersistentData(id: string, agentType?: string): Promise<void> {
+    return this.runtimeManager.deletePersistentData(id, agentType);
+  }
+
   destroy(): void {
     if (this.idleSweepTimer) {
       clearInterval(this.idleSweepTimer);

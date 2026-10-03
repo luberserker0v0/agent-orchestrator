@@ -75,7 +75,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
   });
 
   it('returns error when conversation is not ready', async () => {
-    const createRes = await fetch(`${server.baseUrl}/api/conversations`, {
+    await fetch(`${server.baseUrl}/api/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-msg-ws-notready' }),
@@ -90,7 +90,7 @@ describe('WebSocket JSON-RPC message.send (E2E)', () => {
   });
 
   it('returns error when text is missing', async () => {
-    const createRes = await fetch(`${server.baseUrl}/api/conversations`, {
+    await fetch(`${server.baseUrl}/api/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'e2e-msg-ws-notext' }),

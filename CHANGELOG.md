@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- fix(orchestrator): serialize per-conversation lifecycle mutations so stop/delete cannot race an in-flight start or restart
+- fix(kubernetes): report actual Pod placement, reconcile stopped/restarted routes, and remove runtime PVCs on failed start or explicit delete
 - fix(kubernetes): create per-conversation PVCs before instance Pods and grant required PVC/CR status permissions
 - fix(rbac): enforce explicit permissions for every REST and WebSocket operation instead of allowing unmapped routes
 - fix(orchestrator): validate collision-free conversation IDs and reserve capacity during concurrent instance starts
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(rbac): make custom roles assignable to API keys and reject mutation of immutable built-in roles
 
 ### Changed
+- Kubernetes and shared E2E TypeScript is now linted and type-checked by `npm run preflight`
 - conversation IDs must be 1-52 lowercase letters, digits, or hyphens and must start and end with an alphanumeric character
 - Kubernetes manifests now invoke `node dist/index.js` explicitly so container arguments work independently of image `CMD`
 - docs: restructure documentation into user/developer/architecture paths
@@ -27,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: slim root README.md to landing page pointing to docs/
 
 ### Added
+- test(kubernetes): add opt-in k3d lifecycle, persistence, migration, and failed-start cleanup E2E coverage
 - feat(k8s): orchestrator Deployment/Service/Config-Secret/RBAC, sticky Traefik Ingress, ServiceMonitor, and per-conversation workspace PVC
 - feat(operator): time-based quota refill (per-model windows), load-aware candidate/node scoring, migration + quota-model metrics, `/metrics` endpoint, convergence coverage
 - feat(operator): auto-provision per-conversation PVCs on instance appear with GC on delete (`--pvc-storage`, `Stopped` phase preserves volumes across stop/restart)

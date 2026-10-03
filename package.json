@@ -20,17 +20,19 @@
     "start": "node dist/index.js",
     "prepublishOnly": "npm run build",
     "clean": "node scripts/clean.js",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
+    "lint": "eslint src/ \"e2e/**/*.ts\"",
+    "lint:fix": "eslint src/ \"e2e/**/*.ts\" --fix",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e:docker": "cross-env E2E_RUNTIME=docker vitest run --config e2e/vitest.config.e2e.ts",
     "test:e2e:direct": "vitest run --config e2e/vitest.config.e2e.ts",
     "test:e2e:runtime": "cross-env E2E_RUNTIME=docker vitest run --config e2e/vitest.config.runtime.ts",
+    "test:e2e:kubernetes": "vitest run --config e2e/vitest.config.kubernetes.ts",
     "test:e2e": "npm run test:e2e:docker",
     "test:e2e:watch": "cross-env E2E_RUNTIME=docker vitest --config e2e/vitest.config.e2e.ts",
-    "preflight": "npm run lint && npm run test && npm run build"
+    "typecheck:e2e": "tsc -p tsconfig.e2e.json",
+    "preflight": "npm run lint && npm run test && npm run build && npm run typecheck:e2e"
   },
   "keywords": [
     "opencode",

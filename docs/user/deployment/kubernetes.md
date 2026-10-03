@@ -179,6 +179,24 @@ Instance probes authenticate with Basic auth (the server requires it) — see
 - No shared conversation state (Redis) yet — orchestrator restarts lose
   in-memory records (PVC data persists).
 
+## Kubernetes E2E Test
+
+With the manifests deployed and the current image imported into the `ao-test`
+k3d cluster, run:
+
+```bash
+npm run test:e2e:kubernetes
+```
+
+Override `K8S_E2E_CONTEXT` or `K8S_E2E_NAMESPACE` when using another cluster.
+The suite creates uniquely named conversations and verifies PVC provisioning,
+readiness, status/route reconciliation, stop/restart session persistence,
+same-node migration, serialized start/delete behavior, deletion garbage
+collection, and failed-start cleanup. It does not require an LLM provider
+credential. The host's current kubeconfig context must match
+`K8S_E2E_CONTEXT` because one rollback scenario instantiates the Kubernetes
+runtime directly.
+
 ## Alternatives
 
 For single-host setups, see [Docker Deployment](docker.md) and [npm Deployment](npm.md).

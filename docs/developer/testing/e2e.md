@@ -6,6 +6,8 @@ End-to-end tests validate complete API workflows against a running server.
 
 - **Docker runtime tests:** Docker daemon running
 - **Direct runtime tests:** OpenCode CLI installed
+- **Kubernetes tests:** deployed AgentOrchestrator manifests in a k3d cluster,
+  with the current kubeconfig context set to that cluster
 
 ## Running
 
@@ -18,6 +20,9 @@ npm run test:e2e:direct
 
 # Runtime-specific tests
 npm run test:e2e:runtime
+
+# Kubernetes lifecycle tests (defaults to context k3d-ao-test)
+npm run test:e2e:kubernetes
 
 # Watch mode
 npm run test:e2e:watch
@@ -35,6 +40,7 @@ npx vitest run --config e2e/vitest.config.e2e.ts e2e/scenarios/lifecycle/lifecyc
 | `e2e/scenarios/workspace/` | File/agent CRUD, path traversal protection | Any (Docker default) |
 | `e2e/scenarios/runtime/direct-runtime.test.ts` | Process spawn, env vars, SIGTERM | Direct only |
 | `e2e/scenarios/runtime/docker-runtime.test.ts` | Container lifecycle, port mapping | Docker only |
+| `e2e/scenarios/kubernetes/` | Live Pod/Service/PVC/CR lifecycle and rollback | Kubernetes only |
 
 ## Pattern
 
@@ -142,6 +148,7 @@ docker exec -it <container-name> sh
 
 ## CI Behavior
 
-- E2E tests run with Docker runtime by default
+- GitHub Actions currently runs unit/preflight and coverage, not E2E suites
 - Direct runtime tests are skipped unless `E2E_RUNTIME=direct` is set
 - Runtime-specific tests use `describe.skipIf` to skip when unavailable
+- Kubernetes tests are opt-in and never run from the Docker E2E config

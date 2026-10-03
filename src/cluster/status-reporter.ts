@@ -72,6 +72,7 @@ export interface TrackInstanceInfo {
   endpoint?: string;
   volumeClaimName?: string;
   model?: { providerID: string; id: string };
+  nodeName?: string;
 }
 
 export interface QuotaErrorReport {
@@ -247,7 +248,7 @@ export class K8sStatusReporter {
         metadata: { name, labels: { 'app.kubernetes.io/part-of': 'agent-orchestrator' } },
         spec: {
           conversationId: info.conversationId,
-          nodeName: currentNodeName(),
+          nodeName: info.nodeName ?? currentNodeName(),
           ...(info.runtimeType ? { runtime: info.runtimeType } : {}),
           endpoint: info.endpoint ?? '',
           ...(info.model ? { model: info.model } : {}),
@@ -318,8 +319,8 @@ export class K8sStatusReporter {
     }
   }
 
-  /** Refresh the reported endpoint after a move (e.g. migration allocated a new port). */
-  async reportMoved(conversationId: string, update: { endpoint: string }): Promise<void> {
+  /** Refresh placement and restore Ready after a restart or move. */
+  async reportMoved(conversationId: string, update: { endpoint: string; nodeName?: string }): Promise<void> {
     if (!this.api) return;
     try {
       const existing = await this.api.getNamespacedCustomObject(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, conversationId);
@@ -327,10 +328,31 @@ export class K8sStatusReporter {
       const spec = (current.spec && typeof current.spec === 'object' ? (current.spec as Record<string, unknown>) : {});
       await this.api.replaceNamespacedCustomObject(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, conversationId, {
         ...current,
-        spec: { ...spec, endpoint: update.endpoint },
-        status: { ...((current.status ?? {}) as Record<string, unknown>), lastHeartbeat: new Date().toISOString() },
+        spec: {
+          ...spec,
+          endpoint: update.endpoint,
+          ...(update.nodeName ? { nodeName: update.nodeName } : {}),
+        },
       });
+      // CRDs expose /status as a subresource, so a main-resource replace does
+      // not persist status fields. Patch it separately after the spec update.
+      await this.patchStatus(conversationId, {
+        phase: 'Ready',
+        reachable: true,
+        consecutiveFailures: 0,
+        lastHeartbeat: new Date().toISOString(),
+      });
+      const tracked = this.tracked.get(conversationId);
+      if (tracked) {
+        tracked.info = { ...tracked.info, ...update };
+        tracked.consecutiveQuotaFailures = 0;
+        tracked.lastPhase = 'Ready';
+      }
     } catch (err) {
+      if (isNotFound(err)) {
+        await this.trackInstance({ conversationId, ...update });
+        return;
+      }
       this.warnOnce(`reportMoved(${conversationId}) failed: ${(err as Error).message}`);
     }
   }
@@ -351,7 +373,7 @@ export class K8sStatusReporter {
     }
   }
 
-  /** Delete the object (404-tolerant). Called on conversation stop/delete. */
+  /** Delete the object (404-tolerant). Called on conversation delete. */
   async untrackInstance(conversationId: string): Promise<void> {
     if (!this.api) return;
     this.tracked.delete(conversationId);
@@ -375,7 +397,25 @@ export class K8sStatusReporter {
   private async adoptExisting(name: string, info: TrackInstanceInfo): Promise<void> {
     try {
       const existing = await this.api!.getNamespacedCustomObject(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, name);
-      const status = existing.body.status ?? {};
+      const current = (existing.body ?? {}) as Record<string, unknown>;
+      const status = (current.status && typeof current.status === 'object'
+        ? current.status as Record<string, unknown>
+        : {});
+      const spec = (current.spec && typeof current.spec === 'object'
+        ? current.spec as Record<string, unknown>
+        : {});
+      await this.api!.replaceNamespacedCustomObject(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, name, {
+        ...current,
+        spec: {
+          ...spec,
+          conversationId: info.conversationId,
+          ...(info.nodeName ? { nodeName: info.nodeName } : {}),
+          ...(info.runtimeType ? { runtime: info.runtimeType } : {}),
+          ...(info.endpoint !== undefined ? { endpoint: info.endpoint } : {}),
+          ...(info.model ? { model: info.model } : {}),
+          volumeClaimName: info.volumeClaimName ?? spec.volumeClaimName ?? conversationVolumeClaimName(name),
+        },
+      });
       this.tracked.set(name, {
         info,
         consecutiveQuotaFailures: typeof status.consecutiveFailures === 'number' ? status.consecutiveFailures : 0,

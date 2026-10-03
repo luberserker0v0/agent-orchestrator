@@ -94,9 +94,9 @@ describe('Ready State (E2E)', () => {
 
   it('shows ready status in conversation list', async () => {
     const res = await fetch(`${server.baseUrl}/api/conversations`);
-    const body = await res.json() as any[];
-    const conv = body.find((c: any) => c.id === 'e2e-ready');
+    const body = await res.json() as Array<{ id: string; ready: boolean }>;
+    const conv = body.find((conversation) => conversation.id === 'e2e-ready');
     expect(conv).toBeDefined();
-    expect(conv.ready).toBe(true);
+    expect(conv?.ready).toBe(true);
   });
 });

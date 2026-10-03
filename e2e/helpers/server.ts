@@ -15,6 +15,7 @@ import { ConversationService } from '../../src/services/conversation-service.js'
 import { FileService } from '../../src/services/file-service.js';
 import { SessionService } from '../../src/services/session-service.js';
 import { MessageService } from '../../src/services/message-service.js';
+import { RoleService } from '../../src/services/role-service.js';
 import { RuntimeRegistry } from '../../src/agent-runtime/registry.js';
 import { RuntimeFactory } from '../../src/agent-runtime/runtime-factory.js';
 import { DirectRuntime } from '../../src/agent-runtime/runtimes/direct.js';
@@ -103,6 +104,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     orchestrator: orchestratorConfig,
     workspace: workspaceConfig,
   };
+  const roleService = new RoleService(join(workspaceDir, 'agentorchestrator.json'), fullConfig.roles);
 
   const httpServer: HttpServer = createHttpServer(
     serverConfig,
@@ -118,6 +120,7 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     fileService,
     sessionService,
     messageService,
+    roleService,
     fullConfig,
   );
 

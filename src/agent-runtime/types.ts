@@ -138,6 +138,8 @@ export interface AgentEndpoint {
   port?: number;
   handle?: InstanceHandle;
   baseUrl?: string;
+  /** Runtime placement identity, such as the Kubernetes node hosting the instance Pod. */
+  nodeName?: string;
 }
 
 // ─── AgentRuntime ──────────────────────────────────────────────────────
@@ -154,5 +156,7 @@ export interface AgentRuntime {
   ): Promise<AgentEndpoint>;
   stop(handle?: InstanceHandle, signal?: string): Promise<void>;
   cleanupOrphans?(): Promise<void>;
+  /** Delete durable runtime-owned data after an explicit conversation DELETE. */
+  deletePersistentData?(id: string): Promise<void>;
   restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<AgentEndpoint>;
 }

@@ -15,7 +15,7 @@ rules:
     verbs: [get, list, watch, create, delete]
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
-    verbs: [get, list, watch, create]
+    verbs: [get, list, watch, create, delete]
   - apiGroups: [agentorchestrator.io]
     resources: [opencodeinstances]
     verbs: [get, list, watch, create, update, patch, delete]

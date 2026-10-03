@@ -20,6 +20,7 @@ describe('ConversationService', () => {
     mockInstanceManager = {
       createInstance: vi.fn(),
       destroyInstance: vi.fn().mockResolvedValue(undefined),
+      deletePersistentData: vi.fn().mockResolvedValue(undefined),
       restartInstance: vi.fn(),
       stopInstance: vi.fn(),
       getInstance: vi.fn(),
@@ -729,7 +730,10 @@ describe('ConversationService', () => {
         'conversation.migrated',
         expect.objectContaining({ nodeName: 'worker-2', resumed: true, sessionId: 'ses_old' }),
       );
-      expect(mockReporter.reportMoved).toHaveBeenCalledWith(testId, { endpoint: 'http://127.0.0.1:41004' });
+      expect(mockReporter.reportMoved).toHaveBeenCalledWith(testId, {
+        endpoint: 'http://127.0.0.1:41004',
+        nodeName: 'worker-2',
+      });
     });
 
     it('should create a fresh session when resume fails', async () => {
@@ -786,11 +790,13 @@ describe('ConversationService', () => {
 
     it('should delete a conversation', async () => {
       mockConversationState.has.mockReturnValue(true);
+      mockConversationState.get.mockReturnValue({ agentType: 'opencode-k8s' });
       mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
 
       await service.delete(testId);
 
       expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith(testId);
+      expect(mockInstanceManager.deletePersistentData).toHaveBeenCalledWith(testId, 'opencode-k8s');
       expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith(testId);
       expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'destroyed');
       expect(mockConversationState.remove).toHaveBeenCalledWith(testId);
@@ -1092,18 +1098,31 @@ describe('ConversationService', () => {
         mockConversationState.has.mockReturnValue(true);
 
         let resolveCreate: (v: unknown) => void;
+        let instanceCreated = false;
         mockInstanceManager.createInstance.mockReturnValue(
-          new Promise(resolve => { resolveCreate = resolve; })
+          new Promise(resolve => {
+            resolveCreate = (value: unknown) => {
+              instanceCreated = true;
+              resolve(value);
+            };
+          })
         );
+        mockInstanceManager.destroyInstance.mockImplementation(async () => {
+          expect(instanceCreated).toBe(true);
+        });
 
         const startPromise = service.start(testId);
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'starting');
 
         const deletePromise = service.delete(testId);
+        expect(mockInstanceManager.destroyInstance).not.toHaveBeenCalled();
 
         resolveCreate!(makeInstance());
-        await Promise.allSettled([startPromise, deletePromise]);
+        const results = await Promise.allSettled([startPromise, deletePromise]);
 
+        expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
+        expect(mockInstanceManager.destroyInstance).toHaveBeenCalledTimes(1);
+        expect(mockInstanceManager.deletePersistentData).toHaveBeenCalledWith(testId, 'opencode-direct');
         expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith(testId);
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'destroyed');
         expect(mockConversationState.remove).toHaveBeenCalledWith(testId);
@@ -1224,10 +1243,11 @@ describe('ConversationService', () => {
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'restarting');
 
         mockConversationState.has.mockReturnValue(true);
-        await service.delete(testId);
+        const deletePromise = service.delete(testId);
 
         resolveRestart!(undefined);
         await expect(restartPromise).resolves.toBeDefined();
+        await expect(deletePromise).resolves.toBeUndefined();
 
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'destroyed');
         expect(mockConversationState.remove).toHaveBeenCalledWith(testId);
@@ -1396,10 +1416,11 @@ describe('ConversationService', () => {
         const startPromise = service.start(testId);
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'starting');
 
-        await service.delete(testId);
+        const deletePromise = service.delete(testId);
 
         resolveCreate!(makeInstance());
         await expect(startPromise).resolves.toBeDefined();
+        await expect(deletePromise).resolves.toBeUndefined();
 
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'destroyed');
         expect(mockConversationState.remove).toHaveBeenCalledWith(testId);
@@ -1429,10 +1450,11 @@ describe('ConversationService', () => {
         });
 
         mockConversationState.has.mockReturnValue(true);
-        await service.delete(testId);
+        const deletePromise = service.delete(testId);
 
         resolveCreate!(makeInstance());
         await expect(restartPromise).resolves.toBeDefined();
+        await expect(deletePromise).resolves.toBeUndefined();
 
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'destroyed');
         expect(mockConversationState.remove).toHaveBeenCalledWith(testId);
@@ -1452,10 +1474,11 @@ describe('ConversationService', () => {
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'restarting');
 
         mockConversationState.has.mockReturnValue(true);
-        await service.delete(testId);
+        const deletePromise = service.delete(testId);
 
         resolveRestart!(undefined);
         await expect(restartPromise).resolves.toBeDefined();
+        await expect(deletePromise).resolves.toBeUndefined();
 
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'destroyed');
         expect(mockConversationState.remove).toHaveBeenCalledWith(testId);
@@ -1476,10 +1499,11 @@ describe('ConversationService', () => {
         const startPromise = service.start(testId);
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'starting');
 
-        await service.stop(testId);
+        const stopPromise = service.stop(testId);
 
         resolveCreate!(makeInstance());
         await expect(startPromise).resolves.toBeDefined();
+        await expect(stopPromise).resolves.toBeUndefined();
 
         expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith(testId);
         expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'stopped');

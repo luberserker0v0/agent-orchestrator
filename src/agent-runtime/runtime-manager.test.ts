@@ -51,6 +51,7 @@ describe('RuntimeManager', () => {
       stop: vi.fn().mockResolvedValue(undefined),
       restart: vi.fn(),
       cleanupOrphans: vi.fn().mockResolvedValue(undefined),
+      deletePersistentData: vi.fn().mockResolvedValue(undefined),
     };
 
     registry = new RuntimeRegistry();
@@ -69,7 +70,13 @@ describe('RuntimeManager', () => {
   describe('start', () => {
     it('creates an instance and registers onExit', async () => {
       const handle = createMockHandle();
-      (mockRuntime.start as ReturnType<typeof vi.fn>).mockResolvedValue({ client: mockClient, port: 40000, handle });
+      (mockRuntime.start as ReturnType<typeof vi.fn>).mockResolvedValue({
+        client: mockClient,
+        port: 40000,
+        handle,
+        baseUrl: 'http://instance:40000',
+        nodeName: 'worker-1',
+      });
 
       const inst = await runtimeManager.start('conv-1', '/workspace/conv-1', { username: 'u', password: 'p' }, { retries: 1, intervalMs: 100, clientTimeoutMs: 500 });
 
@@ -77,6 +84,8 @@ describe('RuntimeManager', () => {
       expect(inst.port).toBe(40000);
       expect(inst.client).toBe(mockClient);
       expect(inst.handle).toBe(handle);
+      expect(inst.baseUrl).toBe('http://instance:40000');
+      expect(inst.nodeName).toBe('worker-1');
       expect(handle.onExit).toHaveBeenCalled();
       expect(runtimeManager.has('conv-1')).toBe(true);
       expect(runtimeManager.size).toBe(1);
@@ -140,13 +149,23 @@ describe('RuntimeManager', () => {
       await runtimeManager.start('conv-restart', '/workspace', { username: 'u', password: 'p' }, { retries: 1, intervalMs: 100, clientTimeoutMs: 500 });
 
       const newHandle = createMockHandle();
-      (mockRuntime.restart as ReturnType<typeof vi.fn>).mockResolvedValue({ client: mockClient, port: 40020, handle: newHandle });
+      (mockRuntime.restart as ReturnType<typeof vi.fn>).mockResolvedValue({
+        client: mockClient,
+        port: 40020,
+        handle: newHandle,
+        baseUrl: 'http://instance:40020',
+        nodeName: 'worker-2',
+      });
 
       await runtimeManager.restartInstance('conv-restart', 'opencode-direct');
 
       expect(mockRuntime.restart).toHaveBeenCalledWith('conv-restart', expect.any(Object));
       expect(runtimeManager.has('conv-restart')).toBe(true);
       expect(newHandle.onExit).toHaveBeenCalled();
+      expect(runtimeManager.getInstance('conv-restart')).toMatchObject({
+        baseUrl: 'http://instance:40020',
+        nodeName: 'worker-2',
+      });
     });
 
     it('throws when instance not found', async () => {
@@ -219,6 +238,13 @@ describe('RuntimeManager', () => {
       expect(runtimeManager.has('conv-stale')).toBe(true);
       // onDestroyed should NOT be called by the stale cleanup
       expect(onDestroyed).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deletePersistentData', () => {
+    it('delegates to the selected runtime', async () => {
+      await runtimeManager.deletePersistentData('conv-delete', 'opencode-direct');
+      expect(mockRuntime.deletePersistentData).toHaveBeenCalledWith('conv-delete');
     });
   });
 

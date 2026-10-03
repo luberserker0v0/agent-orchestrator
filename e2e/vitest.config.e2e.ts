@@ -8,6 +8,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['e2e/**/*.test.ts'],
+    exclude: ['e2e/scenarios/kubernetes/**/*.test.ts'],
     testTimeout: isDocker ? 120_000 : 60_000,
     hookTimeout: isDocker ? 60_000 : 30_000,
     fileParallelism: false,

@@ -26,7 +26,7 @@ interface FakePods {
   createdPods: Array<{ namespace: string; body: Record<string, unknown> }>;
   createdServices: Array<{ namespace: string; body: Record<string, unknown> }>;
   deleted: string[];
-  readImpl: (namespace: string, name: string) => Promise<{ phase?: string; ready?: boolean }>;
+  readImpl: (namespace: string, name: string) => Promise<{ phase?: string; ready?: boolean; nodeName?: string }>;
 }
 
 function createFakePods(): FakePods {
@@ -36,7 +36,7 @@ function createFakePods(): FakePods {
     createdPods: [],
     createdServices: [],
     deleted: [],
-    readImpl: async () => ({ phase: 'Running', ready: true }),
+    readImpl: async () => ({ phase: 'Running', ready: true, nodeName: 'worker-1' }),
     api: null as unknown as InstancePodsApi,
   };
   const notFound = (): Error => {
@@ -54,6 +54,12 @@ function createFakePods(): FakePods {
     createPersistentVolumeClaim: vi.fn(async (namespace: string, body: object) => {
       fake.createdPVCs.push({ namespace, body: body as Record<string, unknown> });
       return {};
+    }),
+    deletePersistentVolumeClaim: vi.fn(async (namespace: string, name: string) => {
+      fake.deleted.push(`pvc/${namespace}/${name}`);
+      fake.createdPVCs = fake.createdPVCs.filter((pvc) =>
+        pvc.namespace !== namespace || (pvc.body.metadata as Record<string, unknown>).name !== name,
+      );
     }),
     createPod: vi.fn(async (namespace: string, body: object) => {
       fake.createdPods.push({ namespace, body: body as Record<string, unknown> });
@@ -144,6 +150,7 @@ describe('KubernetesRuntime', () => {
     expect(container.env).toContainEqual({ name: 'XDG_DATA_HOME', value: '/data/conversations/conv-1/session' });
     expect(container.workingDir).toBe('/data/conversations/conv-1/workspace');
     expect(result.baseUrl).toBe(`http://opencode-conv-1.ao-instances.svc.cluster.local:${result.port}`);
+    expect(result.nodeName).toBe('worker-1');
     expect(result.handle).toBeDefined();
     expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/global/health'), expect.anything());
   });
@@ -211,6 +218,46 @@ describe('KubernetesRuntime', () => {
 
     await expect(rt.start('ct', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH)).rejects.toThrow('not Ready in time');
     expect(await pool.allocate()).toBe(40000);
+    expect(fake.createdPVCs).toHaveLength(0);
+    expect(fake.deleted).toContain('pvc/ao-instances/conv-ct');
+  });
+
+  it('retains a pre-existing PVC when startup fails', async () => {
+    const fake = createFakePods();
+    fake.createdPVCs.push({
+      namespace: 'ao-instances',
+      body: { metadata: { name: 'conv-existing' } },
+    });
+    fake.readImpl = async () => ({ phase: 'Pending', ready: false });
+    const rt = new KubernetesRuntime(
+      createPortPool(),
+      { image: 'img', podReadyTimeoutMs: 50 },
+      fake.api,
+    );
+
+    await expect(rt.start(
+      'existing',
+      '/tmp/ws',
+      { username: 'u', password: 'p' },
+      HEALTH,
+    )).rejects.toThrow('not Ready in time');
+
+    expect(fake.createdPVCs).toHaveLength(1);
+    expect(fake.deleted).not.toContain('pvc/ao-instances/conv-existing');
+  });
+
+  it('deletes persistent data explicitly', async () => {
+    const fake = createFakePods();
+    fake.createdPVCs.push({
+      namespace: 'ao-instances',
+      body: { metadata: { name: 'conv-delete-me' } },
+    });
+    const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
+
+    await rt.deletePersistentData('delete-me');
+
+    expect(fake.createdPVCs).toHaveLength(0);
+    expect(fake.deleted).toContain('pvc/ao-instances/conv-delete-me');
   });
 
   it('restart deletes and recreates Pod and Service with a new port', async () => {

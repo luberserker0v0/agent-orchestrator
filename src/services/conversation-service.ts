@@ -45,6 +45,8 @@ export interface MigrateResult extends StartResult {
 }
 
 export class ConversationService {
+  private readonly lifecycleTails = new Map<string, Promise<void>>();
+
   constructor(
     private instanceManager: InstanceManager,
     private conversationState: ConversationState,
@@ -107,7 +109,27 @@ export class ConversationService {
     return this.conversationState.getRecentEvents(id, limit);
   }
 
-  async start(id: string): Promise<StartResult> {
+  start(id: string): Promise<StartResult> {
+    return this.runLifecycle(id, () => this.startUnlocked(id));
+  }
+
+  stop(id: string): Promise<void> {
+    return this.runLifecycle(id, () => this.stopUnlocked(id));
+  }
+
+  restart(id: string): Promise<StartResult> {
+    return this.runLifecycle(id, () => this.restartUnlocked(id));
+  }
+
+  migrateInstance(id: string, target: MigrateTarget): Promise<MigrateResult> {
+    return this.runLifecycle(id, () => this.migrateInstanceUnlocked(id, target));
+  }
+
+  delete(id: string): Promise<void> {
+    return this.runLifecycle(id, () => this.deleteUnlocked(id));
+  }
+
+  private async startUnlocked(id: string): Promise<StartResult> {
     const state = this.conversationState.get(id);
     if (!state) {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
@@ -134,10 +156,11 @@ export class ConversationService {
       }
 
       const runtimeType = this.getRuntimeType?.(state.agentType);
-      void this.statusReporter?.trackInstance({
+      await this.statusReporter?.trackInstance({
         conversationId: id,
         ...(runtimeType ? { runtimeType } : {}),
         ...(instance.baseUrl ? { endpoint: instance.baseUrl } : {}),
+        ...(instance.nodeName ? { nodeName: instance.nodeName } : {}),
         volumeClaimName: conversationVolumeClaimName(id),
       });
 
@@ -157,7 +180,7 @@ export class ConversationService {
     }
   }
 
-  async stop(id: string): Promise<void> {
+  private async stopUnlocked(id: string): Promise<void> {
     const state = this.conversationState.get(id);
     if (!state) {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
@@ -173,13 +196,13 @@ export class ConversationService {
       await this.instanceManager.destroyInstance(id);
       this.conversationState.removeRunningInstance(id);
       this.conversationState.transition(id, 'stopped');
-      void this.statusReporter?.reportStopped(id);
+      await this.statusReporter?.reportStopped(id);
     } catch (err) {
       throw err instanceof AppError ? err : new AppError(500, ErrorCodes.INTERNAL_ERROR, (err as Error).message);
     }
   }
 
-  async restart(id: string): Promise<StartResult> {
+  private async restartUnlocked(id: string): Promise<StartResult> {
     const state = this.conversationState.get(id);
     if (!state) {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
@@ -223,6 +246,13 @@ export class ConversationService {
         this.sseBridge.start(id, instance.baseUrl, instance.username, instance.password);
       }
 
+      if (instance.baseUrl) {
+        await this.statusReporter?.reportMoved(id, {
+          endpoint: instance.baseUrl,
+          ...(instance.nodeName ? { nodeName: instance.nodeName } : {}),
+        });
+      }
+
       this.ensureSessionInBackground(id, instance.client, state.sessionId);
 
       return {
@@ -245,7 +275,7 @@ export class ConversationService {
    * on the target node with the same PVC, and the previous session is resumed
    * (verified) or recreated. The node override is always cleared afterwards.
    */
-  async migrateInstance(id: string, target: MigrateTarget): Promise<MigrateResult> {
+  private async migrateInstanceUnlocked(id: string, target: MigrateTarget): Promise<MigrateResult> {
     const state = this.conversationState.get(id);
     if (!state) {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
@@ -301,7 +331,10 @@ export class ConversationService {
         sessionId,
       });
       if (instance.baseUrl) {
-        void this.statusReporter?.reportMoved(id, { endpoint: instance.baseUrl });
+        await this.statusReporter?.reportMoved(id, {
+          endpoint: instance.baseUrl,
+          nodeName: instance.nodeName ?? target.nodeName,
+        });
       }
 
       return {
@@ -322,15 +355,19 @@ export class ConversationService {
     }
   }
 
-  async delete(id: string): Promise<void> {
+  private async deleteUnlocked(id: string): Promise<void> {
     if (!this.conversationState.has(id)) {
       throw new AppError(404, ErrorCodes.CONVERSATION_NOT_FOUND, 'Conversation not found');
     }
+    const agentType = this.conversationState.get(id)?.agentType;
 
     const hasInstance = this.instanceManager.getInstance(id) !== undefined;
     logger.info(`[${id}] delete: instance exists in manager=${hasInstance}`);
     this.sseBridge?.stop(id);
     await this.instanceManager.destroyInstance(id).catch(() => {});
+    await this.instanceManager.deletePersistentData?.(id, agentType).catch((err: unknown) => {
+      logger.warn(`Failed to remove persistent runtime data for ${id}:`, err);
+    });
     logger.debug(`[${id}] delete: destroyInstance returned, attempting workspace cleanup`);
     try {
       await this.workspaceFactory.destroy(id);
@@ -340,7 +377,28 @@ export class ConversationService {
     }
     this.conversationState.transition(id, 'destroyed');
     this.conversationState.remove(id);
-    void this.statusReporter?.untrackInstance(id);
+    await this.statusReporter?.untrackInstance(id);
+  }
+
+  /** Serialize lifecycle mutations for one conversation without blocking others. */
+  private async runLifecycle<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.lifecycleTails.get(id);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = (previous ?? Promise.resolve()).then(() => gate);
+    this.lifecycleTails.set(id, tail);
+
+    if (previous) await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.lifecycleTails.get(id) === tail) {
+        this.lifecycleTails.delete(id);
+      }
+    }
   }
 
   private toConversationData(state: NonNullable<ReturnType<ConversationState['get']>>): ConversationData {
