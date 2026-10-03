@@ -66,7 +66,8 @@ export class SkillService {
       totalUncompressedSize += entry.header.size;
     }
 
-    await this.workspaceFactory.assertQuota(id, totalUncompressedSize);
+    const existingSize = existsSync(destPath) ? getDirSize(destPath) : 0;
+    await this.workspaceFactory.assertQuota(id, Math.max(0, totalUncompressedSize - existingSize));
 
     mkdirSync(destPath, { recursive: true });
     for (const entry of entries) {
@@ -108,7 +109,8 @@ export class SkillService {
     }
 
     const dirSize = getDirSize(resolvedSource);
-    await this.workspaceFactory.assertQuota(id, dirSize);
+    const existingSize = existsSync(destPath) ? getDirSize(destPath) : 0;
+    await this.workspaceFactory.assertQuota(id, Math.max(0, dirSize - existingSize));
 
     mkdirSync(destPath, { recursive: true });
     cpSync(resolvedSource, destPath, { recursive: true, force: true });

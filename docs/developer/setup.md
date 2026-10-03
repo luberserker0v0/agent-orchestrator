@@ -76,6 +76,9 @@ npm run test:e2e:direct
 # Runtime-specific tests
 npm run test:e2e:runtime
 
+# Kubernetes lifecycle tests (requires a deployed k3d cluster)
+npm run test:e2e:kubernetes
+
 # Watch mode
 npm run test:e2e:watch
 ```

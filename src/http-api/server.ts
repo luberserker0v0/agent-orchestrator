@@ -121,27 +121,56 @@ export function createHttpServer(
     });
   }
 
-  // All mutating routes (non-GET, non-public) require appropriate permission
+  // Every authenticated API operation must declare its permission. Keeping this
+  // list exhaustive makes authorization fail closed when a new route is added.
   const ROUTE_PERMISSIONS: Array<{ method: string; pattern: RegExp; permission: string }> = [
+    { method: 'GET', pattern: /^\/api\/runtimes$/, permission: 'runtime:list' },
+    { method: 'GET', pattern: /^\/api\/roles(?:\/[^/]+)?$/, permission: 'role:read' },
     { method: 'POST', pattern: /^\/api\/conversations$/, permission: 'conversation:start' },
+    { method: 'GET', pattern: /^\/api\/conversations$/, permission: 'conversation:list' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+$/, permission: 'conversation:get' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/events$/, permission: 'conversation:events' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/start$/, permission: 'conversation:start' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/stop$/, permission: 'conversation:stop' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/restart$/, permission: 'conversation:restart' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/migrate$/, permission: 'conversation:migrate' },
     { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+$/, permission: 'conversation:delete' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/config$/, permission: 'config:get' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/config$/, permission: 'config:write' },
+    { method: 'PATCH', pattern: /^\/api\/conversations\/[^/]+\/config$/, permission: 'config:write' },
     { method: 'PUT', pattern: /^\/api\/conversations\/[^/]+\/agents$/, permission: 'agent:write' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/agents$/, permission: 'agent:list' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+$/, permission: 'agent:get' },
     { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+$/, permission: 'agent:delete' },
+    { method: 'PUT', pattern: /^\/api\/conversations\/[^/]+\/agent\/config$/, permission: 'agent:write' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/agent\/config$/, permission: 'agent:get' },
+    { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/agent\/config$/, permission: 'agent:delete' },
     { method: 'PUT', pattern: /^\/api\/conversations\/[^/]+\/files$/, permission: 'file:write' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/files\/read$/, permission: 'file:read' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/files\/delete$/, permission: 'file:delete' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/files\/copy$/, permission: 'file:copy' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/files\/list$/, permission: 'file:list' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/sessions$/, permission: 'session:create' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/sessions$/, permission: 'session:list' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/sessions\/[^/]+$/, permission: 'session:get' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/sessions\/[^/]+\/children$/, permission: 'session:children' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/sessions\/[^/]+\/messages$/, permission: 'message:history' },
     { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/sessions\/[^/]+$/, permission: 'session:delete' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/sessions\/[^/]+\/fork$/, permission: 'session:fork' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/sessions\/abort$/, permission: 'session:abort' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/providers$/, permission: 'provider:list' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/message$/, permission: 'message:send' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/skills\/import$/, permission: 'skill:import' },
     { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/skills\/upload$/, permission: 'skill:import' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/skills$/, permission: 'skill:list' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/skills\/[^/]+$/, permission: 'skill:get' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/skills\/[^/]+\/info$/, permission: 'skill:info' },
     { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/skills\/[^/]+$/, permission: 'skill:delete' },
+    { method: 'POST', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+\/skills\/(?:import|upload)$/, permission: 'skill:import' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+\/skills$/, permission: 'skill:list' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+\/skills\/[^/]+$/, permission: 'skill:get' },
+    { method: 'GET', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+\/skills\/[^/]+\/info$/, permission: 'skill:info' },
+    { method: 'DELETE', pattern: /^\/api\/conversations\/[^/]+\/agents\/[^/]+\/skills\/[^/]+$/, permission: 'skill:delete' },
     { method: 'POST', pattern: /^\/api\/roles$/, permission: 'role:write' },
     { method: 'PUT', pattern: /^\/api\/roles\/[^/]+$/, permission: 'role:write' },
     { method: 'DELETE', pattern: /^\/api\/roles\/[^/]+$/, permission: 'role:write' },
@@ -149,14 +178,14 @@ export function createHttpServer(
 
   if (rbacEnabled) {
     app.use((req, res, next) => {
-      if (req.method === 'GET' || PUBLIC_PATHS.includes(req.path)) return next();
+      if (PUBLIC_PATHS.includes(req.path) || req.path === '/api/auth/role') return next();
       const role = req.apiKeyRole;
       if (!role) {
         res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
         return;
       }
       const match = ROUTE_PERMISSIONS.find(r => r.method === req.method && r.pattern.test(req.path));
-      if (match && !roleService.hasPermission(role, match.permission)) {
+      if (!match || !roleService.hasPermission(role, match.permission)) {
         res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
         return;
       }

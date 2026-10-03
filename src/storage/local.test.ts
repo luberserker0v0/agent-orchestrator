@@ -211,14 +211,13 @@ describe('LocalStorage', () => {
   });
 
   describe('cleanupOrphans', () => {
-    it('removes all entries in base path', async () => {
+    it('preserves workspaces and removes only temporary entries', async () => {
       await mkdir(join(tmpDir, 'orphan-1'), { recursive: true });
-      await mkdir(join(tmpDir, 'orphan-2'), { recursive: true });
+      await mkdir(join(tmpDir, '.tmp-interrupted'), { recursive: true });
       await storage.cleanupOrphans();
-      // All entries should be removed
       const entries = await readdir(tmpDir);
-      // tmpDir itself may have other test dirs, but ours should be gone
-      expect(entries.filter(e => e.startsWith('orphan-'))).toEqual([]);
+      expect(entries).toContain('orphan-1');
+      expect(entries).not.toContain('.tmp-interrupted');
     });
 
     it('does nothing if basePath does not exist', async () => {

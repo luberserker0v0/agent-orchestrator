@@ -26,7 +26,8 @@ spec:
         - name: orchestrator
           # CD publishes branch/semver tags (e.g. :main, :1.2.3) — there is no :latest tag.
           image: luberserker/agent-orchestrator:main
-          args: ["node", "dist/index.js", "--config", "/app/config/agentorchestrator.json"]
+          command: ["node", "dist/index.js"]
+          args: ["--config", "/app/config/agentorchestrator.json"]
           ports:
             - name: http
               containerPort: 8080

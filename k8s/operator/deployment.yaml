@@ -25,6 +25,7 @@ spec:
           # Must match an orchestrator image tag containing the operator CLI.
           # CD publishes branch/semver tags (e.g. :main, :1.2.3) — there is no :latest tag.
           image: luberserker/agent-orchestrator:main
+          command: ["node", "dist/index.js"]
           args: ["operator", "--namespace", "ao-instances", "--interval-ms", "15000"]
           resources:
             requests:

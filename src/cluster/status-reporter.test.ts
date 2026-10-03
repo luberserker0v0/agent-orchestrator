@@ -139,10 +139,12 @@ describe('K8sStatusReporter', () => {
       endpoint: 'http://x:3000',
       volumeClaimName: 'conv-c1',
       model: { providerID: 'anthropic', id: 'm' },
+      nodeName: 'worker-1',
     });
     const created = api.calls.create[0][0] as { spec: Record<string, unknown> };
     expect(created.spec.conversationId).toBe('c1');
     expect(created.spec.volumeClaimName).toBe('conv-c1');
+    expect(created.spec.nodeName).toBe('worker-1');
     const patched = api.calls.replaceStatus[0][1] as { status: Record<string, unknown> };
     expect(patched.status.phase).toBe('Ready');
     expect(reporter.trackedCount()).toBe(1);
@@ -211,20 +213,27 @@ describe('K8sStatusReporter', () => {
       endpoint: 'http://old:30000',
       volumeClaimName: 'conv-c1',
     });
-    await reporter.reportMoved('c1', { endpoint: 'http://new:31000' });
+    await reporter.reportMoved('c1', { endpoint: 'http://new:31000', nodeName: 'worker-2' });
     const replaced = api.calls.replace.at(-1)![1] as {
       spec: Record<string, unknown>;
       status: Record<string, unknown>;
     };
     expect(replaced.spec.endpoint).toBe('http://new:31000');
+    expect(replaced.spec.nodeName).toBe('worker-2');
     expect(replaced.spec.volumeClaimName).toBe('conv-c1');
-    expect(replaced.status.lastHeartbeat).toBeDefined();
+    const status = api.calls.replaceStatus.at(-1)![1] as { status: Record<string, unknown> };
+    expect(status.status.phase).toBe('Ready');
+    expect(status.status.reachable).toBe(true);
+    expect(status.status.consecutiveFailures).toBe(0);
+    expect(status.status.lastHeartbeat).toBeDefined();
     reporter.destroy();
   });
 
-  it('reportMoved tolerates missing objects', async () => {
+  it('reportMoved recreates missing objects', async () => {
     const reporter = enabledReporter(api);
     await reporter.reportMoved('ghost', { endpoint: 'http://x:1' });
+    expect(api.store.has('ghost')).toBe(true);
+    expect(reporter.trackedCount()).toBe(1);
     reporter.destroy();
   });
 
@@ -270,10 +279,14 @@ describe('K8sStatusReporter', () => {
 
   it('adopts existing objects on 409', async () => {
     const reporter = enabledReporter(api);
-    await reporter.trackInstance({ conversationId: 'c1' });
+    await reporter.trackInstance({ conversationId: 'c1', endpoint: 'http://old:1', nodeName: 'worker-1' });
     const reporter2 = enabledReporter(api);
-    await reporter2.trackInstance({ conversationId: 'c1' });
+    await reporter2.trackInstance({ conversationId: 'c1', endpoint: 'http://new:2', nodeName: 'worker-2' });
     expect(reporter2.trackedCount()).toBe(1);
+    const adopted = api.store.get('c1') as { spec: Record<string, unknown>; status: Record<string, unknown> };
+    expect(adopted.spec.endpoint).toBe('http://new:2');
+    expect(adopted.spec.nodeName).toBe('worker-2');
+    expect(adopted.status.phase).toBe('Ready');
     reporter.destroy();
     reporter2.destroy();
   });

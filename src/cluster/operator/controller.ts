@@ -229,6 +229,43 @@ export class PlacementController {
       }
     }
 
+    // Keep established routes aligned with lifecycle changes. A stopped
+    // instance must not remain routable, and a restarted/moved instance must
+    // publish its refreshed endpoint before clients are sent to it.
+    for (const instance of instances) {
+      const route = routeByName.get(instance.name);
+      if (!route) continue;
+      try {
+        if (instance.phase === 'Stopped' && route.phase !== 'Draining') {
+          await this.setRouteStatus(instance.name, {
+            phase: 'Draining',
+            currentInstanceRef: instance.name,
+            ...(instance.endpoint ? { currentEndpoint: instance.endpoint } : {}),
+            conditions: [{
+              type: 'Routable', status: 'False', reason: 'InstanceStopped',
+              lastTransitionTime: new Date().toISOString(),
+            }],
+          });
+        } else if (instance.phase === 'Ready' && (
+          route.phase !== 'Active'
+          || route.currentInstanceRef !== instance.name
+          || route.currentEndpoint !== instance.endpoint
+        )) {
+          await this.setRouteStatus(instance.name, {
+            phase: 'Active',
+            currentInstanceRef: instance.name,
+            ...(instance.endpoint ? { currentEndpoint: instance.endpoint } : {}),
+            conditions: [{
+              type: 'Routable', status: 'True', reason: 'InstanceActive',
+              lastTransitionTime: new Date().toISOString(),
+            }],
+          });
+        }
+      } catch (err) {
+        summary.errors.push(`sync route ${instance.name} failed: ${(err as Error).message}`);
+      }
+    }
+
     for (const route of routes) {
       if (instanceByName.has(route.name)) continue;
       // The instance object is gone only on explicit conversation DELETE

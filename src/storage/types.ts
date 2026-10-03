@@ -14,6 +14,7 @@ export interface StorageBackend {
   writeFile(workspaceId: string, relativePath: string, content: string | Buffer): Promise<void>;
   listEntries(workspaceId: string, relativePath?: string): Promise<string[]>;
   deleteEntry(workspaceId: string, relativePath: string): Promise<void>;
+  getEntrySize(workspaceId: string, relativePath: string): Promise<number>;
 
   getWorkspaceSize(workspaceId: string): Promise<number>;
   cleanupOrphans(): Promise<void>;

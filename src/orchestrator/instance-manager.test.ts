@@ -661,6 +661,44 @@ describe('InstanceManager', () => {
   });
 
   describe('maxInstances strict enforcement', () => {
+    it('reserves capacity while an instance is still starting', async () => {
+      const strictConfig: OrchestratorConfig = {
+        ...defaultOrchestratorConfig,
+        maxInstances: 1,
+      };
+      const strictRM = new RuntimeManager(portPool, runtimeRegistry, 'opencode-direct');
+      const strictManager = new InstanceManager(strictConfig, workspaceFactory, strictRM);
+      let finishStart!: (value: Awaited<ReturnType<AgentRuntime['start']>>) => void;
+      mockSpawnFn.mockReturnValue(new Promise((resolve) => { finishStart = resolve; }));
+
+      const first = strictManager.createInstance('conv-pending-one');
+      await vi.waitFor(() => expect(mockSpawnFn).toHaveBeenCalledTimes(1));
+
+      await expect(strictManager.createInstance('conv-pending-two')).rejects.toThrow(
+        'Maximum instance capacity is reserved',
+      );
+      expect(strictRM.size).toBe(0);
+
+      finishStart({ client: mockClient, port: allocPorts(1)[0], handle: createMockHandle() });
+      await first;
+      expect(strictRM.size).toBe(1);
+      strictManager.destroy();
+    });
+
+    it('rejects a duplicate id while its first start is pending', async () => {
+      let finishStart!: (value: Awaited<ReturnType<AgentRuntime['start']>>) => void;
+      mockSpawnFn.mockReturnValue(new Promise((resolve) => { finishStart = resolve; }));
+
+      const first = instanceManager.createInstance('conv-pending-dup');
+      await vi.waitFor(() => expect(mockSpawnFn).toHaveBeenCalledTimes(1));
+      await expect(instanceManager.createInstance('conv-pending-dup')).rejects.toThrow(
+        'Instance already exists',
+      );
+
+      finishStart({ client: mockClient, port: allocPorts(1)[0], handle: createMockHandle() });
+      await first;
+    });
+
     it('evicts LRU when maxInstances is reached', async () => {
       const strictConfig: OrchestratorConfig = {
         ...defaultOrchestratorConfig,

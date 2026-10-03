@@ -15,6 +15,7 @@ export interface PodStatusView {
   ready?: boolean;
   podIP?: string;
   message?: string;
+  nodeName?: string;
 }
 
 /** Opt-in node placement for runtimes (migration targets). */
@@ -25,6 +26,9 @@ export interface NodePlaceable {
 
 /** Narrow pod/service surface used by the runtime (structurally compatible). */
 export interface InstancePodsApi {
+  readPersistentVolumeClaim(namespace: string, name: string): Promise<void>;
+  createPersistentVolumeClaim(namespace: string, body: object): Promise<unknown>;
+  deletePersistentVolumeClaim(namespace: string, name: string): Promise<void>;
   createPod(namespace: string, body: object): Promise<unknown>;
   readPod(namespace: string, name: string): Promise<PodStatusView>;
   deletePod(namespace: string, name: string, opts?: { force?: boolean }): Promise<void>;
@@ -36,6 +40,7 @@ export interface InstancePodsApi {
 const PART_OF_LABEL = 'app.kubernetes.io/part-of';
 const PART_OF_VALUE = 'agent-orchestrator';
 const CONVERSATION_LABEL = 'agentorchestrator.io/conversation';
+const INSTANCE_POD_SELECTOR = `${PART_OF_LABEL}=${PART_OF_VALUE},${CONVERSATION_LABEL}`;
 const DEFAULT_NAMESPACE = 'ao-instances';
 const DEFAULT_POD_READY_TIMEOUT_MS = 180000;
 const EXIT_POLL_INTERVAL_MS = 2000;
@@ -56,6 +61,10 @@ export function instanceVolumeClaimName(id: string): string {
   return `conv-${sanitizeK8sName(id)}`;
 }
 
+export function instancePodLabelSelector(): string {
+  return INSTANCE_POD_SELECTOR;
+}
+
 function httpStatusOf(err: unknown): number | undefined {
   const e = err as {
     statusCode?: unknown;
@@ -71,6 +80,10 @@ function httpStatusOf(err: unknown): number | undefined {
 
 function isNotFound(err: unknown): boolean {
   return httpStatusOf(err) === 404;
+}
+
+function isConflict(err: unknown): boolean {
+  return httpStatusOf(err) === 409;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -304,7 +317,9 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     const baseUrl = `http://${this.config.instanceHost ?? `${serviceName}.${namespace}.svc.cluster.local`}:${port}`;
     const client = new OpenCodeAgentClient(baseUrl, auth.username, auth.password);
 
+    let createdPVC = false;
     try {
+      createdPVC = await this.ensurePersistentVolumeClaim(namespace, id);
       logger.info(`Creating OpenCode instance Pod ${podName} on port ${port} (image: ${this.config.image})`);
       await this.api().createService(namespace, {
         apiVersion: 'v1',
@@ -321,13 +336,19 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       });
       await this.api().createPod(namespace, this.podBody(id, podName, port, mountRoot, sessionEnv, auth));
 
-      await this.waitForPodReady(namespace, podName);
+      const readyPod = await this.waitForPodReady(namespace, podName);
       await waitForHealthy(id, baseUrl, auth, healthCheckConfig);
 
       const handle = new K8sPodHandle(this.api(), namespace, podName, serviceName);
       this.instanceState.set(id, { podName, serviceName, port, auth });
-      return { client, port, handle, baseUrl };
+      return { client, port, handle, baseUrl, nodeName: readyPod.nodeName };
     } catch (err) {
+      await deletePodAndWait(this.api(), namespace, podName).catch(() => {});
+      await this.deleteIgnoringNotFound(() => this.api().deleteService(namespace, serviceName)).catch(() => {});
+      if (createdPVC) {
+        await this.deleteIgnoringNotFound(() =>
+          this.api().deletePersistentVolumeClaim(namespace, instanceVolumeClaimName(id))).catch(() => {});
+      }
       this.portPool.release(port);
       throw err;
     }
@@ -361,7 +382,9 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     const baseUrl = `http://${this.config.instanceHost ?? `${state.serviceName}.${namespace}.svc.cluster.local`}:${port}`;
     const client = new OpenCodeAgentClient(baseUrl, state.auth.username, state.auth.password);
 
+    let createdPVC = false;
     try {
+      createdPVC = await this.ensurePersistentVolumeClaim(namespace, id);
       await api.createService(namespace, {
         apiVersion: 'v1',
         kind: 'Service',
@@ -377,13 +400,19 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       });
       await api.createPod(namespace, this.podBody(id, state.podName, port, mountRoot, sessionEnv, state.auth));
 
-      await this.waitForPodReady(namespace, state.podName);
+      const readyPod = await this.waitForPodReady(namespace, state.podName);
       await waitForHealthy(id, baseUrl, state.auth, healthCheckConfig);
 
       const handle = new K8sPodHandle(api, namespace, state.podName, state.serviceName);
       this.instanceState.set(id, { podName: state.podName, serviceName: state.serviceName, port, auth: state.auth });
-      return { client, port, handle, baseUrl };
+      return { client, port, handle, baseUrl, nodeName: readyPod.nodeName };
     } catch (err) {
+      await deletePodAndWait(api, namespace, state.podName).catch(() => {});
+      await this.deleteIgnoringNotFound(() => api.deleteService(namespace, state.serviceName)).catch(() => {});
+      if (createdPVC) {
+        await this.deleteIgnoringNotFound(() =>
+          api.deletePersistentVolumeClaim(namespace, instanceVolumeClaimName(id))).catch(() => {});
+      }
       this.portPool.release(port);
       throw err;
     }
@@ -402,6 +431,42 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       logger.warn(`Removing orphan instance Pod ${podName}`);
       await this.deleteIgnoringNotFound(() => this.api().deletePod(namespace, podName));
       await this.deleteIgnoringNotFound(() => this.api().deleteService(namespace, podName));
+    }
+  }
+
+  async deletePersistentData(id: string): Promise<void> {
+    await this.deleteIgnoringNotFound(() =>
+      this.api().deletePersistentVolumeClaim(this.namespace(), instanceVolumeClaimName(id)));
+  }
+
+  private async ensurePersistentVolumeClaim(namespace: string, id: string): Promise<boolean> {
+    const name = instanceVolumeClaimName(id);
+    try {
+      await this.api().readPersistentVolumeClaim(namespace, name);
+      return false;
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+
+    try {
+      await this.api().createPersistentVolumeClaim(namespace, {
+        apiVersion: 'v1',
+        kind: 'PersistentVolumeClaim',
+        metadata: {
+          name,
+          labels: { [PART_OF_LABEL]: PART_OF_VALUE, [CONVERSATION_LABEL]: sanitizeK8sName(id) },
+        },
+        spec: {
+          accessModes: ['ReadWriteOnce'],
+          resources: { requests: { storage: this.config.pvcStorage ?? '10Gi' } },
+        },
+      });
+      return true;
+    } catch (err) {
+      // The placement controller may win the create race. Both owners render
+      // the same durable claim, so AlreadyExists is a successful outcome.
+      if (!isConflict(err)) throw err;
+      return false;
     }
   }
 
@@ -453,7 +518,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     };
   }
 
-  private async waitForPodReady(namespace: string, podName: string): Promise<void> {
+  private async waitForPodReady(namespace: string, podName: string): Promise<PodStatusView> {
     const deadline = Date.now() + this.podReadyTimeoutMs();
     for (;;) {
       let status: PodStatusView;
@@ -463,7 +528,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
         if (!isNotFound(err)) throw err;
         status = {};
       }
-      if (status.ready) return;
+      if (status.ready) return status;
       if (status.phase === 'Failed' || status.phase === 'Unknown') {
         throw new Error(`Instance Pod ${podName} entered phase ${status.phase}${status.message ? `: ${status.message}` : ''}`);
       }
@@ -486,7 +551,19 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
 }
 
 class LivePodsApi implements InstancePodsApi {
-  constructor(private readonly api: PromiseCoreV1Api, private readonly labelSelector = `${PART_OF_LABEL}=${PART_OF_VALUE}`) {}
+  constructor(private readonly api: PromiseCoreV1Api, private readonly labelSelector = INSTANCE_POD_SELECTOR) {}
+
+  async readPersistentVolumeClaim(namespace: string, name: string): Promise<void> {
+    await this.api.readNamespacedPersistentVolumeClaim(name, namespace);
+  }
+
+  async createPersistentVolumeClaim(namespace: string, body: object): Promise<unknown> {
+    return this.api.createNamespacedPersistentVolumeClaim(namespace, body);
+  }
+
+  async deletePersistentVolumeClaim(namespace: string, name: string): Promise<void> {
+    await this.api.deleteNamespacedPersistentVolumeClaim(name, namespace);
+  }
 
   async createPod(namespace: string, body: object): Promise<unknown> {
     return this.api.createNamespacedPod(namespace, body);
@@ -494,6 +571,7 @@ class LivePodsApi implements InstancePodsApi {
 
   async readPod(namespace: string, name: string): Promise<PodStatusView> {
     const pod = (await this.api.readNamespacedPod(name, namespace)) as {
+      spec?: { nodeName?: string };
       status?: { phase?: string; podIP?: string; message?: string; conditions?: Array<{ type?: string; status?: string }> };
     };
     const status = pod.status ?? {};
@@ -501,6 +579,7 @@ class LivePodsApi implements InstancePodsApi {
       ...(status.phase ? { phase: status.phase } : {}),
       ...(status.podIP ? { podIP: status.podIP } : {}),
       ...(status.message ? { message: status.message } : {}),
+      ...(pod.spec?.nodeName ? { nodeName: pod.spec.nodeName } : {}),
       ready: (status.conditions ?? []).some((c) => c.type === 'Ready' && c.status === 'True'),
     };
   }

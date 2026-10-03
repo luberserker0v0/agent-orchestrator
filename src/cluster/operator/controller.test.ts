@@ -130,6 +130,46 @@ describe('PlacementController', () => {
     expect(stores.routes.has('a')).toBe(true);
   });
 
+  it('marks an existing route non-routable while its instance is stopped', async () => {
+    stores.instances.set('a', instanceBody({ status: { phase: 'Stopped' } }));
+    stores.routes.set('a', routeBody({
+      status: { phase: 'Active', currentInstanceRef: 'a', currentEndpoint: 'http://x:1' },
+    }));
+
+    const { controller } = controllerWith(stores);
+    const summary = await controller.reconcileOnce();
+
+    expect(summary.errors).toEqual([]);
+    expect(stores.routes.get('a')).toMatchObject({
+      status: {
+        phase: 'Draining',
+        conditions: [{ type: 'Routable', status: 'False', reason: 'InstanceStopped' }],
+      },
+    });
+  });
+
+  it('reactivates an existing route with a restarted instance endpoint', async () => {
+    stores.instances.set('a', instanceBody({
+      spec: { endpoint: 'http://x:2' },
+      status: { phase: 'Ready' },
+    }));
+    stores.routes.set('a', routeBody({
+      status: { phase: 'Draining', currentInstanceRef: 'a', currentEndpoint: 'http://x:1' },
+    }));
+
+    const { controller } = controllerWith(stores);
+    const summary = await controller.reconcileOnce();
+
+    expect(summary.errors).toEqual([]);
+    expect(stores.routes.get('a')).toMatchObject({
+      status: {
+        phase: 'Active',
+        currentEndpoint: 'http://x:2',
+        conditions: [{ type: 'Routable', status: 'True', reason: 'InstanceActive' }],
+      },
+    });
+  });
+
   it('deletes routes whose instance is gone', async () => {
     stores.routes.set('ghost', routeBody());
     const { controller } = controllerWith(stores);
@@ -141,8 +181,8 @@ describe('PlacementController', () => {
   it('plans migration for QuotaExhausted instances in dry-run without writing', async () => {
     stores.instances.set('a', instanceBody({ spec: { nodeName: 'n1', model: MODEL }, status: { phase: 'QuotaExhausted' } }));
     stores.instances.set('b', instanceBody({ spec: { nodeName: 'n2', model: MODEL }, status: { phase: 'Ready' } }));
-    stores.routes.set('a', routeBody({ status: { phase: 'Active', currentInstanceRef: 'a' } }));
-    stores.routes.set('b', routeBody({ status: { phase: 'Active', currentInstanceRef: 'b' } }));
+    stores.routes.set('a', routeBody({ status: { phase: 'Active', currentInstanceRef: 'a', currentEndpoint: 'http://x:1' } }));
+    stores.routes.set('b', routeBody({ status: { phase: 'Active', currentInstanceRef: 'b', currentEndpoint: 'http://x:1' } }));
     const { controller, api } = controllerWith(stores);
     const summary = await controller.reconcileOnce();
     expect(summary.migrationsPlanned).toEqual([

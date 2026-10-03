@@ -11,6 +11,9 @@ rules:
   - apiGroups: [agentorchestrator.io]
     resources: [opencodeinstances, conversationroutes]
     verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [agentorchestrator.io]
+    resources: [opencodeinstances/status, conversationroutes/status]
+    verbs: [get, update, patch]
   # Read-only visibility into workloads for target selection and debugging.
   - apiGroups: [""]
     resources: [pods, persistentvolumeclaims]

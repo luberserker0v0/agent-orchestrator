@@ -5,6 +5,7 @@ import {
   sanitizeK8sName,
   instanceObjectName,
   instanceVolumeClaimName,
+  instancePodLabelSelector,
   type InstancePodsApi,
 } from './kubernetes.js';
 
@@ -21,19 +22,21 @@ function createPortPool(start = 40000, end = 40050): PortPool {
 
 interface FakePods {
   api: InstancePodsApi;
+  createdPVCs: Array<{ namespace: string; body: Record<string, unknown> }>;
   createdPods: Array<{ namespace: string; body: Record<string, unknown> }>;
   createdServices: Array<{ namespace: string; body: Record<string, unknown> }>;
   deleted: string[];
-  readImpl: (namespace: string, name: string) => Promise<{ phase?: string; ready?: boolean }>;
+  readImpl: (namespace: string, name: string) => Promise<{ phase?: string; ready?: boolean; nodeName?: string }>;
 }
 
 function createFakePods(): FakePods {
   const deletedPods = new Set<string>();
   const fake: FakePods = {
+    createdPVCs: [],
     createdPods: [],
     createdServices: [],
     deleted: [],
-    readImpl: async () => ({ phase: 'Running', ready: true }),
+    readImpl: async () => ({ phase: 'Running', ready: true, nodeName: 'worker-1' }),
     api: null as unknown as InstancePodsApi,
   };
   const notFound = (): Error => {
@@ -42,6 +45,22 @@ function createFakePods(): FakePods {
     return err;
   };
   fake.api = {
+    readPersistentVolumeClaim: vi.fn(async (namespace: string, name: string) => {
+      const exists = fake.createdPVCs.some((pvc) =>
+        pvc.namespace === namespace && (pvc.body.metadata as Record<string, unknown>).name === name,
+      );
+      if (!exists) throw notFound();
+    }),
+    createPersistentVolumeClaim: vi.fn(async (namespace: string, body: object) => {
+      fake.createdPVCs.push({ namespace, body: body as Record<string, unknown> });
+      return {};
+    }),
+    deletePersistentVolumeClaim: vi.fn(async (namespace: string, name: string) => {
+      fake.deleted.push(`pvc/${namespace}/${name}`);
+      fake.createdPVCs = fake.createdPVCs.filter((pvc) =>
+        pvc.namespace !== namespace || (pvc.body.metadata as Record<string, unknown>).name !== name,
+      );
+    }),
     createPod: vi.fn(async (namespace: string, body: object) => {
       fake.createdPods.push({ namespace, body: body as Record<string, unknown> });
       deletedPods.delete(`${namespace}/${((body as Record<string, unknown>).metadata as Record<string, unknown>).name}`);
@@ -67,6 +86,12 @@ function createFakePods(): FakePods {
 }
 
 const HEALTH = { retries: 2, intervalMs: 1, clientTimeoutMs: 5000 };
+
+it('uses the conversation label to select only managed instance Pods', () => {
+  expect(instancePodLabelSelector()).toBe(
+    'app.kubernetes.io/part-of=agent-orchestrator,agentorchestrator.io/conversation',
+  );
+});
 
 describe('sanitizeK8sName', () => {
   it('lowercases and strips invalid characters', () => {
@@ -111,6 +136,11 @@ describe('KubernetesRuntime', () => {
 
     const result = await rt.start('conv-1', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
 
+    expect(fake.createdPVCs).toHaveLength(1);
+    expect(fake.createdPVCs[0].body).toMatchObject({
+      metadata: { name: 'conv-conv-1' },
+      spec: { accessModes: ['ReadWriteOnce'], resources: { requests: { storage: '10Gi' } } },
+    });
     expect(fake.createdServices).toHaveLength(1);
     expect(fake.createdPods).toHaveLength(1);
     const pod = fake.createdPods[0].body;
@@ -120,6 +150,7 @@ describe('KubernetesRuntime', () => {
     expect(container.env).toContainEqual({ name: 'XDG_DATA_HOME', value: '/data/conversations/conv-1/session' });
     expect(container.workingDir).toBe('/data/conversations/conv-1/workspace');
     expect(result.baseUrl).toBe(`http://opencode-conv-1.ao-instances.svc.cluster.local:${result.port}`);
+    expect(result.nodeName).toBe('worker-1');
     expect(result.handle).toBeDefined();
     expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/global/health'), expect.anything());
   });
@@ -167,15 +198,48 @@ describe('KubernetesRuntime', () => {
     }
   });
 
-  it('throws when Pod enters Failed phase', async () => {
+  it('waits for a failed Pod to disappear before rejecting start', async () => {
     const fake = createFakePods();
-    fake.readImpl = async () => ({ phase: 'Failed', ready: false });
+    let deletionRequested = false;
+    let confirmPodGone!: () => void;
+    const podGone = new Promise<void>((resolve) => {
+      confirmPodGone = resolve;
+    });
+    (fake.api.deletePod as ReturnType<typeof vi.fn>).mockImplementation(async (namespace: string, name: string) => {
+      fake.deleted.push(`pod/${namespace}/${name}`);
+      deletionRequested = true;
+    });
+    (fake.api.readPod as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (!deletionRequested) return { phase: 'Failed', ready: false };
+      await podGone;
+      const err = new Error('gone') as Error & { statusCode: number };
+      err.statusCode = 404;
+      throw err;
+    });
     const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
     mockFetch.mockResolvedValue(makeHealthyFetch());
 
-    await expect(rt.start('cf', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH)).rejects.toThrow(
-      'entered phase Failed',
+    let settled = false;
+    const outcome = rt.start('cf', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH).then(
+      () => {
+        settled = true;
+        return new Error('start unexpectedly resolved');
+      },
+      (err: unknown) => {
+        settled = true;
+        return err as Error;
+      },
     );
+
+    await vi.waitFor(() => {
+      expect(fake.api.deletePod).toHaveBeenCalledWith('ao-instances', 'opencode-cf');
+      expect(fake.api.readPod).toHaveBeenCalledTimes(2);
+    });
+    expect(settled).toBe(false);
+
+    confirmPodGone();
+    const error = await outcome;
+    expect(error.message).toContain('entered phase Failed');
   });
 
   it('throws on Pod ready timeout and releases the port', async () => {
@@ -187,6 +251,46 @@ describe('KubernetesRuntime', () => {
 
     await expect(rt.start('ct', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH)).rejects.toThrow('not Ready in time');
     expect(await pool.allocate()).toBe(40000);
+    expect(fake.createdPVCs).toHaveLength(0);
+    expect(fake.deleted).toContain('pvc/ao-instances/conv-ct');
+  });
+
+  it('retains a pre-existing PVC when startup fails', async () => {
+    const fake = createFakePods();
+    fake.createdPVCs.push({
+      namespace: 'ao-instances',
+      body: { metadata: { name: 'conv-existing' } },
+    });
+    fake.readImpl = async () => ({ phase: 'Pending', ready: false });
+    const rt = new KubernetesRuntime(
+      createPortPool(),
+      { image: 'img', podReadyTimeoutMs: 50 },
+      fake.api,
+    );
+
+    await expect(rt.start(
+      'existing',
+      '/tmp/ws',
+      { username: 'u', password: 'p' },
+      HEALTH,
+    )).rejects.toThrow('not Ready in time');
+
+    expect(fake.createdPVCs).toHaveLength(1);
+    expect(fake.deleted).not.toContain('pvc/ao-instances/conv-existing');
+  });
+
+  it('deletes persistent data explicitly', async () => {
+    const fake = createFakePods();
+    fake.createdPVCs.push({
+      namespace: 'ao-instances',
+      body: { metadata: { name: 'conv-delete-me' } },
+    });
+    const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
+
+    await rt.deletePersistentData('delete-me');
+
+    expect(fake.createdPVCs).toHaveLength(0);
+    expect(fake.deleted).toContain('pvc/ao-instances/conv-delete-me');
   });
 
   it('restart deletes and recreates Pod and Service with a new port', async () => {
@@ -232,6 +336,63 @@ describe('KubernetesRuntime', () => {
 
     expect(fake.api.deletePod).toHaveBeenCalledWith('ao-instances', 'opencode-cw');
     expect(fake.createdPods).toHaveLength(2);
+  });
+
+  it('waits for a failed replacement Pod to disappear before rejecting restart', async () => {
+    const fake = createFakePods();
+    const rt = new KubernetesRuntime(createPortPool(40000, 40001), { image: 'img' }, fake.api);
+    mockFetch.mockResolvedValue(makeHealthyFetch());
+
+    await rt.start('restart-failure', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+    let deleteCalls = 0;
+    let confirmPodGone!: () => void;
+    const podGone = new Promise<void>((resolve) => {
+      confirmPodGone = resolve;
+    });
+    (fake.api.deletePod as ReturnType<typeof vi.fn>).mockImplementation(async (namespace: string, name: string) => {
+      fake.deleted.push(`pod/${namespace}/${name}`);
+      deleteCalls++;
+    });
+    (fake.api.readPod as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (fake.createdPods.length === 1 && deleteCalls === 1) {
+        const err = new Error('gone') as Error & { statusCode: number };
+        err.statusCode = 404;
+        throw err;
+      }
+      if (fake.createdPods.length === 2 && deleteCalls === 1) {
+        return { phase: 'Failed', ready: false };
+      }
+      if (fake.createdPods.length === 2 && deleteCalls === 2) {
+        await podGone;
+        const err = new Error('gone') as Error & { statusCode: number };
+        err.statusCode = 404;
+        throw err;
+      }
+      return { phase: 'Running', ready: true };
+    });
+
+    let settled = false;
+    const outcome = rt.restart('restart-failure', HEALTH).then(
+      () => {
+        settled = true;
+        return new Error('restart unexpectedly resolved');
+      },
+      (err: unknown) => {
+        settled = true;
+        return err as Error;
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(fake.api.deletePod).toHaveBeenCalledTimes(2);
+      expect(fake.api.readPod).toHaveBeenCalledTimes(4);
+    });
+    expect(settled).toBe(false);
+
+    confirmPodGone();
+    const error = await outcome;
+    expect(error.message).toContain('entered phase Failed');
   });
 
   it('stop kills Pod and Service, tolerating missing objects', async () => {
@@ -308,5 +469,29 @@ describe('KubernetesRuntime', () => {
 
     expect(fake.deleted).toContain('pod/ao-instances/opencode-old');
     expect(fake.deleted).toContain('svc/ao-instances/opencode-old');
+  });
+
+  it('reuses an existing conversation PVC', async () => {
+    const fake = createFakePods();
+    fake.createdPVCs.push({ namespace: 'ao-instances', body: { metadata: { name: 'conv-existing' } } });
+    const createPVC = fake.api.createPersistentVolumeClaim as ReturnType<typeof vi.fn>;
+    const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
+    mockFetch.mockResolvedValue(makeHealthyFetch());
+
+    await rt.start('existing', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+    expect(createPVC).not.toHaveBeenCalled();
+  });
+
+  it('labels instance Pods distinctly from orchestrator control-plane Pods', async () => {
+    const fake = createFakePods();
+    const rt = new KubernetesRuntime(createPortPool(), { image: 'img' }, fake.api);
+    mockFetch.mockResolvedValue(makeHealthyFetch());
+
+    await rt.start('label-check', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH);
+
+    const metadata = fake.createdPods[0].body.metadata as { labels: Record<string, string> };
+    expect(metadata.labels['app.kubernetes.io/part-of']).toBe('agent-orchestrator');
+    expect(metadata.labels['agentorchestrator.io/conversation']).toBe('label-check');
   });
 });

@@ -2,7 +2,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseJSONC } from 'jsonc-parser';
 
-export type ApiKeyRole = 'admin' | 'user' | 'observer';
+export type BuiltinApiKeyRole = 'admin' | 'user' | 'observer';
+export type ApiKeyRole = string;
 
 export interface RoleConfig {
   permissions: string[];
@@ -84,6 +85,8 @@ export interface KubernetesRuntimeConfig {
   sessionMode?: 'xdg' | 'sqlite';
   /** Max ms to wait for the Pod to become Ready. Default 180000. */
   podReadyTimeoutMs?: number;
+  /** Storage requested for a per-conversation PVC. Default '10Gi'. */
+  pvcStorage?: string;
   /** Container CPU/memory requests/limits (e.g. `{ requests: { cpu: '500m' } }`). */
   resources?: {
     requests?: { cpu?: string; memory?: string };
@@ -275,6 +278,24 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   if (server.apiKey !== undefined && server.apiKey !== '' && (typeof server.apiKey !== 'string' || server.apiKey.length < 8)) {
     throw new Error(`Config validation failed: server.apiKey must be a string of at least 8 characters, got ${typeof server.apiKey === 'string' ? 'too short' : typeof server.apiKey}`);
   }
+  const roleNamePattern = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+  if (config.roles !== undefined) {
+    if (typeof config.roles !== 'object' || config.roles === null || Array.isArray(config.roles)) {
+      throw new Error('Config validation failed: roles must be an object');
+    }
+    for (const [name, definition] of Object.entries(config.roles)) {
+      if (!roleNamePattern.test(name)) {
+        throw new Error(`Config validation failed: invalid custom role name "${name}"`);
+      }
+      if (name === 'admin' || name === 'user' || name === 'observer') {
+        throw new Error(`Config validation failed: built-in role "${name}" cannot be overridden`);
+      }
+      if (!definition || !Array.isArray(definition.permissions) || definition.permissions.some(p => typeof p !== 'string' || !p)) {
+        throw new Error(`Config validation failed: role "${name}" permissions must be an array of non-empty strings`);
+      }
+    }
+  }
+  const configuredRoleNames = new Set(['admin', 'user', 'observer', ...Object.keys(config.roles ?? {})]);
   if (server.apiKeys !== undefined) {
     if (!Array.isArray(server.apiKeys)) {
       throw new Error('Config validation failed: server.apiKeys must be an array');
@@ -287,8 +308,11 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       if (typeof entry.key !== 'string' || entry.key.length < 8) {
         throw new Error('Config validation failed: each apiKeys entry must have a "key" string of at least 8 characters');
       }
-      if (entry.role !== 'admin' && entry.role !== 'user' && entry.role !== 'observer') {
-        throw new Error(`Config validation failed: apiKeys entry role must be "admin", "user", or "observer", got "${entry.role}"`);
+      if (/^(?:changeme|replace[-_ ]?me)/i.test(entry.key)) {
+        throw new Error('Config validation failed: replace placeholder API keys before starting');
+      }
+      if (typeof entry.role !== 'string' || !configuredRoleNames.has(entry.role)) {
+        throw new Error(`Config validation failed: apiKeys entry references unknown role "${entry.role}"`);
       }
       if (keys.has(entry.key)) {
         throw new Error(`Config validation failed: duplicate apiKey "${entry.key.slice(0, 4)}..."`);

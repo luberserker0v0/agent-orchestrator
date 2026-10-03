@@ -110,11 +110,11 @@ describe('RoleService', () => {
     });
 
     it('cannot modify admin', () => {
-      expect(() => service.update('admin', ['conversation:start'])).toThrow('Cannot modify admin');
+      expect(() => service.update('admin', ['conversation:start'])).toThrow('Cannot modify built-in role');
     });
 
-    it('can modify user role', () => {
-      expect(() => service.update('user', ['conversation:start'])).not.toThrow();
+    it('cannot modify user role', () => {
+      expect(() => service.update('user', ['conversation:start'])).toThrow('Cannot modify built-in role');
     });
   });
 
@@ -137,11 +137,11 @@ describe('RoleService', () => {
     });
 
     it('cannot delete admin', () => {
-      expect(() => service.delete('admin')).toThrow('Cannot delete admin');
+      expect(() => service.delete('admin')).toThrow('Cannot delete built-in role');
     });
 
-    it('can delete user role', () => {
-      expect(() => service.delete('user')).not.toThrow();
+    it('cannot delete user role', () => {
+      expect(() => service.delete('user')).toThrow('Cannot delete built-in role');
     });
   });
 

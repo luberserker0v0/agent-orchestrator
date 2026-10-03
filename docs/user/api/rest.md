@@ -23,6 +23,10 @@ All endpoints are prefixed with `/api`. Authentication is required if `server.ap
 | `DELETE` | `/api/conversations/:id` | Admin | Delete conversation |
 | `GET` | `/api/conversations/:id/events` | Yes | Get events (query: `limit`, max 100) |
 
+Client-supplied conversation IDs must contain 1-52 lowercase letters, digits,
+or hyphens and must start and end with a letter or digit. Invalid IDs return
+`400 INVALID_CONVERSATION_ID` before any workspace or runtime resource is created.
+
 ### Conversation Lifecycle
 
 | Method | Path | Auth | Description |

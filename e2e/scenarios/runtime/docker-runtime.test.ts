@@ -18,13 +18,18 @@ function dockerPs(filter: string): string[] {
   return result.stdout.trim().split('\n').filter(Boolean);
 }
 
-function dockerInspect(name: string): Record<string, unknown> | null {
+interface DockerInspect {
+  NetworkSettings?: { Ports?: Record<string, unknown[]> };
+  Config?: { Env?: string[] };
+}
+
+function dockerInspect(name: string): DockerInspect | null {
   const result = spawnSync('docker', [
     'inspect', name,
   ], { encoding: 'utf-8', timeout: 5000 });
   if (result.status !== 0) return null;
   const parsed = JSON.parse(result.stdout);
-  return Array.isArray(parsed) ? parsed[0] : parsed;
+  return (Array.isArray(parsed) ? parsed[0] : parsed) as DockerInspect;
 }
 
 describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)', () => {
@@ -85,7 +90,7 @@ describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)',
 
     const inspect = dockerInspect('agentorchestrator-e2e-docker-runtime');
     expect(inspect).not.toBeNull();
-    const ports = (inspect as any).NetworkSettings?.Ports ?? {};
+    const ports = inspect?.NetworkSettings?.Ports ?? {};
     const portKey = `${body.port}/tcp`;
     expect(ports[portKey]).toBeDefined();
     expect(ports[portKey].length).toBeGreaterThan(0);
@@ -94,7 +99,7 @@ describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)',
   it('container has auth env vars', async () => {
     const inspect = dockerInspect('agentorchestrator-e2e-docker-runtime');
     expect(inspect).not.toBeNull();
-    const env: string[] = (inspect as any).Config?.Env ?? [];
+    const env = inspect?.Config?.Env ?? [];
     expect(env.some((e: string) => e.startsWith('OPENCODE_SERVER_USERNAME='))).toBe(true);
     expect(env.some((e: string) => e.startsWith('OPENCODE_SERVER_PASSWORD='))).toBe(true);
   });

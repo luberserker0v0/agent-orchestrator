@@ -31,10 +31,13 @@ npm run test:e2e:direct
 # Runtime-specific tests
 npm run test:e2e:runtime
 
+# Kubernetes lifecycle tests against a deployed cluster
+npm run test:e2e:kubernetes
+
 # E2E tests (watch mode)
 npm run test:e2e:watch
 
-# Full preflight (lint + test + build)
+# Full preflight (lint + unit tests + source build + E2E type-check)
 npm run preflight
 ```
 
@@ -66,6 +69,8 @@ e2e/
     runtime/
       direct-runtime.test.ts
       docker-runtime.test.ts
+    kubernetes/
+      lifecycle.test.ts
 ```
 
 ## Test Naming

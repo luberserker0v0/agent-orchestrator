@@ -104,6 +104,15 @@ export class LocalStorage implements StorageBackend {
     await rm(p, { recursive: true, force: true });
   }
 
+  async getEntrySize(workspaceId: string, relativePath: string): Promise<number> {
+    try {
+      return statSync(this.resolvePath(workspaceId, relativePath)).size;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+      throw err;
+    }
+  }
+
   async getWorkspaceSize(workspaceId: string): Promise<number> {
     const p = this.wsPath(workspaceId);
     if (!existsSync(p)) return 0;
@@ -112,7 +121,9 @@ export class LocalStorage implements StorageBackend {
 
   async cleanupOrphans(): Promise<void> {
     if (!existsSync(this.basePath)) return;
-    const entries = readdirSync(this.basePath);
+    // Conversation workspaces are durable. Only remove explicitly marked
+    // temporary artifacts left behind by interrupted atomic operations.
+    const entries = readdirSync(this.basePath).filter(entry => entry.startsWith('.tmp-'));
     for (const entry of entries) {
       const fullPath = join(this.basePath, entry);
       try {

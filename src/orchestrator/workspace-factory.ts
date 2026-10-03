@@ -191,7 +191,8 @@ export class WorkspaceFactory {
     const wsId = sanitizeId(id);
     const sanitized = sanitizeRelativePath(relativePath);
     const size = Buffer.byteLength(content, 'utf-8');
-    await this.assertQuota(wsId, size);
+    const existingSize = await this.storage.getEntrySize(wsId, sanitized);
+    await this.assertQuota(wsId, Math.max(0, size - existingSize));
     await this.storage.writeFile(wsId, sanitized, content);
     logger.info(`File written: ${this.resolveWorkspacePath(id)}/${sanitized}`);
   }

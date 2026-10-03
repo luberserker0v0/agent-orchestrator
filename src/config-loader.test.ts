@@ -164,7 +164,18 @@ describe('validateConfig', () => {
         apiKeys: [{ key: 'valid-key-1234', role: 'superuser' as any }],
       },
     });
-    expect(() => validateConfig(config)).toThrow('must be "admin", "user", or "observer"');
+    expect(() => validateConfig(config)).toThrow('references unknown role "superuser"');
+  });
+
+  it('accepts an API key assigned to a configured custom role', () => {
+    const config = createValidConfig({
+      roles: { deployer: { permissions: ['conversation:start'] } },
+      server: {
+        ...createValidConfig().server,
+        apiKeys: [{ key: 'custom-role-key', role: 'deployer' }],
+      },
+    });
+    expect(() => validateConfig(config)).not.toThrow();
   });
 
   it('rejects duplicate apiKeys', () => {
@@ -464,6 +475,18 @@ describe('validateConfig', () => {
       server: { port: 8080, host: '127.0.0.1', shutdownTimeoutMs: 15000, rbac: { enabled: true } },
     });
     expect(() => validateConfig(config)).toThrow('server.rbac.enabled is true but no API keys configured');
+  });
+
+  it('rejects placeholder API keys', () => {
+    const config = createValidConfig({
+      server: {
+        port: 8080,
+        host: '127.0.0.1',
+        shutdownTimeoutMs: 15000,
+        apiKeys: [{ key: 'CHANGEME-admin-secret', role: 'admin' }],
+      },
+    });
+    expect(() => validateConfig(config)).toThrow('replace placeholder API keys');
   });
 
   it('accepts rbac.enabled: false without API keys', () => {

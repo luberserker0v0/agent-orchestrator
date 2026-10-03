@@ -31,9 +31,9 @@ describe('Conversation Lifecycle (E2E)', () => {
   it('lists conversations', async () => {
     const res = await fetch(`${server.baseUrl}/api/conversations`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as Array<{ id: string }>;
     expect(Array.isArray(body)).toBe(true);
-    expect(body.some((c: any) => c.id === 'e2e-lifecycle')).toBe(true);
+    expect(body.some((conversation) => conversation.id === 'e2e-lifecycle')).toBe(true);
   });
 
   it('gets conversation details', async () => {

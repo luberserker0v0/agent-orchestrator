@@ -19,7 +19,7 @@ k8s/
 │   └── deployment.yaml             # controller, 1 replica (leader election pending)
 ├── orchestrator/
 │   ├── serviceaccount.yaml         # orchestrator identity
-│   ├── role.yaml                   # instance Pods/Services, status CRs, PVC reads
+│   ├── role.yaml                   # instance Pods/Services, status CRs, PVC ensure
 │   ├── rolebinding.yaml
 │   ├── secret.yaml                 # agentorchestrator.json (contains API keys — replace placeholders)
 │   ├── workspace-pvc.yaml          # orchestrator's own workspace (20Gi, RWO)
@@ -101,7 +101,8 @@ and enable status reporting so the controller can place and migrate:
         "config": {
           "image": "ghcr.io/anomalyco/opencode:latest",
           "namespace": "ao-instances",
-          "sessionMode": "xdg"
+          "sessionMode": "xdg",
+          "pvcStorage": "10Gi"
           // "instanceHost": "127.0.0.1", // + kubectl port-forward when orchestrating from outside
           // "nodeName": "worker-2",       // pin scheduling (migration target)
         }
@@ -130,12 +131,14 @@ and enable status reporting so the controller can place and migrate:
 
 One RWO PVC per conversation (`conv-<id>`, see `k8s/volume/conversation-pvc-template.yaml`).
 The instance Pod mounts it at `/data/conversations/<id>` (`workspace/` + `session/`).
+The runtime ensures the claim exists before creating the Pod; the controller performs
+the same operation idempotently while reconciling status objects.
 Retention: deleted **only** on explicit conversation DELETE — never on migration,
 eviction, or idle timeout.
 
 ## Placement Controller
 
-Runs `aor operator` (image `luberserker/agent-orchestrator:latest`):
+Runs `aor operator` (image `luberserker/agent-orchestrator:main` or a release tag):
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -149,7 +152,7 @@ Runs `aor operator` (image `luberserker/agent-orchestrator:latest`):
 | `--metrics-port` | `0` (disabled) | Prometheus scrape endpoint |
 | `--pvc-storage` | `10Gi` | Storage request for auto-provisioned per-conversation PVCs |
 
-The controller provisions `conv-<id>` PVCs automatically when instances appear
+The controller ensures `conv-<id>` PVCs exist when instances appear
 (dynamic provisioning via the default `StorageClass`) and deletes route + volume
 when the instance object disappears (conversation DELETE; `stop` keeps a `Stopped`
 object so its volume survives for restart).
@@ -175,6 +178,57 @@ Instance probes authenticate with Basic auth (the server requires it) — see
   quota migration currently executes within one orchestrator.
 - No shared conversation state (Redis) yet — orchestrator restarts lose
   in-memory records (PVC data persists).
+
+## Kubernetes E2E Test
+
+### Existing Cluster Lifecycle Suite
+
+With the manifests deployed and the current image imported into the `ao-test`
+k3d cluster, run:
+
+```bash
+npm run test:e2e:kubernetes
+```
+
+Override `K8S_E2E_CONTEXT` or `K8S_E2E_NAMESPACE` when using another cluster.
+The suite creates uniquely named conversations and verifies PVC provisioning,
+readiness, status/route reconciliation, stop/restart session persistence,
+same-node migration, serialized start/delete behavior, deletion garbage
+collection, and failed-start cleanup. It does not require an LLM provider
+credential. The host's current kubeconfig context must match
+`K8S_E2E_CONTEXT` because one rollback scenario instantiates the Kubernetes
+runtime directly.
+
+### Isolated Cross-Node Migration Suite
+
+To exercise execute-mode placement and migration without preparing or changing
+an existing cluster, run:
+
+```bash
+npm run test:e2e:k3d
+```
+
+Docker, k3d, and kubectl must be installed and available on `PATH`. The runner
+creates a disposable cluster with one server and two worker nodes, builds and
+imports the current AgentOrchestrator and OpenCode images, generates its own API
+key, and uses an isolated kubeconfig without switching the host's current
+context.
+
+A dedicated Docker volume is mounted at `/shared` on every k3d node. Static
+host-path PVs backed by that volume let the suite verify that one RWO PVC retains
+the workspace and session data while its instance Pod moves between workers.
+The suite covers successful migration and session resume, route/history/event
+convergence with no duplicate migration, failed placement on a synthetic node,
+PVC retention and retry quarantine, and manual recovery on a healthy worker.
+
+Resources are removed after the run. Set `K3D_E2E_REPEAT` to a positive integer
+for a repeated soak run, or set `K3D_E2E_KEEP=1` to keep the generated cluster,
+shared volume, images, and temporary files for diagnosis:
+
+```bash
+K3D_E2E_REPEAT=10 npm run test:e2e:k3d
+K3D_E2E_KEEP=1 npm run test:e2e:k3d
+```
 
 ## Alternatives
 

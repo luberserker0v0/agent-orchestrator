@@ -16,6 +16,7 @@ export interface InstanceInfo {
   baseUrl?: string;
   username?: string;
   password?: string;
+  nodeName?: string;
 }
 
 export class RuntimeManager {
@@ -50,8 +51,9 @@ export class RuntimeManager {
     let port: number | undefined;
     let handle: InstanceHandle | undefined;
     let baseUrl: string | undefined;
+    let nodeName: string | undefined;
     try {
-      ({ client, port, handle, baseUrl } = await runtime.start(id, workspacePath, auth, healthCheckConfig, runtimeAccess));
+      ({ client, port, handle, baseUrl, nodeName } = await runtime.start(id, workspacePath, auth, healthCheckConfig, runtimeAccess));
     } catch (err) {
       instancesErrorsTotal.inc({ type: 'start' });
       throw err;
@@ -79,6 +81,7 @@ export class RuntimeManager {
       baseUrl,
       username: auth.username,
       password: auth.password,
+      nodeName,
     };
 
     this.instances.set(id, instance);
@@ -118,6 +121,7 @@ export class RuntimeManager {
         client: result.client,
         port: result.port,
         baseUrl: result.baseUrl,
+        nodeName: result.nodeName,
         lastUsedAt: Date.now(),
       };
       if (result.handle) {
@@ -141,6 +145,11 @@ export class RuntimeManager {
   async cleanupOrphanContainers(): Promise<void> {
     const runtimes = this.runtimes.getAll();
     await Promise.all(runtimes.map((r) => r.cleanupOrphans?.()));
+  }
+
+  async deletePersistentData(id: string, agentType?: string): Promise<void> {
+    const runtime = this.runtimes.get(agentType ?? this.defaultAgentType);
+    await runtime?.deletePersistentData?.(id);
   }
 
   setOnDestroyed(cb: (id: string) => void): void {
