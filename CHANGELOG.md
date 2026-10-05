@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-05
+
 ### Fixed
 - fix(release): publish the npm CLI from the owned `@luberserker/agent-orchestrator` scope and reject tag/package version mismatches
+
+## [1.2.0] - 2026-10-05
+
+### Fixed
 - fix(kubernetes): wait for failed instance Pods to finish terminating before allowing an immediate recovery start
 - fix(orchestrator): serialize per-conversation lifecycle mutations so stop/delete cannot race an in-flight start or restart
 - fix(kubernetes): report actual Pod placement, reconcile stopped/restarted routes, and remove runtime PVCs on failed start or explicit delete
