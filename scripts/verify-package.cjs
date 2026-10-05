@@ -4,7 +4,7 @@ const { join } = require('node:path');
 const root = join(__dirname, '..');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const packageLock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
-const expectedName = '@luberserker/agent-orchestrator';
+const expectedName = '@luberserker0v0/agent-orchestrator';
 const expectedBin = 'bin/aor.js';
 
 function fail(message) {

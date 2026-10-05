@@ -1,6 +1,6 @@
 {
-  "name": "@luberserker/agent-orchestrator",
-  "version": "1.2.1",
+  "name": "@luberserker0v0/agent-orchestrator",
+  "version": "1.2.2",
   "description": "Node.js orchestrator that spawns isolated OpenCode instances per conversation over HTTP and WebSocket",
   "main": "dist/index.js",
   "bin": {

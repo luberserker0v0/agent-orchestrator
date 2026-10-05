@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-05
+
+### Fixed
+- fix(release): use the authenticated `@luberserker0v0` npm scope and stage releases for 2FA approval
+
 ## [1.2.1] - 2026-10-05
 
 ### Fixed
-- fix(release): publish the npm CLI from the owned `@luberserker/agent-orchestrator` scope and reject tag/package version mismatches
+- fix(release): add scoped npm publishing metadata and reject tag/package version mismatches
 
 ## [1.2.0] - 2026-10-05
 
