@@ -5,7 +5,12 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { waitForHealthy } from '../health.js';
-import { resolveSessionStorage } from '../session-storage.js';
+import {
+  DEFAULT_SESSION_CLEANUP_OWNER,
+  deleteManagedSessionStorage,
+  markSessionStorageDeletePending,
+  resolveSessionStorage,
+} from '../session-storage.js';
 import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, HealthCheckConfig, RuntimeAccess } from '../types.js';
 import type { DirectRuntimeConfig } from '../../config-loader.js';
 
@@ -24,10 +29,12 @@ class ChildProcessHandle implements InstanceHandle {
     if (!this.proc || this.proc.killed || this.proc.exitCode !== null || this.proc.pid === undefined) {
       return Promise.resolve();
     }
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       treeKill(this.proc.pid!, signal ?? 'SIGTERM', (err) => {
         if (err) {
           logger.warn(`kill error for PID ${this.proc.pid}: ${err.message}`);
+          reject(err);
+          return;
         }
         resolve();
       });
@@ -71,6 +78,7 @@ export class DirectRuntime implements AgentRuntime {
     auth: { username: string; password: string };
     handle: InstanceHandle;
   }>();
+  private pendingPersistentDataDeletes = new Map<string, string>();
 
   constructor(portPool: PortPool, config?: DirectRuntimeConfig) {
     this.portPool = portPool;
@@ -78,6 +86,7 @@ export class DirectRuntime implements AgentRuntime {
       binary: config?.binary ?? 'opencode',
       instanceHost: config?.instanceHost ?? '127.0.0.1',
       sessionStorage: config?.sessionStorage,
+      cleanupOwnerId: config?.cleanupOwnerId,
     };
   }
 
@@ -88,7 +97,41 @@ export class DirectRuntime implements AgentRuntime {
    */
   private sessionEnvFor(id: string): Record<string, string> {
     if (!this.config.sessionStorage) return {};
-    return resolveSessionStorage(this.config.sessionStorage, id).env;
+    return resolveSessionStorage(
+      this.config.sessionStorage,
+      id,
+      this.config.cleanupOwnerId,
+    ).env;
+  }
+
+  /** Mark the current generation before an explicit conversation delete stops it. */
+  async preparePersistentDataDeletion(id: string): Promise<void> {
+    if (!this.config.sessionStorage) return;
+    const artifactId = markSessionStorageDeletePending(
+      this.config.sessionStorage,
+      id,
+      this.config.cleanupOwnerId ?? DEFAULT_SESSION_CLEANUP_OWNER,
+    );
+    if (artifactId) this.pendingPersistentDataDeletes.set(id, artifactId);
+  }
+
+  /** Quarantine and purge only the generation marked by the explicit delete. */
+  async deletePersistentData(id: string): Promise<void> {
+    if (!this.config.sessionStorage) return;
+    const expectedArtifactId = this.pendingPersistentDataDeletes.get(id);
+    if (!expectedArtifactId) return;
+    try {
+      await deleteManagedSessionStorage(
+        this.config.sessionStorage,
+        id,
+        this.config.cleanupOwnerId ?? DEFAULT_SESSION_CLEANUP_OWNER,
+        expectedArtifactId,
+      );
+      this.pendingPersistentDataDeletes.delete(id);
+    } catch (err) {
+      logger.warn(`Persistent session cleanup remains pending for ${id}`);
+      throw err;
+    }
   }
 
   async start(

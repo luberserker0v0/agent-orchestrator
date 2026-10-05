@@ -44,6 +44,16 @@ curl http://localhost:8080/metrics
 |--------|------|-------------|
 | `agentorchestrator_conversation_state_changes_total` | Counter | State transitions (labels: status) |
 
+### Cleanup and File Logging Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `agentorchestrator_cleanup_runs_total` | Counter | Cleanup runs by trigger and bounded result |
+| `agentorchestrator_cleanup_artifacts_total` | Counter | Artifact actions by target, action, and result |
+| `agentorchestrator_cleanup_reclaimed_bytes_total` | Counter | Known reclaimed bytes by target; PVC capacity is intentionally not counted |
+| `agentorchestrator_cleanup_last_success_timestamp_seconds` | Gauge | Last successful sweep timestamp by target |
+| `agentorchestrator_log_file_errors_total` | Counter | File-sink errors by operation |
+
 ### Node.js Metrics
 
 | Metric | Type | Description |

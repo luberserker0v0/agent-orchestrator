@@ -28,6 +28,46 @@ export const openapiSpec: Record<string, unknown> = {
         },
       },
     },
+    '/api/cleanup/preview': {
+      post: {
+        tags: ['Cleanup'],
+        summary: 'Preview artifacts eligible under the configured cleanup policy',
+        description: 'Requires the cleanup:read permission. This operation never mutates artifacts.',
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CleanupPreviewRequest' } } },
+        },
+        responses: {
+          '200': { description: 'Fresh cleanup preview', content: { 'application/json': { schema: { $ref: '#/components/schemas/CleanupReport' } } } },
+          '400': { description: 'Invalid target selection', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '401': { description: 'Authentication required', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '403': { description: 'Insufficient permission', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Another cleanup operation is running', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Cleanup scan failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '503': { description: 'Cleanup service unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/cleanup/run': {
+      post: {
+        tags: ['Cleanup'],
+        summary: 'Run configured cleanup against selected targets',
+        description: 'Requires cleanup:run. Retention, grace periods, and paths cannot be overridden by callers.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CleanupRunRequest' } } },
+        },
+        responses: {
+          '200': { description: 'Completed, partial, or failed per-artifact cleanup report', content: { 'application/json': { schema: { $ref: '#/components/schemas/CleanupReport' } } } },
+          '400': { description: 'Invalid request or missing confirmation', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '401': { description: 'Authentication required', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '403': { description: 'Insufficient permission', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Another cleanup operation is running', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Cleanup could not produce a report', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '503': { description: 'Cleanup service unavailable', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
     '/api/conversations': {
       post: {
         tags: ['Conversations'],
@@ -59,7 +99,7 @@ export const openapiSpec: Record<string, unknown> = {
       },
       delete: {
         tags: ['Conversations'],
-        summary: 'Delete conversation (destroy instance + remove workspace)',
+        summary: 'Delete conversation (destroy instance, workspace, and managed persistent session data)',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '204': { description: 'Conversation deleted' },
@@ -631,7 +671,96 @@ export const openapiSpec: Record<string, unknown> = {
     schemas: {
       Error: {
         type: 'object',
-        properties: { error: { type: 'string' } },
+        required: ['error'],
+        properties: {
+          error: {
+            type: 'object',
+            required: ['code', 'message'],
+            properties: { code: { type: 'string' }, message: { type: 'string' } },
+          },
+        },
+      },
+      CleanupTarget: { type: 'string', enum: ['logs', 'persistentData'] },
+      CleanupPreviewRequest: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          targets: { type: 'array', minItems: 1, uniqueItems: true, items: { $ref: '#/components/schemas/CleanupTarget' } },
+        },
+      },
+      CleanupRunRequest: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['targets', 'confirm'],
+        properties: {
+          targets: { type: 'array', minItems: 1, uniqueItems: true, items: { $ref: '#/components/schemas/CleanupTarget' } },
+          confirm: { type: 'boolean', enum: [true] },
+        },
+      },
+      CleanupArtifact: {
+        type: 'object',
+        required: ['target', 'artifactId', 'backend', 'state', 'reason', 'sizeBytes'],
+        properties: {
+          target: { $ref: '#/components/schemas/CleanupTarget' },
+          artifactId: { type: 'string' },
+          backend: { type: 'string', enum: ['filesystem', 'kubernetes'] },
+          runtimeId: { type: 'string' },
+          conversationId: { type: 'string' },
+          state: { type: 'string', enum: ['untracked', 'pending', 'eligible'] },
+          reason: { type: 'string' },
+          sizeBytes: { type: 'integer', nullable: true },
+          lastModifiedAt: { type: 'integer' },
+          firstObservedAt: { type: 'integer' },
+          eligibleAt: { type: 'integer' },
+          outcome: { type: 'string', enum: ['marked', 'cleared', 'deleted', 'skipped', 'failed'] },
+          code: { type: 'string' },
+          message: { type: 'string' },
+        },
+      },
+      CleanupReport: {
+        type: 'object',
+        required: ['mode', 'status', 'startedAt', 'finishedAt', 'summary', 'targets', 'items'],
+        properties: {
+          mode: { type: 'string', enum: ['preview', 'run'] },
+          status: { type: 'string', enum: ['completed', 'partial', 'failed'] },
+          startedAt: { type: 'integer' },
+          finishedAt: { type: 'integer' },
+          summary: { $ref: '#/components/schemas/CleanupSummary' },
+          targets: { type: 'array', items: { $ref: '#/components/schemas/CleanupTargetReport' } },
+          items: { type: 'array', items: { $ref: '#/components/schemas/CleanupArtifact' } },
+        },
+      },
+      CleanupSummary: {
+        type: 'object',
+        required: ['scanned', 'eligible', 'eligibleBytes'],
+        properties: {
+          scanned: { type: 'integer', minimum: 0 },
+          eligible: { type: 'integer', minimum: 0 },
+          eligibleBytes: { type: 'integer', minimum: 0, nullable: true },
+          marked: { type: 'integer', minimum: 0 },
+          cleared: { type: 'integer', minimum: 0 },
+          deleted: { type: 'integer', minimum: 0 },
+          skipped: { type: 'integer', minimum: 0 },
+          failed: { type: 'integer', minimum: 0 },
+          reclaimedBytes: { type: 'integer', minimum: 0, nullable: true },
+        },
+      },
+      CleanupTargetReport: {
+        type: 'object',
+        required: ['target', 'enabled', 'scanned', 'eligible', 'eligibleBytes'],
+        properties: {
+          target: { $ref: '#/components/schemas/CleanupTarget' },
+          enabled: { type: 'boolean' },
+          scanned: { type: 'integer', minimum: 0 },
+          eligible: { type: 'integer', minimum: 0 },
+          eligibleBytes: { type: 'integer', minimum: 0, nullable: true },
+          marked: { type: 'integer', minimum: 0 },
+          cleared: { type: 'integer', minimum: 0 },
+          deleted: { type: 'integer', minimum: 0 },
+          skipped: { type: 'integer', minimum: 0 },
+          failed: { type: 'integer', minimum: 0 },
+          reclaimedBytes: { type: 'integer', minimum: 0, nullable: true },
+        },
       },
       ConversationCreated: {
         type: 'object',

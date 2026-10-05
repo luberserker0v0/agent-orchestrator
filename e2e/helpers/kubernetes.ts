@@ -154,10 +154,11 @@ export function assertKubernetesPrerequisites(): void {
   kubectl(['-n', K8S_NAMESPACE, 'get', 'deployment', 'agent-orchestrator'], 10_000);
   kubectl(['-n', K8S_NAMESPACE, 'get', 'deployment', 'placement-controller'], 10_000);
   const permissions = [
+    ['patch', 'persistentvolumeclaims', `system:serviceaccount:${K8S_NAMESPACE}:agent-orchestrator`],
     ['delete', 'persistentvolumeclaims', `system:serviceaccount:${K8S_NAMESPACE}:agent-orchestrator`],
     ['update', 'opencodeinstances/status', `system:serviceaccount:${K8S_NAMESPACE}:agent-orchestrator`],
     ['update', 'conversationroutes/status', `system:serviceaccount:${K8S_NAMESPACE}:placement-controller`],
-    ['delete', 'persistentvolumeclaims', `system:serviceaccount:${K8S_NAMESPACE}:placement-controller`],
+    ['create', 'persistentvolumeclaims', `system:serviceaccount:${K8S_NAMESPACE}:placement-controller`],
   ];
   for (const [verb, resource, serviceAccount] of permissions) {
     const allowed = kubectl([

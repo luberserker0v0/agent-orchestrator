@@ -26,7 +26,14 @@ spec:
           # CD publishes branch/semver tags (e.g. :main, :1.2.3) — there is no :latest tag.
           image: luberserker/agent-orchestrator:main
           command: ["node", "dist/index.js"]
-          args: ["operator", "--namespace", "ao-instances", "--interval-ms", "15000"]
+          # Load the same config Secret as the orchestrator so cleanup.ownerId
+          # is identical for operator-provisioned and runtime-managed PVCs.
+          args: ["--config", "/app/config/agentorchestrator.json", "operator", "--namespace", "ao-instances", "--interval-ms", "15000"]
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/agentorchestrator.json
+              subPath: agentorchestrator.json
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -34,3 +41,10 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: config
+          secret:
+            secretName: agent-orchestrator-config
+            items:
+              - key: agentorchestrator.json
+                path: agentorchestrator.json

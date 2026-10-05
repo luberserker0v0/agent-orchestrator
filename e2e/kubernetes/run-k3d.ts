@@ -16,6 +16,8 @@ const opencodeSourceImage = process.env.K3D_E2E_OPENCODE_IMAGE ?? 'ghcr.io/anoma
 const opencodeImage = `opencode:e2e-${suffix}`;
 const k3sImage = process.env.K3D_E2E_K3S_IMAGE ?? 'rancher/k3s:v1.31.5-k3s1';
 const reconcileIntervalMs = 1_000;
+const cleanupOwnerId = `k3d-e2e-${suffix}`;
+const orphanGracePeriodMs = 1_000;
 const keepResources = process.env.K3D_E2E_KEEP === '1';
 const activeChildren = new Set<ChildProcess>();
 
@@ -366,6 +368,11 @@ async function prepareCluster(): Promise<{ sourceNode: string; targetNode: strin
       rbac: { enabled: true },
     },
     websocket: { heartbeatIntervalMs: 30_000, idleTimeoutMs: 600_000 },
+    cleanup: {
+      ownerId: cleanupOwnerId,
+      sweepIntervalMs: 3_600_000,
+      orphanedData: { enabled: true, gracePeriodMs: orphanGracePeriodMs },
+    },
     orchestrator: {
       maxInstances: 4,
       idleTimeoutMs: 0,
@@ -445,6 +452,7 @@ async function prepareCluster(): Promise<{ sourceNode: string; targetNode: strin
   operatorContainer.image = orchestratorImage;
   operatorContainer.imagePullPolicy = 'IfNotPresent';
   operatorContainer.args = [
+    '--config', '/app/config/agentorchestrator.json',
     'operator',
     '--namespace', namespace,
     '--interval-ms', String(reconcileIntervalMs),
@@ -471,7 +479,7 @@ async function main(): Promise<void> {
   const repeat = parseRepeat();
   let failed = false;
   try {
-    const { sourceNode, targetNode } = await prepareCluster();
+    const { sourceNode, targetNode, apiKey } = await prepareCluster();
     const testEnvironment: NodeJS.ProcessEnv = {
       ...clusterEnv(),
       K8S_E2E_CONTEXT: contextName,
@@ -480,6 +488,9 @@ async function main(): Promise<void> {
       K8S_E2E_TARGET_NODE: targetNode,
       K8S_E2E_SHARED_ROOT: '/shared',
       K8S_E2E_RECONCILE_INTERVAL_MS: String(reconcileIntervalMs),
+      K8S_E2E_API_KEY: apiKey,
+      K8S_E2E_CLEANUP_OWNER: cleanupOwnerId,
+      K8S_E2E_ORPHAN_GRACE_PERIOD_MS: String(orphanGracePeriodMs),
     };
     for (let runNumber = 1; runNumber <= repeat; runNumber += 1) {
       await run(process.execPath, [

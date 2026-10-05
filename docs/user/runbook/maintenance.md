@@ -140,7 +140,8 @@ curl http://localhost:8080/metrics | grep nodejs_heap
 |------|-----------|---------|
 | Check health | Daily | `curl http://localhost:8080/health` |
 | Review metrics | Weekly | Check Grafana dashboard |
-| Clean old workspaces | Weekly | `rm -rf ./workspace/{old-conversation-id}` |
+| Preview retained data | Weekly | `POST /api/cleanup/preview` |
+| Run configured cleanup | As needed | `POST /api/cleanup/run` with `confirm: true` |
 | Update dependencies | Monthly | `npm update` |
 | Rotate API keys | Quarterly | Update `server.apiKeys` in config |
 | Backup workspace | Daily | See backup commands above |
@@ -148,6 +149,11 @@ curl http://localhost:8080/metrics | grep nodejs_heap
 | Test graceful shutdown | Monthly | `kill -SIGTERM <pid>` and verify |
 
 ## Log Rotation
+
+AO can mirror console records to managed JSONL files. Enable `logging.file` and
+mount its directory on durable storage when file retention is desired. The active
+file is `agentorchestrator.jsonl`; only AO's timestamped rotated names are pruned.
+See [Logging and Cleanup Policy](../configuration/cleanup.md).
 
 ### PM2
 
@@ -178,6 +184,24 @@ sudo systemd-tmpfiles --create --prefix /var/log/journal
 # Configure Docker log driver
 docker run --log-driver=json-file --log-opt max-size=10m --log-opt max-file=3 ...
 ```
+
+The Docker runtime also accepts these limits in each runtime's `config.logging`.
+They apply to spawned OpenCode containers. Compose/service logging limits apply
+to the AO container itself.
+
+## Persistent Session Cleanup
+
+Before enabling orphan cleanup:
+
+1. Back up every configured `sessionStorage.sharedRoot` and Kubernetes PVC.
+2. Assign one stable, unique `cleanup.ownerId` per AO installation.
+3. Call `/api/cleanup/preview` and inspect all candidates.
+4. Enable `cleanup.orphanedData.enabled` only after confirming ownership.
+
+An explicit conversation `DELETE` removes managed persistent data immediately.
+The periodic policy does not expire valid stopped, restarted, migrated, or
+idle-evicted conversations. Existing unmarked directories and PVCs wait the full
+grace period from their first AO observation; modification time is not used.
 
 ## Disaster Recovery
 

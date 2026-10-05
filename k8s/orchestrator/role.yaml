@@ -1,7 +1,7 @@
 # Rights the orchestrator itself needs in-cluster:
 # - instance Pods/Services lifecycle (KubernetesRuntime)
 # - OpencodeInstance status reporting (cluster.* config)
-# - read routes/PVCs (placement awareness; PVC lifecycle is owned by the operator)
+# - read routes and manage owned PVC lifecycle/cleanup with UID-safe API calls
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -15,7 +15,7 @@ rules:
     verbs: [get, list, watch, create, delete]
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
-    verbs: [get, list, watch, create, delete]
+    verbs: [get, list, watch, create, patch, delete]
   - apiGroups: [agentorchestrator.io]
     resources: [opencodeinstances]
     verbs: [get, list, watch, create, update, patch, delete]

@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, parse as parsePath, resolve } from 'node:path';
 import { parse as parseJSONC } from 'jsonc-parser';
 
 export type BuiltinApiKeyRole = 'admin' | 'user' | 'observer';
@@ -55,6 +55,14 @@ export interface DirectRuntimeConfig {
   instanceHost?: string;
   /** Per-conversation opencode data-dir (session persistence). Omit for opencode defaults. */
   sessionStorage?: SessionStorageConfig;
+  /** Internal owner injected by the orchestrator for cleanup metadata. */
+  cleanupOwnerId?: string;
+}
+
+export interface DockerLoggingConfig {
+  driver?: 'local' | 'json-file';
+  maxSize?: string;
+  maxFiles?: number;
 }
 
 export interface DockerRuntimeConfig {
@@ -66,6 +74,10 @@ export interface DockerRuntimeConfig {
   networkMode?: string;
   /** Per-conversation opencode data-dir (session persistence). Omit for ephemeral container storage. */
   sessionStorage?: SessionStorageConfig;
+  /** Optional Docker-engine log rotation settings for the spawned container. */
+  logging?: DockerLoggingConfig;
+  /** Internal owner injected by the orchestrator for cleanup metadata. */
+  cleanupOwnerId?: string;
 }
 
 export interface KubernetesRuntimeConfig {
@@ -92,6 +104,8 @@ export interface KubernetesRuntimeConfig {
     requests?: { cpu?: string; memory?: string };
     limits?: { cpu?: string; memory?: string };
   };
+  /** Internal owner injected by the orchestrator for cleanup metadata. */
+  cleanupOwnerId?: string;
 }
 
 /**
@@ -122,6 +136,30 @@ export function validateSessionStorageConfig(value: unknown): string[] {
   }
   if (cfg.mode !== undefined && cfg.mode !== 'xdg' && cfg.mode !== 'sqlite') {
     errs.push('"sessionStorage.mode" must be "xdg" or "sqlite"');
+  }
+  return errs;
+}
+
+/** Validate optional Docker container log limits. */
+export function validateDockerLoggingConfig(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return ['"logging" must be an object'];
+  }
+  const cfg = value as Record<string, unknown>;
+  const errs: string[] = [];
+  if (cfg.driver !== undefined && cfg.driver !== 'local' && cfg.driver !== 'json-file') {
+    errs.push('"logging.driver" must be "local" or "json-file"');
+  }
+  if (cfg.maxSize !== undefined && (
+    typeof cfg.maxSize !== 'string' || !/^[1-9]\d*(?:[kKmMgG])?$/.test(cfg.maxSize)
+  )) {
+    errs.push('"logging.maxSize" must be a Docker size such as "10m"');
+  }
+  if (cfg.maxFiles !== undefined && (
+    typeof cfg.maxFiles !== 'number' || !Number.isSafeInteger(cfg.maxFiles) || cfg.maxFiles <= 0
+  )) {
+    errs.push('"logging.maxFiles" must be a positive integer');
   }
   return errs;
 }
@@ -201,6 +239,28 @@ export interface ClusterConfig {
   advertiseBaseUrl?: string;
 }
 
+export interface FileLoggingConfig {
+  enabled: boolean;
+  directory: string;
+  maxFileSizeBytes: number;
+  maxRotatedFiles: number;
+  retentionMs: number;
+}
+
+export interface LoggingConfig {
+  file: FileLoggingConfig;
+}
+
+export interface CleanupConfig {
+  /** Stable logical installation owner. Required for orphaned-data cleanup. */
+  ownerId: string | null;
+  sweepIntervalMs: number;
+  orphanedData: {
+    enabled: boolean;
+    gracePeriodMs: number;
+  };
+}
+
 export interface AgentOrchestratorConfig {
   server: ServerConfig;
   websocket: WebSocketConfig;
@@ -208,6 +268,8 @@ export interface AgentOrchestratorConfig {
   workspace: WorkspaceConfig;
   roles?: RolesConfig;
   cluster?: ClusterConfig;
+  logging: LoggingConfig;
+  cleanup: CleanupConfig;
 }
 
 const CONFIG_DIR = join(process.cwd(), 'config');
@@ -216,48 +278,57 @@ const EXAMPLE_PATH = join(CONFIG_DIR, 'agentorchestrator.example.json');
 const CANONICAL_OPECONFIG_PATH = join(CONFIG_DIR, 'canonical-opencode.json');
 const CANONICAL_OPECONFIG_EXAMPLE_PATH = join(CONFIG_DIR, 'canonical-opencode.example.json');
 
+function matchConfigKey(
+  current: Record<string, unknown>,
+  parts: string[],
+  start: number,
+): { key: string; consumed: number } | undefined {
+  const keys = Object.keys(current);
+  for (let consumed = parts.length - start; consumed >= 1; consumed--) {
+    const normalized = parts.slice(start, start + consumed).join('').toLowerCase();
+    const key = keys.find(candidate => candidate.toLowerCase() === normalized);
+    if (key) return { key, consumed };
+  }
+  return undefined;
+}
+
+function parseEnvValue(value: string | undefined): unknown {
+  const trimmed = value?.trim() ?? '';
+  const numValue = Number(trimmed);
+  if (trimmed !== '' && Number.isFinite(numValue)) return numValue;
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  return value;
+}
+
 function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHESTRATOR'): void {
   for (const [envKey, envValue] of Object.entries(process.env)) {
     if (!envKey.startsWith(prefix + '_')) continue;
 
-    const path = envKey
+    const parts = envKey
       .slice(prefix.length + 1)
       .split('_')
-      .map((part, index) =>
-        index === 0 ? part.toLowerCase() : part[0].toLowerCase() + part.slice(1).toLowerCase()
-      );
+      .filter(Boolean);
+    if (parts.length === 0) continue;
 
     let current: Record<string, unknown> = config;
-    for (let i = 0; i < path.length - 1; i++) {
-      const key = path[i];
-      const matchedKey = Object.keys(current).find(
-        k => k.toLowerCase() === key.toLowerCase()
-      ) ?? key;
-      if (!current[matchedKey] || typeof current[matchedKey] !== 'object') {
-        current[matchedKey] = {};
-      }
-      current = current[matchedKey] as Record<string, unknown>;
-    }
+    let index = 0;
+    while (index < parts.length) {
+      const matched = matchConfigKey(current, parts, index);
+      const key = matched?.key ?? parts[index].toLowerCase();
+      index += matched?.consumed ?? 1;
 
-    const leafKey = path[path.length - 1];
-    const matchedKey = Object.keys(current).find(
-      k => k.toLowerCase() === leafKey.toLowerCase()
-    );
-    const finalKey = matchedKey ?? leafKey;
-    const trimmed = envValue?.trim() ?? '';
-    const numValue = Number(trimmed);
-    const isValidNumber =
-      trimmed !== '' &&
-      Number.isFinite(numValue) &&
-      !Number.isNaN(numValue);
-    if (isValidNumber) {
-      current[finalKey] = numValue;
-    } else if (trimmed === 'true') {
-      current[finalKey] = true;
-    } else if (trimmed === 'false') {
-      current[finalKey] = false;
-    } else {
-      current[finalKey] = envValue;
+      if (index === parts.length) {
+        // Arrays are intentionally opaque and cannot be expressed safely via
+        // scalar environment variables.
+        if (!Array.isArray(current[key])) current[key] = parseEnvValue(envValue);
+        break;
+      }
+
+      const next = current[key];
+      if (next !== undefined && (typeof next !== 'object' || next === null || Array.isArray(next))) break;
+      if (next === undefined) current[key] = {};
+      current = current[key] as Record<string, unknown>;
     }
   }
 }
@@ -496,6 +567,55 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       throw new Error('Config validation failed: cluster.advertiseBaseUrl must be a non-empty string');
     }
   }
+
+  const fileLogging = config.logging?.file;
+  if (!fileLogging || typeof fileLogging !== 'object') {
+    throw new Error('Config validation failed: logging.file must be an object');
+  }
+  if (typeof fileLogging.enabled !== 'boolean') {
+    throw new Error('Config validation failed: logging.file.enabled must be a boolean');
+  }
+  if (typeof fileLogging.directory !== 'string' || !fileLogging.directory.trim()) {
+    throw new Error('Config validation failed: logging.file.directory must be a non-empty string');
+  }
+  const resolvedLogDirectory = resolve(process.cwd(), fileLogging.directory);
+  if (resolvedLogDirectory === parsePath(resolvedLogDirectory).root) {
+    throw new Error('Config validation failed: logging.file.directory cannot be a filesystem root');
+  }
+  for (const [name, value] of [
+    ['maxFileSizeBytes', fileLogging.maxFileSizeBytes],
+    ['maxRotatedFiles', fileLogging.maxRotatedFiles],
+    ['retentionMs', fileLogging.retentionMs],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new Error(`Config validation failed: logging.file.${name} must be a positive safe integer, got ${value}`);
+    }
+  }
+
+  if (!config.cleanup || typeof config.cleanup !== 'object') {
+    throw new Error('Config validation failed: cleanup must be an object');
+  }
+  if (!Number.isSafeInteger(config.cleanup.sweepIntervalMs) || config.cleanup.sweepIntervalMs <= 0) {
+    throw new Error(`Config validation failed: cleanup.sweepIntervalMs must be a positive safe integer, got ${config.cleanup.sweepIntervalMs}`);
+  }
+  if (config.cleanup.ownerId !== null && (
+    typeof config.cleanup.ownerId !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(config.cleanup.ownerId)
+  )) {
+    throw new Error('Config validation failed: cleanup.ownerId must be null or a stable identifier containing letters, digits, dot, underscore, or hyphen');
+  }
+  if (!config.cleanup.orphanedData || typeof config.cleanup.orphanedData !== 'object') {
+    throw new Error('Config validation failed: cleanup.orphanedData must be an object');
+  }
+  if (typeof config.cleanup.orphanedData.enabled !== 'boolean') {
+    throw new Error('Config validation failed: cleanup.orphanedData.enabled must be a boolean');
+  }
+  if (!Number.isSafeInteger(config.cleanup.orphanedData.gracePeriodMs) || config.cleanup.orphanedData.gracePeriodMs <= 0) {
+    throw new Error(`Config validation failed: cleanup.orphanedData.gracePeriodMs must be a positive safe integer, got ${config.cleanup.orphanedData.gracePeriodMs}`);
+  }
+  if (config.cleanup.orphanedData.enabled && !config.cleanup.ownerId) {
+    throw new Error('Config validation failed: cleanup.ownerId is required when cleanup.orphanedData.enabled is true');
+  }
 }
 
 export function readJSON(path: string): Record<string, unknown> {
@@ -551,6 +671,23 @@ export function defaultConfig(): AgentOrchestratorConfig {
       namespace: 'ao-instances',
       heartbeatIntervalMs: 60000,
       quotaFailureThreshold: 2,
+    },
+    logging: {
+      file: {
+        enabled: false,
+        directory: './logs',
+        maxFileSizeBytes: 10 * 1024 * 1024,
+        maxRotatedFiles: 10,
+        retentionMs: 7 * 24 * 60 * 60 * 1000,
+      },
+    },
+    cleanup: {
+      ownerId: null,
+      sweepIntervalMs: 60 * 60 * 1000,
+      orphanedData: {
+        enabled: false,
+        gracePeriodMs: 30 * 24 * 60 * 60 * 1000,
+      },
     },
   };
 }
@@ -616,12 +753,11 @@ export function loadConfig(configPath?: string): AgentOrchestratorConfig {
   let config: AgentOrchestratorConfig;
   if (resolvedPath) {
     const parsed = readJSON(resolvedPath);
-    applyEnvOverrides(parsed);
     config = mergeDefaults(defaultConfig(), parsed);
   } else {
     config = defaultConfig();
-    applyEnvOverrides(config as unknown as Record<string, unknown>);
   }
+  applyEnvOverrides(config as unknown as Record<string, unknown>);
   validateConfig(config);
   return config;
 }

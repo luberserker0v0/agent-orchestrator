@@ -23,6 +23,8 @@ import { openapiSpec } from './openapi.js';
 import { AppError, ErrorCodes, isAppError, toHttpErrorResponse } from '../utils/errors.js';
 import { mountDashboard } from './dashboard.js';
 import type { ApiKeyRole } from '../config-loader.js';
+import type { CleanupManager } from '../cleanup/cleanup-manager.js';
+import { CLEANUP_TARGETS, type CleanupTarget } from '../cleanup/types.js';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -52,7 +54,8 @@ export function createHttpServer(
   sessionService: SessionService,
   messageService: MessageService,
   roleService: RoleService,
-  config: AgentOrchestratorConfig
+  config: AgentOrchestratorConfig,
+  cleanupManager?: CleanupManager,
 ): HttpServer {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
@@ -126,6 +129,8 @@ export function createHttpServer(
   const ROUTE_PERMISSIONS: Array<{ method: string; pattern: RegExp; permission: string }> = [
     { method: 'GET', pattern: /^\/api\/runtimes$/, permission: 'runtime:list' },
     { method: 'GET', pattern: /^\/api\/roles(?:\/[^/]+)?$/, permission: 'role:read' },
+    { method: 'POST', pattern: /^\/api\/cleanup\/preview$/, permission: 'cleanup:read' },
+    { method: 'POST', pattern: /^\/api\/cleanup\/run$/, permission: 'cleanup:run' },
     { method: 'POST', pattern: /^\/api\/conversations$/, permission: 'conversation:start' },
     { method: 'GET', pattern: /^\/api\/conversations$/, permission: 'conversation:list' },
     { method: 'GET', pattern: /^\/api\/conversations\/[^/]+$/, permission: 'conversation:get' },
@@ -204,6 +209,28 @@ export function createHttpServer(
 
   function sendError(res: Response, status: number, code: string, message: string): void {
     res.status(status).json({ error: { code, message } });
+  }
+
+  function parseCleanupTargets(
+    body: unknown,
+    options: { requireTargets: boolean; requireConfirm: boolean },
+  ): CleanupTarget[] | undefined {
+    if (body === undefined && !options.requireTargets && !options.requireConfirm) {
+      return [...CLEANUP_TARGETS];
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined;
+    const record = body as Record<string, unknown>;
+    const allowed = new Set(options.requireConfirm ? ['targets', 'confirm'] : ['targets']);
+    if (Object.keys(record).some(key => !allowed.has(key))) return undefined;
+    if (options.requireConfirm && record.confirm !== true) return undefined;
+    if (record.targets === undefined) {
+      return options.requireTargets ? undefined : [...CLEANUP_TARGETS];
+    }
+    if (!Array.isArray(record.targets) || record.targets.length === 0) return undefined;
+    if (record.targets.some(target => !CLEANUP_TARGETS.includes(target as CleanupTarget))) return undefined;
+    const targets = record.targets as CleanupTarget[];
+    if (new Set(targets).size !== targets.length) return undefined;
+    return targets;
   }
 
   function handleControllerError(res: Response, err: unknown, defaultStatus = 500): void {
@@ -301,6 +328,49 @@ export function createHttpServer(
       return;
     }
     res.json({ name: role.name, permissions: role.permissions, builtin: role.builtin });
+  });
+
+  // Cleanup preview is deliberately POST: it performs a fresh, potentially
+  // expensive scan and accepts a strict target-selection body.
+  app.post('/api/cleanup/preview', async (req: Request, res: Response) => {
+    const targets = parseCleanupTargets(req.body, { requireTargets: false, requireConfirm: false });
+    if (!targets) {
+      sendError(res, 400, ErrorCodes.INVALID_REQUEST_BODY, 'Body may contain only a unique non-empty "targets" array');
+      return;
+    }
+    if (!cleanupManager) {
+      sendError(res, 503, ErrorCodes.CLEANUP_FAILED, 'Cleanup service is not available');
+      return;
+    }
+    try {
+      res.json(await cleanupManager.preview(targets));
+    } catch (err) {
+      handleControllerError(res, err);
+    }
+  });
+
+  app.post('/api/cleanup/run', async (req: Request, res: Response) => {
+    const record = typeof req.body === 'object' && req.body !== null && !Array.isArray(req.body)
+      ? req.body as Record<string, unknown>
+      : undefined;
+    if (record?.confirm !== true) {
+      sendError(res, 400, ErrorCodes.CLEANUP_CONFIRMATION_REQUIRED, 'Cleanup requires literal "confirm": true');
+      return;
+    }
+    const targets = parseCleanupTargets(req.body, { requireTargets: true, requireConfirm: true });
+    if (!targets) {
+      sendError(res, 400, ErrorCodes.INVALID_REQUEST_BODY, 'Body must contain only unique non-empty "targets" and "confirm": true');
+      return;
+    }
+    if (!cleanupManager) {
+      sendError(res, 503, ErrorCodes.CLEANUP_FAILED, 'Cleanup service is not available');
+      return;
+    }
+    try {
+      res.json(await cleanupManager.run(targets));
+    } catch (err) {
+      handleControllerError(res, err);
+    }
   });
 
   app.post('/api/roles', (req: Request, res: Response) => {

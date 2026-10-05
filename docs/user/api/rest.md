@@ -13,6 +13,19 @@ All endpoints are prefixed with `/api`. Authentication is required if `server.ap
 | `GET` | `/api/runtimes` | Yes | List configured runtimes |
 | `GET` | `/api/auth/role` | Yes | Get current API key role |
 
+## Cleanup
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `POST` | `/api/cleanup/preview` | `cleanup:read` | Fresh, non-mutating scan; body may select unique `targets` (`logs`, `persistentData`) |
+| `POST` | `/api/cleanup/run` | `cleanup:run` | Run selected targets; requires `{"targets":[...],"confirm":true}` |
+
+The built-in `admin` wildcard grants both permissions; built-in `user` and
+`observer` roles do not. Manual runs cannot override configured paths, retention,
+or grace periods. Concurrent operations return `409 CLEANUP_IN_PROGRESS`.
+Per-artifact failures are returned as a `200` report with `partial` or `failed`
+status. Candidate records never include absolute filesystem paths.
+
 ## Conversations
 
 | Method | Path | Auth | Description |

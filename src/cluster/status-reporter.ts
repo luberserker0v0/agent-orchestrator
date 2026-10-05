@@ -6,6 +6,16 @@ import { PromiseCustomObjectsApi } from '@kubernetes/client-node/dist/gen/types/
 import { logger } from '../utils/logger.js';
 import { ErrorCodes } from '../utils/errors.js';
 import type { ClusterConfig } from '../config-loader.js';
+import {
+  CLEANUP_ARTIFACT_ANNOTATION,
+  CLEANUP_OWNER_ANNOTATION,
+  CLEANUP_STATE_ANNOTATION,
+  CLEANUP_STATE_SINCE_ANNOTATION,
+  isPersistentDataArtifactId,
+  isPersistentDataCleanupState,
+  isPersistentDataStateTimestamp,
+  persistentDataAnnotations,
+} from '../agent-runtime/runtimes/kubernetes.js';
 
 const GROUP = 'agentorchestrator.io';
 const VERSION = 'v1alpha1';
@@ -73,6 +83,7 @@ export interface TrackInstanceInfo {
   volumeClaimName?: string;
   model?: { providerID: string; id: string };
   nodeName?: string;
+  persistentDataAnnotations?: Record<string, string>;
 }
 
 export interface QuotaErrorReport {
@@ -175,10 +186,10 @@ export function resolveReporterConfig(config?: ClusterConfig): StatusReporterCon
 }
 
 /**
- * Reports OpencodeInstance lifecycle to Kubernetes. All methods are safe to
- * call unconditionally: when disabled or unreachable they log once and no-op,
- * never throwing into the request path. Callers must not await the returned
- * promises on hot paths.
+ * Reports OpencodeInstance lifecycle to Kubernetes. Routine status methods are
+ * best-effort and safe to call unconditionally. The explicit-delete marker is
+ * deliberately strict because proceeding after that durable write fails could
+ * let the placement controller recreate storage.
  */
 export class K8sStatusReporter {
   private readonly api?: StatusObjectsApi;
@@ -228,6 +239,11 @@ export class K8sStatusReporter {
     return this.api !== undefined;
   }
 
+  /** Narrow healthy cluster-authority view used by the cleanup coordinator. */
+  cleanupContext(): { namespace: string; api: StatusObjectsApi } | undefined {
+    return this.api ? { namespace: this.namespace, api: this.api } : undefined;
+  }
+
   /** Set/override the advertised owner URL (called once the server port is known). */
   setAdvertiseBaseUrl(url: string): void {
     this.advertiseBaseUrl = url;
@@ -245,7 +261,13 @@ export class K8sStatusReporter {
       await this.api.createNamespacedCustomObject(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, {
         apiVersion: `${GROUP}/${VERSION}`,
         kind: 'OpencodeInstance',
-        metadata: { name, labels: { 'app.kubernetes.io/part-of': 'agent-orchestrator' } },
+        metadata: {
+          name,
+          labels: { 'app.kubernetes.io/part-of': 'agent-orchestrator' },
+          ...(info.persistentDataAnnotations
+            ? { annotations: info.persistentDataAnnotations }
+            : {}),
+        },
         spec: {
           conversationId: info.conversationId,
           nodeName: info.nodeName ?? currentNodeName(),
@@ -373,6 +395,63 @@ export class K8sStatusReporter {
     }
   }
 
+  /**
+   * Mirror a PVC's destructive intent onto its corresponding instance record.
+   * Unlike best-effort status updates, this method throws on an unsafe or
+   * failed mutation so the caller will not stop the runtime with an active CR
+   * that could recreate the claim.
+   */
+  async markPersistentDataDeletePending(conversationId: string): Promise<void> {
+    if (!this.api) return;
+    let existing: { body: { status?: Record<string, unknown> } };
+    try {
+      existing = await this.api.getNamespacedCustomObject(
+        GROUP, VERSION, this.namespace, INSTANCES_PLURAL, conversationId,
+      );
+    } catch (err) {
+      if (isNotFound(err)) return;
+      throw err;
+    }
+
+    const current = (existing.body ?? {}) as Record<string, unknown>;
+    const metadata = asRecord(current.metadata);
+    const annotations = asStringRecord(metadata.annotations);
+    const ownerId = annotations[CLEANUP_OWNER_ANNOTATION];
+    const artifactId = annotations[CLEANUP_ARTIFACT_ANNOTATION];
+    const state = annotations[CLEANUP_STATE_ANNOTATION];
+    const previousStateSince = annotations[CLEANUP_STATE_SINCE_ANNOTATION];
+    if (
+      !ownerId
+      || !isPersistentDataArtifactId(artifactId)
+      || !isPersistentDataCleanupState(state)
+      || !isPersistentDataStateTimestamp(previousStateSince)
+    ) {
+      throw new Error(`OpencodeInstance ${conversationId} has incomplete cleanup ownership metadata`);
+    }
+    const stateSince = state === 'delete-pending'
+      ? previousStateSince
+      : new Date().toISOString();
+    const nextAnnotations = {
+      ...annotations,
+      ...persistentDataAnnotations(ownerId, 'delete-pending', stateSince, artifactId),
+    };
+    await this.api.replaceNamespacedCustomObject(
+      GROUP,
+      VERSION,
+      this.namespace,
+      INSTANCES_PLURAL,
+      conversationId,
+      {
+        ...current,
+        metadata: { ...metadata, annotations: nextAnnotations },
+      },
+    );
+    const tracked = this.tracked.get(conversationId);
+    if (tracked) {
+      tracked.info = { ...tracked.info, persistentDataAnnotations: nextAnnotations };
+    }
+  }
+
   /** Delete the object (404-tolerant). Called on conversation delete. */
   async untrackInstance(conversationId: string): Promise<void> {
     if (!this.api) return;
@@ -404,8 +483,20 @@ export class K8sStatusReporter {
       const spec = (current.spec && typeof current.spec === 'object'
         ? current.spec as Record<string, unknown>
         : {});
+      const metadata = (current.metadata && typeof current.metadata === 'object'
+        ? current.metadata as Record<string, unknown>
+        : {});
+      const annotations = (metadata.annotations && typeof metadata.annotations === 'object'
+        ? metadata.annotations as Record<string, string>
+        : {});
       await this.api!.replaceNamespacedCustomObject(GROUP, VERSION, this.namespace, INSTANCES_PLURAL, name, {
         ...current,
+        metadata: {
+          ...metadata,
+          ...(info.persistentDataAnnotations
+            ? { annotations: { ...annotations, ...info.persistentDataAnnotations } }
+            : {}),
+        },
         spec: {
           ...spec,
           conversationId: info.conversationId,
@@ -469,4 +560,15 @@ export class K8sStatusReporter {
       logger.warn(message);
     }
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function asStringRecord(value: unknown): Record<string, string> {
+  const record = asRecord(value);
+  return Object.fromEntries(
+    Object.entries(record).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
 }

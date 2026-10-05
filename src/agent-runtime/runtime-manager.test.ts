@@ -51,6 +51,7 @@ describe('RuntimeManager', () => {
       stop: vi.fn().mockResolvedValue(undefined),
       restart: vi.fn(),
       cleanupOrphans: vi.fn().mockResolvedValue(undefined),
+      preparePersistentDataDeletion: vi.fn().mockResolvedValue(undefined),
       deletePersistentData: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -129,14 +130,15 @@ describe('RuntimeManager', () => {
       await expect(runtimeManager.destroyInstance('not-exist')).resolves.toBeUndefined();
     });
 
-    it('does not throw when handle.kill throws', async () => {
+    it('retains the instance and rejects destructive cleanup when both kill attempts fail', async () => {
       const handle = createMockHandle();
       handle.kill = vi.fn().mockRejectedValue(new Error('kill failed'));
       (mockRuntime.start as ReturnType<typeof vi.fn>).mockResolvedValue({ client: mockClient, port: 40011, handle });
       await runtimeManager.start('conv-killfail', '/workspace', { username: 'u', password: 'p' }, { retries: 1, intervalMs: 100, clientTimeoutMs: 500 });
 
-      await expect(runtimeManager.destroyInstance('conv-killfail')).resolves.toBeUndefined();
-      expect(runtimeManager.has('conv-killfail')).toBe(false);
+      await expect(runtimeManager.destroyInstance('conv-killfail')).rejects.toThrow('refusing destructive cleanup');
+      expect(handle.kill).toHaveBeenCalledTimes(2);
+      expect(runtimeManager.has('conv-killfail')).toBe(true);
     });
   });
 
@@ -245,6 +247,13 @@ describe('RuntimeManager', () => {
     it('delegates to the selected runtime', async () => {
       await runtimeManager.deletePersistentData('conv-delete', 'opencode-direct');
       expect(mockRuntime.deletePersistentData).toHaveBeenCalledWith('conv-delete');
+    });
+  });
+
+  describe('preparePersistentDataDeletion', () => {
+    it('delegates to the selected runtime before explicit deletion', async () => {
+      await runtimeManager.preparePersistentDataDeletion('conv-delete', 'opencode-direct');
+      expect(mockRuntime.preparePersistentDataDeletion).toHaveBeenCalledWith('conv-delete');
     });
   });
 

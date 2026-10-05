@@ -1,5 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { instanceObjectName, instanceVolumeClaimName } from '../../../src/agent-runtime/runtimes/kubernetes.js';
+import {
+  CLEANUP_ARTIFACT_ANNOTATION,
+  CLEANUP_OWNER_ANNOTATION,
+  CLEANUP_STATE_ANNOTATION,
+  CLEANUP_STATE_SINCE_ANNOTATION,
+  CONVERSATION_LABEL,
+  PART_OF_LABEL,
+  PART_OF_VALUE,
+  instanceObjectName,
+  instanceVolumeClaimName,
+  persistentDataAnnotations,
+} from '../../../src/agent-runtime/runtimes/kubernetes.js';
+import type { CleanupReport } from '../../../src/cleanup/types.js';
 import {
   K8S_NAMESPACE,
   assertKubernetesPrerequisites,
@@ -27,7 +39,7 @@ interface ConversationEvent {
 }
 
 interface KubeObject {
-  metadata: { uid?: string };
+  metadata: { uid?: string; annotations?: Record<string, string> };
   spec?: { nodeName?: string; endpoint?: string };
   status?: {
     phase?: string;
@@ -55,10 +67,14 @@ describe('Kubernetes execute-mode cross-node migration (isolated k3d E2E)', () =
   const suffix = `${process.pid}-${Date.now().toString(36)}`;
   const successId = `k3d-move-${suffix}`;
   const failureId = `k3d-fail-${suffix}`;
+  const orphanId = `k3d-orphan-${suffix}`;
+  const deleteRetryId = `k3d-delete-retry-${suffix}`;
   const storageClass = `ao-shared-${suffix}`;
   const sourceNode = requiredEnvironment('K8S_E2E_SOURCE_NODE');
   const targetNode = requiredEnvironment('K8S_E2E_TARGET_NODE');
   const sharedRoot = requiredEnvironment('K8S_E2E_SHARED_ROOT');
+  const cleanupOwner = requiredEnvironment('K8S_E2E_CLEANUP_OWNER');
+  const orphanGracePeriodMs = Number(requiredEnvironment('K8S_E2E_ORPHAN_GRACE_PERIOD_MS'));
   const reconcileIntervalMs = Number(process.env.K8S_E2E_RECONCILE_INTERVAL_MS ?? '1000');
   let forward: PortForward;
   let apiKey: string;
@@ -159,6 +175,55 @@ describe('Kubernetes execute-mode cross-node migration (isolated k3d E2E)', () =
     return { claimName, volumeName };
   };
 
+  const orchestratorCanDeletePvc = (): boolean => {
+    try {
+      return kubectl([
+        'auth', 'can-i', 'delete', 'persistentvolumeclaims',
+        `--as=system:serviceaccount:${K8S_NAMESPACE}:agent-orchestrator`,
+        '-n', K8S_NAMESPACE,
+      ], 10_000) === 'yes';
+    } catch {
+      return false;
+    }
+  };
+
+  const setOrchestratorPvcDeletePermission = async (enabled: boolean): Promise<void> => {
+    kubectlApply({
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'Role',
+      metadata: { name: 'agent-orchestrator', namespace: K8S_NAMESPACE },
+      rules: [
+        { apiGroups: [''], resources: ['pods', 'services'], verbs: ['get', 'list', 'watch', 'create', 'delete'] },
+        {
+          apiGroups: [''],
+          resources: ['persistentvolumeclaims'],
+          verbs: ['get', 'list', 'watch', 'create', 'patch', ...(enabled ? ['delete'] : [])],
+        },
+        {
+          apiGroups: ['agentorchestrator.io'],
+          resources: ['opencodeinstances'],
+          verbs: ['get', 'list', 'watch', 'create', 'update', 'patch', 'delete'],
+        },
+        {
+          apiGroups: ['agentorchestrator.io'],
+          resources: ['opencodeinstances/status'],
+          verbs: ['get', 'update', 'patch'],
+        },
+        {
+          apiGroups: ['agentorchestrator.io'],
+          resources: ['conversationroutes'],
+          verbs: ['get', 'list', 'watch'],
+        },
+      ],
+    });
+    await waitFor(
+      `orchestrator PVC delete permission to become ${enabled ? 'allowed' : 'denied'}`,
+      () => orchestratorCanDeletePvc() === enabled,
+      30_000,
+      250,
+    );
+  };
+
   const patchInstanceStatus = (id: string, status: Record<string, unknown>): void => {
     kubectl([
       '-n', K8S_NAMESPACE,
@@ -203,6 +268,26 @@ describe('Kubernetes execute-mode cross-node migration (isolated k3d E2E)', () =
         && typeof instance.status.reportedBy === 'string'
         && route.status?.phase === 'Active';
     }, 60_000);
+    const claim = kubectlJson<KubeObject>([
+      '-n', K8S_NAMESPACE, 'get', 'pvc', instanceVolumeClaimName(id),
+    ]);
+    const instance = getInstance(id);
+    const claimAnnotations = claim.metadata.annotations ?? {};
+    const instanceAnnotations = instance.metadata.annotations ?? {};
+    expect(claimAnnotations).toMatchObject({
+      [CLEANUP_OWNER_ANNOTATION]: cleanupOwner,
+      [CLEANUP_STATE_ANNOTATION]: 'active',
+    });
+    expect(claimAnnotations[CLEANUP_ARTIFACT_ANNOTATION]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(Number.isFinite(Date.parse(claimAnnotations[CLEANUP_STATE_SINCE_ANNOTATION]))).toBe(true);
+    expect(instanceAnnotations).toMatchObject({
+      [CLEANUP_OWNER_ANNOTATION]: cleanupOwner,
+      [CLEANUP_ARTIFACT_ANNOTATION]: claimAnnotations[CLEANUP_ARTIFACT_ANNOTATION],
+      [CLEANUP_STATE_ANNOTATION]: 'active',
+      [CLEANUP_STATE_SINCE_ANNOTATION]: claimAnnotations[CLEANUP_STATE_SINCE_ANNOTATION],
+    });
     return conversation;
   };
 
@@ -221,21 +306,24 @@ describe('Kubernetes execute-mode cross-node migration (isolated k3d E2E)', () =
   ]);
 
   const deleteConversation = async (id: string, volumeName: string): Promise<void> => {
-    if (forward) {
-      await api(`/api/conversations/${id}`, { method: 'DELETE' }).catch(() => undefined);
+    try {
+      if (!forward) throw new Error('orchestrator port-forward is unavailable');
+      const response = await api(`/api/conversations/${id}`, { method: 'DELETE' });
+      expect(response.status).toBe(204);
+      await waitFor(`${id} explicit-delete cleanup`, () =>
+        !resourceExists('pod', instanceObjectName(id))
+        && !resourceExists('service', instanceObjectName(id))
+        && !resourceExists('pvc', instanceVolumeClaimName(id))
+        && !resourceExists('opencodeinstance', id)
+        && !resourceExists('conversationroute', id), 90_000);
+    } finally {
+      deleteResource('pod', instanceObjectName(id));
+      deleteResource('service', instanceObjectName(id));
+      deleteResource('pvc', instanceVolumeClaimName(id));
+      deleteResource('opencodeinstance', id);
+      deleteResource('conversationroute', id);
+      kubectl(['delete', 'persistentvolume', volumeName, '--ignore-not-found=true', '--wait=false']);
     }
-    await waitFor(`${id} resource cleanup`, () =>
-      !resourceExists('pod', instanceObjectName(id))
-      && !resourceExists('service', instanceObjectName(id))
-      && !resourceExists('pvc', instanceVolumeClaimName(id))
-      && !resourceExists('opencodeinstance', id)
-      && !resourceExists('conversationroute', id), 90_000).catch(() => undefined);
-    deleteResource('pod', instanceObjectName(id));
-    deleteResource('service', instanceObjectName(id));
-    deleteResource('pvc', instanceVolumeClaimName(id));
-    deleteResource('opencodeinstance', id);
-    deleteResource('conversationroute', id);
-    kubectl(['delete', 'persistentvolume', volumeName, '--ignore-not-found=true', '--wait=false']);
   };
 
   beforeAll(async () => {
@@ -254,13 +342,217 @@ describe('Kubernetes execute-mode cross-node migration (isolated k3d E2E)', () =
       provisioner: 'kubernetes.io/no-provisioner',
       volumeBindingMode: 'Immediate',
     });
-    apiKey = readLiveApiKey();
+    apiKey = process.env.K8S_E2E_API_KEY ?? readLiveApiKey();
     forward = await startOrchestratorPortForward();
   });
 
   afterAll(async () => {
     if (forward) await forward.close();
     kubectl(['delete', 'storageclass', storageClass, '--ignore-not-found=true', '--wait=false']);
+  });
+
+  it('marks and deletes an owned orphan PVC only after its cleanup grace period', async () => {
+    const { claimName, volumeName } = createSharedVolume(orphanId);
+    try {
+      const originalUid = kubectlJson<KubeObject>([
+        '-n', K8S_NAMESPACE, 'get', 'pvc', claimName,
+      ]).metadata.uid;
+      expect(resourceExists('pod', instanceObjectName(orphanId))).toBe(false);
+      expect(resourceExists('opencodeinstance', orphanId)).toBe(false);
+      expect(resourceExists('conversationroute', orphanId)).toBe(false);
+
+      kubectl([
+        '-n', K8S_NAMESPACE,
+        'patch', 'pvc', claimName,
+        '--type=merge',
+        '-p', JSON.stringify({
+          metadata: {
+            labels: {
+              [PART_OF_LABEL]: PART_OF_VALUE,
+              [CONVERSATION_LABEL]: orphanId,
+            },
+            annotations: persistentDataAnnotations(cleanupOwner, 'active'),
+          },
+        }),
+      ]);
+
+      let response = await api('/api/cleanup/run', {
+        method: 'POST',
+        body: JSON.stringify({ targets: ['persistentData'], confirm: true }),
+      });
+      expect(response.status).toBe(200);
+      const marked = await response.json() as CleanupReport;
+      expect(marked).toMatchObject({ mode: 'run', status: 'completed' });
+      expect(marked.items.find((item) => item.conversationId === orphanId)).toMatchObject({
+        target: 'persistentData',
+        backend: 'kubernetes',
+        state: 'pending',
+        reason: 'orphan-first-observed',
+        outcome: 'marked',
+      });
+      expect(kubectlJson<KubeObject>(['-n', K8S_NAMESPACE, 'get', 'pvc', claimName])
+        .metadata.annotations?.[CLEANUP_STATE_ANNOTATION]).toBe('orphan-candidate');
+
+      let eligible: CleanupReport | undefined;
+      await waitFor('orphan PVC cleanup grace period', async () => {
+        response = await api('/api/cleanup/preview', {
+          method: 'POST',
+          body: JSON.stringify({ targets: ['persistentData'] }),
+        });
+        if (!response.ok) throw new Error(`cleanup preview failed: ${response.status} ${await response.text()}`);
+        eligible = await response.json() as CleanupReport;
+        return eligible.items.some((item) =>
+          item.conversationId === orphanId
+          && item.state === 'eligible'
+          && item.reason === 'orphan-retention-expired');
+      }, Math.max(10_000, orphanGracePeriodMs * 5), 250);
+      expect(eligible).toMatchObject({ mode: 'preview', status: 'completed' });
+
+      await setOrchestratorPvcDeletePermission(false);
+      response = await api('/api/cleanup/run', {
+        method: 'POST',
+        body: JSON.stringify({ targets: ['persistentData'], confirm: true }),
+      });
+      expect(response.status).toBe(200);
+      const failed = await response.json() as CleanupReport;
+      expect(failed.status).toBe('failed');
+      expect(failed.items.find((item) => item.conversationId === orphanId)).toMatchObject({
+        target: 'persistentData',
+        backend: 'kubernetes',
+        state: 'eligible',
+        reason: 'orphan-retention-expired',
+        outcome: 'failed',
+      });
+      expect(resourceExists('pvc', claimName)).toBe(true);
+
+      await setOrchestratorPvcDeletePermission(true);
+      response = await api('/api/cleanup/run', {
+        method: 'POST',
+        body: JSON.stringify({ targets: ['persistentData'], confirm: true }),
+      });
+      expect(response.status).toBe(200);
+      const deleted = await response.json() as CleanupReport;
+      expect(deleted).toMatchObject({ mode: 'run', status: 'completed' });
+      expect(deleted.items.find((item) => item.conversationId === orphanId)).toMatchObject({
+        target: 'persistentData',
+        backend: 'kubernetes',
+        state: 'eligible',
+        reason: 'orphan-retention-expired',
+        outcome: 'deleted',
+      });
+      await waitFor('owned orphan PVC deletion', () => !resourceExists('pvc', claimName), 30_000);
+
+      kubectl(['delete', 'persistentvolume', volumeName, '--ignore-not-found=true', '--wait=true']);
+      createSharedVolume(orphanId);
+      kubectl([
+        '-n', K8S_NAMESPACE,
+        'patch', 'pvc', claimName,
+        '--type=merge',
+        '-p', JSON.stringify({
+          metadata: {
+            labels: {
+              [PART_OF_LABEL]: PART_OF_VALUE,
+              [CONVERSATION_LABEL]: orphanId,
+            },
+            annotations: persistentDataAnnotations(cleanupOwner, 'active'),
+          },
+        }),
+      ]);
+      const replacementUid = kubectlJson<KubeObject>([
+        '-n', K8S_NAMESPACE, 'get', 'pvc', claimName,
+      ]).metadata.uid;
+      expect(replacementUid).not.toBe(originalUid);
+
+      response = await api('/api/cleanup/run', {
+        method: 'POST',
+        body: JSON.stringify({ targets: ['persistentData'], confirm: true }),
+      });
+      expect(response.status).toBe(200);
+      const replacement = await response.json() as CleanupReport;
+      expect(replacement.items.find((item) => item.conversationId === orphanId)).toMatchObject({
+        state: 'pending',
+        reason: 'orphan-first-observed',
+        outcome: 'marked',
+      });
+      expect(kubectlJson<KubeObject>(['-n', K8S_NAMESPACE, 'get', 'pvc', claimName]).metadata.uid)
+        .toBe(replacementUid);
+    } finally {
+      try {
+        await setOrchestratorPvcDeletePermission(true);
+      } finally {
+        deleteResource('pvc', claimName);
+        kubectl(['delete', 'persistentvolume', volumeName, '--ignore-not-found=true', '--wait=false']);
+      }
+    }
+  });
+
+  it('retries a durable explicit-delete marker after PVC deletion is denied', async () => {
+    const { claimName, volumeName } = createSharedVolume(deleteRetryId);
+    try {
+      await createAndStart(deleteRetryId);
+      const originalUid = kubectlJson<KubeObject>([
+        '-n', K8S_NAMESPACE, 'get', 'pvc', claimName,
+      ]).metadata.uid;
+
+      await setOrchestratorPvcDeletePermission(false);
+      const deletion = await api(`/api/conversations/${deleteRetryId}`, { method: 'DELETE' });
+      expect(deletion.status).toBe(204);
+      await waitFor('explicit-delete runtime shutdown', () =>
+        !resourceExists('pod', instanceObjectName(deleteRetryId))
+        && !resourceExists('service', instanceObjectName(deleteRetryId)), 90_000);
+
+      const pending = kubectlJson<KubeObject>([
+        '-n', K8S_NAMESPACE, 'get', 'pvc', claimName,
+      ]);
+      expect(pending.metadata.uid).toBe(originalUid);
+      expect(pending.metadata.annotations).toMatchObject({
+        [CLEANUP_OWNER_ANNOTATION]: cleanupOwner,
+        [CLEANUP_STATE_ANNOTATION]: 'delete-pending',
+      });
+      expect((await api(`/api/conversations/${deleteRetryId}`)).status).toBe(404);
+
+      let response = await api('/api/cleanup/run', {
+        method: 'POST',
+        body: JSON.stringify({ targets: ['persistentData'], confirm: true }),
+      });
+      expect(response.status).toBe(200);
+      const failed = await response.json() as CleanupReport;
+      expect(failed.status).toBe('failed');
+      expect(failed.items.find((item) => item.conversationId === deleteRetryId)).toMatchObject({
+        state: 'eligible',
+        reason: 'explicit-delete-pending',
+        outcome: 'failed',
+      });
+
+      await setOrchestratorPvcDeletePermission(true);
+      response = await api('/api/cleanup/run', {
+        method: 'POST',
+        body: JSON.stringify({ targets: ['persistentData'], confirm: true }),
+      });
+      expect(response.status).toBe(200);
+      const retried = await response.json() as CleanupReport;
+      expect(retried.status).toBe('completed');
+      expect(retried.items.find((item) => item.conversationId === deleteRetryId)).toMatchObject({
+        state: 'eligible',
+        reason: 'explicit-delete-pending',
+        outcome: 'deleted',
+      });
+      await waitFor('explicit-delete PVC retry', () => !resourceExists('pvc', claimName), 30_000);
+      await waitFor('explicit-delete cluster authority cleanup', () =>
+        !resourceExists('opencodeinstance', deleteRetryId)
+        && !resourceExists('conversationroute', deleteRetryId), 30_000);
+    } finally {
+      try {
+        await setOrchestratorPvcDeletePermission(true);
+      } finally {
+        deleteResource('pod', instanceObjectName(deleteRetryId));
+        deleteResource('service', instanceObjectName(deleteRetryId));
+        deleteResource('pvc', claimName);
+        deleteResource('opencodeinstance', deleteRetryId);
+        deleteResource('conversationroute', deleteRetryId);
+        kubectl(['delete', 'persistentvolume', volumeName, '--ignore-not-found=true', '--wait=false']);
+      }
+    }
   });
 
   it('moves a live conversation to another worker once and resumes its persisted session', async () => {
@@ -320,6 +612,41 @@ describe('Kubernetes execute-mode cross-node migration (isolated k3d E2E)', () =
       await new Promise((resolve) => setTimeout(resolve, reconcileIntervalMs * 3 + 500));
       expect(getPod(successId).metadata.uid).toBe(settledPodUid);
       expect(getRoute(successId).status?.migrationHistory).toHaveLength(1);
+
+      const stop = await api(`/api/conversations/${successId}/stop`, {
+        method: 'POST',
+        body: '{}',
+      });
+      expect(stop.status).toBe(200);
+      await waitFor('migrated conversation stop', async () => {
+        const conversation = await getConversation(successId);
+        return conversation.status === 'stopped'
+          && !resourceExists('pod', instanceObjectName(successId));
+      }, 90_000);
+
+      const cleanup = await api('/api/cleanup/run', {
+        method: 'POST',
+        body: JSON.stringify({ targets: ['persistentData'], confirm: true }),
+      });
+      expect(cleanup.status).toBe(200);
+      const cleanupReport = await cleanup.json() as CleanupReport;
+      expect(cleanupReport.items.find((item) => item.conversationId === successId)).toMatchObject({
+        backend: 'kubernetes',
+        outcome: 'skipped',
+      });
+      expect(kubectlJson<KubeObject>(['-n', K8S_NAMESPACE, 'get', 'pvc', claimName]).metadata.uid)
+        .toBe(initialClaim.metadata.uid);
+
+      const restart = await api(`/api/conversations/${successId}/restart`, {
+        method: 'POST',
+        body: '{}',
+      });
+      expect(restart.status).toBe(200);
+      const resumed = await waitUntilReady(successId);
+      expect(resumed.sessionId).toBe(initialSessionId);
+      expect(readSentinel(successId)).toBe(sentinel);
+      expect(kubectlJson<KubeObject>(['-n', K8S_NAMESPACE, 'get', 'pvc', claimName]).metadata.uid)
+        .toBe(initialClaim.metadata.uid);
     } finally {
       await deleteConversation(successId, volumeName);
     }

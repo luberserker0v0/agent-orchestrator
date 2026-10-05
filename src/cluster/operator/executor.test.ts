@@ -74,12 +74,25 @@ describe('createMigrateCaller', () => {
 describe('conversationVolumeBody', () => {
   it('builds an RWO claim with the plan naming', () => {
     const body = conversationVolumeBody('abc', '10Gi') as {
-      metadata: { name: string };
+      metadata: { name: string; annotations: Record<string, string> };
       spec: { accessModes: string[]; resources: { requests: { storage: string } } };
     };
     expect(body.metadata.name).toBe('conv-abc');
+    expect(body.metadata.annotations).toMatchObject({
+      'agentorchestrator.io/cleanup-owner': 'agent-orchestrator',
+      'agentorchestrator.io/cleanup-artifact': expect.any(String),
+      'agentorchestrator.io/cleanup-state': 'active',
+      'agentorchestrator.io/cleanup-state-since': expect.any(String),
+    });
     expect(body.spec.accessModes).toEqual(['ReadWriteOnce']);
     expect(body.spec.resources.requests.storage).toBe('10Gi');
+  });
+
+  it('uses an explicit cleanup owner annotation', () => {
+    const body = conversationVolumeBody('abc', '10Gi', 'owner-a') as {
+      metadata: { annotations: Record<string, string> };
+    };
+    expect(body.metadata.annotations['agentorchestrator.io/cleanup-owner']).toBe('owner-a');
   });
 });
 

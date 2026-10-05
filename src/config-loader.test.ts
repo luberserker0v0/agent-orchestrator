@@ -1,9 +1,9 @@
-import { readFileSync, existsSync, renameSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, existsSync, renameSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse as parseJSONC } from 'jsonc-parser';
 import { describe, it, expect, afterEach } from 'vitest';
-import { loadConfig, validateConfig, readJSON, normalizeApiKeys, validateSessionStorageConfig } from './config-loader.js';
+import { defaultConfig, loadConfig, validateConfig, readJSON, normalizeApiKeys, validateDockerLoggingConfig, validateSessionStorageConfig } from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
 
 function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentOrchestratorConfig {
@@ -20,6 +20,8 @@ function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentO
       healthCheck: { retries: 10, intervalMs: 500, clientTimeoutMs: 5000 },
     },
     workspace: { basePath: './workspace', enforceCanonicalConfig: true, maxSizeBytes: 52428800, storage: { type: 'local' } },
+    logging: { file: { enabled: false, directory: './logs', maxFileSizeBytes: 10485760, maxRotatedFiles: 10, retentionMs: 604800000 } },
+    cleanup: { ownerId: null, sweepIntervalMs: 3600000, orphanedData: { enabled: false, gracePeriodMs: 2592000000 } },
     ...overrides,
   } as AgentOrchestratorConfig;
 }
@@ -31,6 +33,60 @@ describe('loadConfig', () => {
     expect(config).toHaveProperty('websocket');
     expect(config).toHaveProperty('orchestrator');
     expect(config).toHaveProperty('workspace');
+  });
+
+  it('provides the documented cleanup and file logging defaults', () => {
+    const config = defaultConfig();
+
+    expect(config.logging.file).toEqual({
+      enabled: false,
+      directory: './logs',
+      maxFileSizeBytes: 10_485_760,
+      maxRotatedFiles: 10,
+      retentionMs: 604_800_000,
+    });
+    expect(config.cleanup).toEqual({
+      ownerId: null,
+      sweepIntervalMs: 3_600_000,
+      orphanedData: {
+        enabled: false,
+        gracePeriodMs: 2_592_000_000,
+      },
+    });
+  });
+
+  it('deep-merges partial cleanup and file logging objects with defaults', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ao-config-merge-'));
+    const path = join(directory, 'agentorchestrator.json');
+    writeFileSync(path, JSON.stringify({
+      logging: { file: { enabled: true, maxRotatedFiles: 4 } },
+      cleanup: {
+        ownerId: 'deep-merge-owner',
+        orphanedData: { enabled: true },
+      },
+    }), 'utf8');
+
+    try {
+      const config = loadConfig(path);
+
+      expect(config.logging.file).toEqual({
+        enabled: true,
+        directory: './logs',
+        maxFileSizeBytes: 10_485_760,
+        maxRotatedFiles: 4,
+        retentionMs: 604_800_000,
+      });
+      expect(config.cleanup).toEqual({
+        ownerId: 'deep-merge-owner',
+        sweepIntervalMs: 3_600_000,
+        orphanedData: {
+          enabled: true,
+          gracePeriodMs: 2_592_000_000,
+        },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 
@@ -406,6 +462,56 @@ describe('validateConfig', () => {
     });
   });
 
+  describe('cleanup and file logging validation', () => {
+    it('accepts disabled conservative defaults', () => {
+      expect(() => validateConfig(createValidConfig())).not.toThrow();
+    });
+
+    it('requires an owner when orphan cleanup is enabled', () => {
+      const config = createValidConfig();
+      config.cleanup.orphanedData.enabled = true;
+      expect(() => validateConfig(config)).toThrow('cleanup.ownerId is required');
+    });
+
+    it('rejects a whitespace-only owner when orphan cleanup is enabled', () => {
+      const config = createValidConfig();
+      config.cleanup.ownerId = '   ';
+      config.cleanup.orphanedData.enabled = true;
+      expect(() => validateConfig(config)).toThrow('cleanup.ownerId');
+    });
+
+    it('accepts enabled cleanup with a stable owner', () => {
+      const config = createValidConfig();
+      config.cleanup.ownerId = 'primary-ao';
+      config.cleanup.orphanedData.enabled = true;
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it('rejects filesystem-root log directories and invalid numeric limits', () => {
+      const rootConfig = createValidConfig();
+      rootConfig.logging.file.directory = process.platform === 'win32' ? 'C:\\' : '/';
+      expect(() => validateConfig(rootConfig)).toThrow('cannot be a filesystem root');
+
+      const sizeConfig = createValidConfig();
+      sizeConfig.logging.file.maxFileSizeBytes = 0;
+      expect(() => validateConfig(sizeConfig)).toThrow('maxFileSizeBytes must be a positive safe integer');
+    });
+  });
+
+  describe('validateDockerLoggingConfig', () => {
+    it('accepts bounded local logging', () => {
+      expect(validateDockerLoggingConfig({ driver: 'local', maxSize: '10m', maxFiles: 3 })).toEqual([]);
+    });
+
+    it('rejects unsafe driver and limits', () => {
+      expect(validateDockerLoggingConfig({ driver: 'syslog', maxSize: 'all', maxFiles: 0 })).toEqual([
+        '"logging.driver" must be "local" or "json-file"',
+        '"logging.maxSize" must be a Docker size such as "10m"',
+        '"logging.maxFiles" must be a positive integer',
+      ]);
+    });
+  });
+
   describe('cluster validation', () => {
     it('accepts absent cluster section (reporting disabled)', () => {
       const config = createValidConfig();
@@ -584,6 +690,29 @@ describe('loadConfig with env overrides', () => {
     process.env.AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES = '0';
     const config = loadConfig();
     expect(config.workspace.maxSizeBytes).toBe(0);
+  });
+
+  it('maps underscore-separated names onto camelCase config keys', () => {
+    process.env.AGENTORCHESTRATOR_SERVER_SHUTDOWN_TIMEOUT_MS = '22222';
+    process.env.AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS = '12345';
+    const config = loadConfig();
+    expect(config.server.shutdownTimeoutMs).toBe(22222);
+    expect(config.orchestrator.idleSweepIntervalMs).toBe(12345);
+  });
+
+  it('overrides nested cleanup and file logging settings', () => {
+    process.env.AGENTORCHESTRATOR_LOGGING_FILE_ENABLED = 'true';
+    process.env.AGENTORCHESTRATOR_LOGGING_FILE_MAX_FILE_SIZE_BYTES = '2048';
+    process.env.AGENTORCHESTRATOR_CLEANUP_OWNER_ID = 'env-owner';
+    process.env.AGENTORCHESTRATOR_CLEANUP_SWEEP_INTERVAL_MS = '6000';
+    process.env.AGENTORCHESTRATOR_CLEANUP_ORPHANED_DATA_ENABLED = 'true';
+    process.env.AGENTORCHESTRATOR_CLEANUP_ORPHANED_DATA_GRACE_PERIOD_MS = '5000';
+    const config = loadConfig();
+    expect(config.logging.file.enabled).toBe(true);
+    expect(config.logging.file.maxFileSizeBytes).toBe(2048);
+    expect(config.cleanup.ownerId).toBe('env-owner');
+    expect(config.cleanup.sweepIntervalMs).toBe(6000);
+    expect(config.cleanup.orphanedData).toEqual({ enabled: true, gracePeriodMs: 5000 });
   });
 });
 

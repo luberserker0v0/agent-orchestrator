@@ -14,6 +14,8 @@ docker run -d \
   -p 8080:8080 \
   -v /path/to/config:/app/config \
   -v /path/to/workspace:/app/workspace \
+  -v /path/to/logs:/app/logs \
+  --log-driver local --log-opt max-size=10m --log-opt max-file=3 \
   ghcr.io/anomalyco/opencode:latest
 ```
 
@@ -23,6 +25,7 @@ docker run -d \
 |---------------|-----------|---------|
 | `/app/config` | Config directory | Configuration files |
 | `/app/workspace` | Workspace directory | Conversation workspaces |
+| `/app/logs` | AO log directory | Optional rotating JSONL logs |
 
 ### Named Volumes (Recommended)
 
@@ -90,6 +93,12 @@ services:
     volumes:
       - ao-config:/app/config
       - ao-workspace:/app/workspace
+      - ao-logs:/app/logs
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -101,6 +110,7 @@ services:
 volumes:
   ao-config:
   ao-workspace:
+  ao-logs:
 ```
 
 ```bash
@@ -137,6 +147,16 @@ docker exec agent-orchestrator curl -f http://localhost:8080/health
 ```
 
 ## Logs
+
+Two independent policies apply:
+
+- Docker/Compose rotates the AO container's stdout/stderr with the service
+  `logging` block.
+- `logging.file` in AgentOrchestrator mirrors filtered records to JSONL under
+  `/app/logs`; mount that path if those files must survive container replacement.
+
+For Docker-runtime OpenCode instances, configure `orchestrator.runtimes[].config.logging`
+to bound each spawned container's engine logs.
 
 ```bash
 # View logs

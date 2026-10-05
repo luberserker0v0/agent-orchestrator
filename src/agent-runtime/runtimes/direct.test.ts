@@ -6,11 +6,12 @@ vi.mock('tree-kill', () => ({
 }));
 
 import { spawn } from 'cross-spawn';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { DirectRuntime } from './direct.js';
+import { readSessionOwnershipRecord, resolveSessionStorage } from '../session-storage.js';
 
 function createMockProc(opts: { exitCode?: number | null; pid?: number | undefined } = {}) {
   const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
@@ -169,6 +170,7 @@ describe('DirectRuntime', () => {
             env: expect.objectContaining({ XDG_DATA_HOME: join(root, 'sess-conv') }),
           }),
         );
+        expect(readSessionOwnershipRecord({ sharedRoot: root }, 'sess-conv')).toBeUndefined();
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -257,6 +259,50 @@ describe('DirectRuntime', () => {
       const rt = new DirectRuntime(createPortPool());
       await expect(rt.stop(undefined)).resolves.toBeUndefined();
     });
+  });
+
+  describe('persistent data deletion', () => {
+    it('uses a transient tombstone to delete storage when cleanup ownership is unset', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'ao-direct-delete-'));
+      try {
+        const config = { sharedRoot: root };
+        const rt = new DirectRuntime(createPortPool(), {
+          binary: 'opencode',
+          sessionStorage: config,
+        });
+        (spawn as any).mockReturnValue(createMockProc());
+        mockFetch.mockResolvedValue(makeHealthyFetch());
+
+        await rt.start(
+          'direct-delete', '/tmp/ws',
+          { username: 'u', password: 'p' },
+          { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+        );
+        writeFileSync(join(root, 'direct-delete', 'opencode.db'), 'data');
+        expect(readSessionOwnershipRecord(config, 'direct-delete')).toBeUndefined();
+
+        await rt.preparePersistentDataDeletion('direct-delete');
+        expect(readSessionOwnershipRecord(config, 'direct-delete')?.state).toBe('delete-pending');
+        await rt.deletePersistentData('direct-delete');
+
+        expect(existsSync(join(root, 'direct-delete'))).toBe(false);
+        expect(readSessionOwnershipRecord(config, 'direct-delete')).toBeUndefined();
+
+        const recreated = resolveSessionStorage(config, 'direct-delete');
+        writeFileSync(join(recreated.sessionDir, 'keep.txt'), 'new generation');
+        await rt.deletePersistentData('direct-delete');
+        expect(existsSync(join(recreated.sessionDir, 'keep.txt'))).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('is a no-op without configured session storage', async () => {
+      const rt = new DirectRuntime(createPortPool(), { binary: 'opencode' });
+      await expect(rt.preparePersistentDataDeletion('direct-no-storage')).resolves.toBeUndefined();
+      await expect(rt.deletePersistentData('direct-no-storage')).resolves.toBeUndefined();
+    });
+
   });
 
   describe('restart', () => {

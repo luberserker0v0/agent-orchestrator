@@ -143,3 +143,38 @@ export const workspaceQuotaExceededTotal = new Counter({
   help: 'Total workspace quota exceeded errors',
   registers: [metricsRegistry],
 });
+
+export const cleanupRunsTotal = new Counter({
+  name: 'agentorchestrator_cleanup_runs_total',
+  help: 'Cleanup runs by trigger and result',
+  labelNames: ['trigger', 'result'],
+  registers: [metricsRegistry],
+});
+
+export const cleanupArtifactsTotal = new Counter({
+  name: 'agentorchestrator_cleanup_artifacts_total',
+  help: 'Cleanup artifact actions by target, action, and result',
+  labelNames: ['target', 'action', 'result'],
+  registers: [metricsRegistry],
+});
+
+export const cleanupReclaimedBytesTotal = new Counter({
+  name: 'agentorchestrator_cleanup_reclaimed_bytes_total',
+  help: 'Known bytes reclaimed by cleanup target',
+  labelNames: ['target'],
+  registers: [metricsRegistry],
+});
+
+export const cleanupLastSuccessTimestampSeconds = new Gauge({
+  name: 'agentorchestrator_cleanup_last_success_timestamp_seconds',
+  help: 'Unix timestamp of the last successful cleanup by target',
+  labelNames: ['target'],
+  registers: [metricsRegistry],
+});
+
+export const logFileErrorsTotal = new Counter({
+  name: 'agentorchestrator_log_file_errors_total',
+  help: 'File log sink errors by operation',
+  labelNames: ['operation'],
+  registers: [metricsRegistry],
+});

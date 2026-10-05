@@ -129,6 +129,11 @@ export class ConversationService {
     return this.runLifecycle(id, () => this.deleteUnlocked(id));
   }
 
+  /** Share the lifecycle lock with retention cleanup final checks. */
+  withLifecycleLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    return this.runLifecycle(id, operation);
+  }
+
   private async startUnlocked(id: string): Promise<StartResult> {
     const state = this.conversationState.get(id);
     if (!state) {
@@ -161,6 +166,9 @@ export class ConversationService {
         ...(runtimeType ? { runtimeType } : {}),
         ...(instance.baseUrl ? { endpoint: instance.baseUrl } : {}),
         ...(instance.nodeName ? { nodeName: instance.nodeName } : {}),
+        ...(instance.persistentDataAnnotations
+          ? { persistentDataAnnotations: instance.persistentDataAnnotations }
+          : {}),
         volumeClaimName: conversationVolumeClaimName(id),
       });
 
@@ -363,11 +371,31 @@ export class ConversationService {
 
     const hasInstance = this.instanceManager.getInstance(id) !== undefined;
     logger.info(`[${id}] delete: instance exists in manager=${hasInstance}`);
+    try {
+      await this.instanceManager.preparePersistentDataDeletion?.(id, agentType);
+      if (agentType && this.getRuntimeType?.(agentType) === 'kubernetes') {
+        await this.statusReporter?.markPersistentDataDeletePending(id);
+      }
+    } catch (err) {
+      throw new AppError(
+        500,
+        ErrorCodes.PERSISTENT_DATA_CLEANUP_PENDING,
+        `Unable to record persistent-data deletion intent for ${id}: ${(err as Error).message}`,
+      );
+    }
     this.sseBridge?.stop(id);
-    await this.instanceManager.destroyInstance(id).catch(() => {});
-    await this.instanceManager.deletePersistentData?.(id, agentType).catch((err: unknown) => {
-      logger.warn(`Failed to remove persistent runtime data for ${id}:`, err);
-    });
+    let runtimeStopped = false;
+    try {
+      await this.instanceManager.destroyInstance(id);
+      runtimeStopped = true;
+    } catch (err) {
+      logger.warn(`Failed to stop runtime for ${id}; persistent data remains delete-pending`, err);
+    }
+    if (runtimeStopped) {
+      await this.instanceManager.deletePersistentData?.(id, agentType).catch((err: unknown) => {
+        logger.warn(`Failed to remove persistent runtime data for ${id}:`, err);
+      });
+    }
     logger.debug(`[${id}] delete: destroyInstance returned, attempting workspace cleanup`);
     try {
       await this.workspaceFactory.destroy(id);

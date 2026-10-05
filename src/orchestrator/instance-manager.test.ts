@@ -628,14 +628,18 @@ describe('InstanceManager', () => {
   });
 
   describe('kill edge cases', () => {
-    it('does not throw when handle.kill throws', async () => {
+    it('surfaces repeated kill failures and retains the instance', async () => {
       const handle = createMockHandle({ exitCode: null });
       handle.kill = vi.fn().mockRejectedValue(new Error('kill failed'));
       const port = allocPorts(1)[0];
       mockSpawnFn.mockResolvedValue({ client: mockClient, port, handle });
 
       await instanceManager.createInstance('conv-kill-err');
-      await expect(instanceManager.destroyInstance('conv-kill-err')).resolves.toBeUndefined();
+      await expect(instanceManager.destroyInstance('conv-kill-err'))
+        .rejects.toThrow('refusing destructive cleanup');
+      expect(instanceManager.listInstances()).toEqual([
+        expect.objectContaining({ id: 'conv-kill-err' }),
+      ]);
     });
 
     it('handles waitForExit timeout when process does not exit', async () => {

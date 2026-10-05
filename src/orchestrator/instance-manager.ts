@@ -99,6 +99,10 @@ export class InstanceManager {
     return this.runtimeManager.deletePersistentData(id, agentType);
   }
 
+  preparePersistentDataDeletion(id: string, agentType?: string): Promise<void> {
+    return this.runtimeManager.preparePersistentDataDeletion(id, agentType);
+  }
+
   destroy(): void {
     if (this.idleSweepTimer) {
       clearInterval(this.idleSweepTimer);

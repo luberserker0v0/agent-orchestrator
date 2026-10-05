@@ -140,6 +140,8 @@ export interface AgentEndpoint {
   baseUrl?: string;
   /** Runtime placement identity, such as the Kubernetes node hosting the instance Pod. */
   nodeName?: string;
+  /** Internal ownership annotations for the runtime's persistent data artifact. */
+  persistentDataAnnotations?: Record<string, string>;
 }
 
 // ─── AgentRuntime ──────────────────────────────────────────────────────
@@ -156,6 +158,8 @@ export interface AgentRuntime {
   ): Promise<AgentEndpoint>;
   stop(handle?: InstanceHandle, signal?: string): Promise<void>;
   cleanupOrphans?(): Promise<void>;
+  /** Durably record explicit deletion intent before stopping the runtime. */
+  preparePersistentDataDeletion?(id: string): Promise<void>;
   /** Delete durable runtime-owned data after an explicit conversation DELETE. */
   deletePersistentData?(id: string): Promise<void>;
   restart(id: string, healthCheckConfig: HealthCheckConfig): Promise<AgentEndpoint>;

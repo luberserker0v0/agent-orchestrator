@@ -18,7 +18,8 @@ rules:
   - apiGroups: [""]
     resources: [pods, persistentvolumeclaims]
     verbs: [get, list, watch]
-  # Per-conversation volume lifecycle (provision on appear, GC on delete).
+  # Per-conversation volume provisioning. Retention-aware GC is owned by the
+  # orchestrator cleanup policy so a missing instance cannot delete data.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
-    verbs: [create, delete]
+    verbs: [create]

@@ -20,6 +20,8 @@ function makeConfig(runtimes: Array<{ id: string; type: string; config: Record<s
       sse: { enabled: true, reconnectMaxAttempts: 10, reconnectBaseMs: 1000, filterHeartbeat: true },
     },
     workspace: { basePath: '/tmp/ws', enforceCanonicalConfig: true, storage: { type: 'local' } },
+    logging: { file: { enabled: false, directory: './logs', maxFileSizeBytes: 10485760, maxRotatedFiles: 10, retentionMs: 604800000 } },
+    cleanup: { ownerId: null, sweepIntervalMs: 3600000, orphanedData: { enabled: false, gracePeriodMs: 2592000000 } },
   };
 }
 

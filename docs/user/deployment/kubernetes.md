@@ -45,8 +45,9 @@ k8s/
 
 ```bash
 kubectl apply -f k8s/namespace.yaml -f k8s/crd/
+# Edit the shared Secret first (API keys and cleanup.ownerId), then:
+kubectl apply -f k8s/orchestrator/secret.yaml
 kubectl apply -f k8s/operator/
-# Edit k8s/orchestrator/secret.yaml (API keys), then:
 kubectl apply -f k8s/orchestrator/
 ```
 
@@ -56,6 +57,8 @@ kubectl apply -f k8s/orchestrator/
 (`agentorchestrator.json` with a `kubernetes` runtime + `cluster.enabled`),
 own workspace PVC (`ao-workspace`), `ClusterIP` Service, Traefik sticky ingress
 (set `agentorchestrator.example.com` + TLS), and a `ServiceMonitor`.
+The placement-controller Deployment mounts that same Secret so both processes
+use the identical `cleanup.ownerId`; do not give them separate owner values.
 Scale beyond 1 replica only with sticky routing — conversation state is
 per-Pod until shared state lands (see limitations).
 
@@ -115,6 +118,14 @@ and enable status reporting so the controller can place and migrate:
     "heartbeatIntervalMs": 60000,
     "quotaFailureThreshold": 2
     // "advertiseBaseUrl": "http://orchestrator:8080" // owner URL for migration callbacks
+  },
+  "cleanup": {
+    "ownerId": "production-cluster-1",
+    "sweepIntervalMs": 3600000,
+    "orphanedData": {
+      "enabled": true,
+      "gracePeriodMs": 2592000000
+    }
   }
 }
 ```
@@ -132,9 +143,19 @@ and enable status reporting so the controller can place and migrate:
 One RWO PVC per conversation (`conv-<id>`, see `k8s/volume/conversation-pvc-template.yaml`).
 The instance Pod mounts it at `/data/conversations/<id>` (`workspace/` + `session/`).
 The runtime ensures the claim exists before creating the Pod; the controller performs
-the same operation idempotently while reconciling status objects.
-Retention: deleted **only** on explicit conversation DELETE — never on migration,
-eviction, or idle timeout.
+the same operation idempotently while reconciling status objects. Managed claims carry
+owner, artifact, state, and timestamp annotations.
+
+An explicit conversation `DELETE` marks the PVC delete-pending, waits until no Pod
+references it, mirrors the marker to the corresponding `OpencodeInstance`, and
+deletes with a UID precondition. The controller treats delete-pending instance
+records as tombstones: it removes their routes, never recreates storage, and removes
+the record after the PVC is gone. Missing instance records only remove stale routes.
+Periodic orphan cleanup requires healthy CR/route/Pod/PVC
+listings, a matching stable `cleanup.ownerId`, two observations separated by the full
+grace period, and a fresh UID/ownership check. Stopped, restarted, migrated, and
+idle-evicted conversations retain their PVCs. Foreign or unlabeled PVCs are never
+touched.
 
 ## Placement Controller
 
@@ -153,9 +174,14 @@ Runs `aor operator` (image `luberserker/agent-orchestrator:main` or a release ta
 | `--pvc-storage` | `10Gi` | Storage request for auto-provisioned per-conversation PVCs |
 
 The controller ensures `conv-<id>` PVCs exist when instances appear
-(dynamic provisioning via the default `StorageClass`) and deletes route + volume
-when the instance object disappears (conversation DELETE; `stop` keeps a `Stopped`
-object so its volume survives for restart).
+(dynamic provisioning via the default `StorageClass`). When an instance object
+disappears, the controller removes only its stale route; the cleanup policy owns PVC
+retention and deletion.
+
+Kubernetes container logs remain owned by the kubelet/container runtime. Configure
+node log rotation and a TTL in the external log backend independently from AO's
+optional JSONL file sink. PVC requested capacity is not reported as reclaimed bytes,
+because it is not a reliable measure of bytes actually reclaimed.
 
 Quota flow: LLM 429/402/403 → typed `LLM_QUOTA_EXHAUSTED` → instance flips to
 `QuotaExhausted` after the flap threshold → controller migrates the Pod to a healthy

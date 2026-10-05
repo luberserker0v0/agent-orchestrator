@@ -6,6 +6,7 @@ vi.mock('../utils/logger.js', () => ({
 
 import { ConversationService } from './conversation-service.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
+import type { K8sStatusReporter } from '../cluster/status-reporter.js';
 
 describe('ConversationService', () => {
   let service: ConversationService;
@@ -20,6 +21,7 @@ describe('ConversationService', () => {
     mockInstanceManager = {
       createInstance: vi.fn(),
       destroyInstance: vi.fn().mockResolvedValue(undefined),
+      preparePersistentDataDeletion: vi.fn().mockResolvedValue(undefined),
       deletePersistentData: vi.fn().mockResolvedValue(undefined),
       restartInstance: vi.fn(),
       stopInstance: vi.fn(),
@@ -796,18 +798,22 @@ describe('ConversationService', () => {
       await service.delete(testId);
 
       expect(mockInstanceManager.destroyInstance).toHaveBeenCalledWith(testId);
+      expect(mockInstanceManager.preparePersistentDataDeletion).toHaveBeenCalledWith(testId, 'opencode-k8s');
       expect(mockInstanceManager.deletePersistentData).toHaveBeenCalledWith(testId, 'opencode-k8s');
+      expect(mockInstanceManager.preparePersistentDataDeletion.mock.invocationCallOrder[0])
+        .toBeLessThan(mockInstanceManager.destroyInstance.mock.invocationCallOrder[0]);
       expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith(testId);
       expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'destroyed');
       expect(mockConversationState.remove).toHaveBeenCalledWith(testId);
     });
 
-    it('should swallow destroyInstance error', async () => {
+    it('leaves persistent data pending when the runtime cannot be stopped', async () => {
       mockConversationState.has.mockReturnValue(true);
       mockInstanceManager.destroyInstance.mockRejectedValue(new Error('kill failed'));
 
       await service.delete(testId);
 
+      expect(mockInstanceManager.deletePersistentData).not.toHaveBeenCalled();
       expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith(testId);
     });
 
@@ -820,6 +826,74 @@ describe('ConversationService', () => {
       await service.delete(testId);
 
       expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it('marks the Kubernetes instance record before stopping the runtime', async () => {
+      const mockReporter = {
+        markPersistentDataDeletePending: vi.fn().mockResolvedValue(undefined),
+        untrackInstance: vi.fn().mockResolvedValue(undefined),
+      };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-k8s',
+        undefined,
+        mockReporter as unknown as K8sStatusReporter,
+        () => 'kubernetes',
+      );
+      mockConversationState.has.mockReturnValue(true);
+      mockConversationState.get.mockReturnValue({ agentType: 'opencode-k8s' });
+
+      await svc.delete(testId);
+
+      expect(mockReporter.markPersistentDataDeletePending).toHaveBeenCalledWith(testId);
+      expect(mockInstanceManager.preparePersistentDataDeletion.mock.invocationCallOrder[0])
+        .toBeLessThan(mockReporter.markPersistentDataDeletePending.mock.invocationCallOrder[0]);
+      expect(mockReporter.markPersistentDataDeletePending.mock.invocationCallOrder[0])
+        .toBeLessThan(mockInstanceManager.destroyInstance.mock.invocationCallOrder[0]);
+    });
+
+    it('keeps the Kubernetes runtime alive when its instance deletion marker fails', async () => {
+      const mockReporter = {
+        markPersistentDataDeletePending: vi.fn().mockRejectedValue(new Error('CR update failed')),
+        untrackInstance: vi.fn(),
+      };
+      const svc = new ConversationService(
+        mockInstanceManager,
+        mockConversationState,
+        mockWorkspaceFactory,
+        mockRuntimeManager,
+        mockServerConfig,
+        'opencode-k8s',
+        undefined,
+        mockReporter as unknown as K8sStatusReporter,
+        () => 'kubernetes',
+      );
+      mockConversationState.has.mockReturnValue(true);
+      mockConversationState.get.mockReturnValue({ agentType: 'opencode-k8s' });
+
+      await expect(svc.delete(testId)).rejects.toMatchObject({
+        code: ErrorCodes.PERSISTENT_DATA_CLEANUP_PENDING,
+      });
+      expect(mockInstanceManager.destroyInstance).not.toHaveBeenCalled();
+      expect(mockConversationState.remove).not.toHaveBeenCalled();
+    });
+
+    it('keeps the conversation intact when deletion intent cannot be persisted', async () => {
+      mockConversationState.has.mockReturnValue(true);
+      mockConversationState.get.mockReturnValue({ agentType: 'opencode-direct' });
+      mockInstanceManager.preparePersistentDataDeletion.mockRejectedValue(new Error('metadata unavailable'));
+
+      await expect(service.delete(testId)).rejects.toMatchObject({
+        code: ErrorCodes.PERSISTENT_DATA_CLEANUP_PENDING,
+      });
+
+      expect(mockInstanceManager.destroyInstance).not.toHaveBeenCalled();
+      expect(mockInstanceManager.deletePersistentData).not.toHaveBeenCalled();
+      expect(mockConversationState.remove).not.toHaveBeenCalled();
     });
 
     it('should throw 404 when not found', async () => {

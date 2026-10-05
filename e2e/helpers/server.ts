@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OrchestratorConfig, AgentOrchestratorConfig } from '../../src/config-loader.js';
+import { defaultConfig, type OrchestratorConfig, type AgentOrchestratorConfig } from '../../src/config-loader.js';
 import { createHttpServer, type HttpServer } from '../../src/http-api/server.js';
 import { WorkspaceFactory } from '../../src/orchestrator/workspace-factory.js';
 import { InstanceManager } from '../../src/orchestrator/instance-manager.js';
@@ -103,6 +103,8 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     websocket: wsConfig,
     orchestrator: orchestratorConfig,
     workspace: workspaceConfig,
+    logging: defaultConfig().logging,
+    cleanup: defaultConfig().cleanup,
   };
   const roleService = new RoleService(join(workspaceDir, 'agentorchestrator.json'), fullConfig.roles);
 
