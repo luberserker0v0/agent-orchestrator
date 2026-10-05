@@ -17,7 +17,7 @@ A Node.js orchestrator that manages [OpenCode](https://opencode.ai) AI coding ag
 
 ```bash
 # npm
-npm install -g agent-orchestrator
+npm install -g @luberserker/agent-orchestrator
 aor
 
 # Docker

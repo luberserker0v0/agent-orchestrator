@@ -5,7 +5,7 @@ Deploy AgentOrchestrator using npm for single-server environments.
 ## Global Install
 
 ```bash
-npm install -g agent-orchestrator
+npm install -g @luberserker/agent-orchestrator
 ```
 
 ### CLI Usage
@@ -159,7 +159,7 @@ npm run dev
 
 ```bash
 # npm global
-npm update -g agent-orchestrator
+npm update -g @luberserker/agent-orchestrator
 
 # Source
 git pull origin main

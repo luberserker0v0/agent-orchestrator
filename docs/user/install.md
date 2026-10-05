@@ -21,7 +21,7 @@ docker run -d \
 
 ```bash
 # Install globally
-npm install -g agent-orchestrator
+npm install -g @luberserker/agent-orchestrator
 
 # Run
 aor

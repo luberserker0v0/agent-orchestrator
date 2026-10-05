@@ -8,7 +8,7 @@ Regular maintenance tasks for AgentOrchestrator deployments.
 
 ```bash
 # Update
-npm update -g agent-orchestrator
+npm update -g @luberserker/agent-orchestrator
 
 # Verify
 aor --version
