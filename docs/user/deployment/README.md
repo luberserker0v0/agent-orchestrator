@@ -26,7 +26,7 @@ docker run -d \
 ### npm Global
 
 ```bash
-npm install -g @luberserker/agent-orchestrator
+npm install -g @luberserker0v0/agent-orchestrator
 aor
 ```
 
