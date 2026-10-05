@@ -4,6 +4,15 @@ import { planMigration, rankNodes, isRefillDue, refillWindowMs, type MigrationCa
 import { migrationsTotal } from '../../metrics/registry.js';
 import { createLiveExecutor, createLiveVolumes, conversationVolumeBody, type Executor, type VolumeObjectsApi } from './executor.js';
 import { conversationVolumeClaimName } from '../status-reporter.js';
+import {
+  CLEANUP_ARTIFACT_ANNOTATION,
+  CLEANUP_OWNER_ANNOTATION,
+  CLEANUP_STATE_ANNOTATION,
+  CLEANUP_STATE_SINCE_ANNOTATION,
+  DEFAULT_CLEANUP_OWNER,
+  isPersistentDataArtifactId,
+  isPersistentDataStateTimestamp,
+} from '../../agent-runtime/runtimes/kubernetes.js';
 
 const GROUP = 'agentorchestrator.io';
 const VERSION = 'v1alpha1';
@@ -23,6 +32,8 @@ export interface ControllerOptions {
   refill?: RefillPolicy;
   /** Storage request for auto-provisioned per-conversation PVCs. Default '10Gi'. */
   pvcStorage?: string;
+  /** Stable owner annotation applied to operator-provisioned PVCs. */
+  cleanupOwnerId?: string;
 }
 
 export interface RunOperatorOptions {
@@ -34,10 +45,15 @@ export interface RunOperatorOptions {
   refill?: RefillPolicy;
   metricsPort?: number;
   pvcStorage?: string;
+  cleanupOwnerId?: string;
 }
 
 export interface InstanceView {
   name: string;
+  cleanupState?: string;
+  cleanupOwnerId?: string;
+  cleanupArtifactId?: string;
+  cleanupStateSince?: string;
   nodeName?: string;
   model?: { providerID: string; id: string };
   endpoint?: string;
@@ -97,11 +113,25 @@ function isNotFoundLike(err: unknown): boolean {
 
 function toInstanceView(name: string, body: unknown): InstanceView {
   const obj = asRecord(body);
+  const metadata = asRecord(obj.metadata);
+  const annotations = asRecord(metadata.annotations);
   const spec = asRecord(obj.spec);
   const status = asRecord(obj.status);
   const model = asRecord(spec.model);
   return {
     name,
+    ...(typeof annotations[CLEANUP_STATE_ANNOTATION] === 'string'
+      ? { cleanupState: annotations[CLEANUP_STATE_ANNOTATION] as string }
+      : {}),
+    ...(typeof annotations[CLEANUP_OWNER_ANNOTATION] === 'string'
+      ? { cleanupOwnerId: annotations[CLEANUP_OWNER_ANNOTATION] as string }
+      : {}),
+    ...(typeof annotations[CLEANUP_ARTIFACT_ANNOTATION] === 'string'
+      ? { cleanupArtifactId: annotations[CLEANUP_ARTIFACT_ANNOTATION] as string }
+      : {}),
+    ...(typeof annotations[CLEANUP_STATE_SINCE_ANNOTATION] === 'string'
+      ? { cleanupStateSince: annotations[CLEANUP_STATE_SINCE_ANNOTATION] as string }
+      : {}),
     ...(typeof spec.nodeName === 'string' ? { nodeName: spec.nodeName } : {}),
     ...(typeof model.providerID === 'string' && typeof model.id === 'string'
       ? { model: { providerID: model.providerID, id: model.id } }
@@ -182,13 +212,15 @@ export class PlacementController {
     }
 
     const routeByName = new Map(routes.map((r) => [r.name, r]));
-    const instanceByName = new Map(instances.map((i) => [i.name, i]));
+    const activeInstances = instances.filter((instance) => instance.cleanupState !== 'delete-pending');
+    const activeInstanceByName = new Map(activeInstances.map((instance) => [instance.name, instance]));
 
     // Time-based refill first: quota windows that elapsed clear back to Ready
     // so later passes (and the planner) see recovered capacity.
     const refillPolicy = this.options.refill ?? { defaultWindowMs: 24 * 60 * 60 * 1000 };
     const nowMs = Date.now();
     for (const instance of instances) {
+      if (instance.cleanupState === 'delete-pending') continue;
       if (instance.phase !== 'QuotaExhausted') continue;
       if (!isRefillDue(instance.lastQuotaErrorAt, nowMs, refillWindowMs(refillPolicy, instance.model))) continue;
       try {
@@ -207,6 +239,7 @@ export class PlacementController {
     }
 
     for (const instance of instances) {
+      if (instance.cleanupState === 'delete-pending') continue;
       if (routeByName.has(instance.name)) continue;
       try {
         await this.ensureVolume(instance.name, summary);
@@ -233,6 +266,7 @@ export class PlacementController {
     // instance must not remain routable, and a restarted/moved instance must
     // publish its refreshed endpoint before clients are sent to it.
     for (const instance of instances) {
+      if (instance.cleanupState === 'delete-pending') continue;
       const route = routeByName.get(instance.name);
       if (!route) continue;
       try {
@@ -267,29 +301,64 @@ export class PlacementController {
     }
 
     for (const route of routes) {
-      if (instanceByName.has(route.name)) continue;
-      // The instance object is gone only on explicit conversation DELETE
-      // (stop keeps a Stopped object), so its volume goes with it.
+      if (activeInstanceByName.has(route.name)) continue;
+      // A missing or delete-pending instance makes its route stale, but does
+      // not prove the PVC is safe to delete. Cleanup owns Pod checks, owner
+      // verification, retention, and UID-preconditioned deletion.
       try {
-        await this.deleteVolume(route.name, summary);
         await this.api.deleteNamespacedCustomObject(GROUP, VERSION, namespace, ROUTES_PLURAL, route.name);
         summary.routesDeleted.push(route.name);
-        logger.info(`[operator] route deleted for ${route.name} (instance gone)`);
+        logger.info(`[operator] route deleted for ${route.name} (instance unavailable)`);
       } catch (err) {
         summary.errors.push(`delete route ${route.name} failed: ${(err as Error).message}`);
       }
     }
 
+    // A delete-pending instance record is a durable tombstone, not placement
+    // authority. Never recreate its route or PVC. Once UID-safe cleanup has
+    // removed the claim, remove the corresponding CR as well.
+    if (this.volumes) {
+      for (const instance of instances) {
+        if (instance.cleanupState !== 'delete-pending') continue;
+        if (!this.canRetireDeletePendingInstance(instance)) {
+          summary.errors.push(`delete-pending instance ${instance.name} has invalid cleanup ownership metadata`);
+          continue;
+        }
+        try {
+          await this.volumes.readPersistentVolumeClaim(
+            namespace,
+            conversationVolumeClaimName(instance.name),
+          );
+        } catch (err) {
+          if (!isNotFoundLike(err)) {
+            summary.errors.push(`read delete-pending volume ${instance.name} failed: ${(err as Error).message}`);
+            continue;
+          }
+          try {
+            await this.api.deleteNamespacedCustomObject(
+              GROUP, VERSION, namespace, INSTANCES_PLURAL, instance.name,
+            );
+            logger.info(`[operator] delete-pending instance record removed for ${instance.name}`);
+          } catch (deleteErr) {
+            if (!isNotFoundLike(deleteErr)) {
+              summary.errors.push(`delete pending instance ${instance.name} failed: ${(deleteErr as Error).message}`);
+            }
+          }
+        }
+      }
+    }
+
     for (const instance of instances) {
+      if (instance.cleanupState === 'delete-pending') continue;
       if (instance.phase !== 'QuotaExhausted') continue;
       const route = routeByName.get(instance.name);
       if (!route || route.phase !== 'Active' || route.desiredInstanceRef) continue;
       if (!this.options.dryRun) {
-        await this.executeMigration(instance, summary, loadByNode(instances));
+        await this.executeMigration(instance, summary, loadByNode(activeInstances));
         continue;
       }
       const candidates: MigrationCandidate[] = instances
-        .filter((c) => c.name !== instance.name)
+        .filter((c) => c.name !== instance.name && c.cleanupState !== 'delete-pending')
         .map((c) => ({ name: c.name, ...(c.nodeName ? { nodeName: c.nodeName } : {}), ...(c.model ? { model: c.model } : {}), phase: c.phase ?? 'Unknown' }));
       const decision = planMigration(
         {
@@ -298,7 +367,7 @@ export class PlacementController {
           ...(instance.model ? { model: instance.model } : {}),
         },
         candidates,
-        loadByNode(instances),
+        loadByNode(activeInstances),
       );
       if (decision.action === 'migrate') {
         summary.migrationsPlanned.push({ from: instance.name, target: decision.target, reason: decision.reason });
@@ -405,28 +474,29 @@ export class PlacementController {
     if (!this.volumes) return;
     const claim = conversationVolumeClaimName(conversationId);
     try {
-      await this.volumes.readPersistentVolumeClaim(this.options.namespace, claim);
+      const existing = await this.volumes.readPersistentVolumeClaim(this.options.namespace, claim);
+      if (!isManagedConversationVolume(existing, claim, conversationId)) {
+        throw new Error(`refusing to use unmanaged persistent volume claim ${claim}`);
+      }
     } catch (err) {
       if (!isNotFoundLike(err)) throw err;
       await this.volumes.createPersistentVolumeClaim(
         this.options.namespace,
-        conversationVolumeBody(conversationId, this.options.pvcStorage ?? '10Gi'),
+        conversationVolumeBody(
+          conversationId,
+          this.options.pvcStorage ?? '10Gi',
+          this.options.cleanupOwnerId,
+        ),
       );
       summary.volumesProvisioned.push(claim);
       logger.info(`[operator] volume provisioned for ${conversationId}`);
     }
   }
 
-  private async deleteVolume(conversationId: string, summary: ReconcileSummary): Promise<void> {
-    if (!this.volumes) return;
-    const claim = conversationVolumeClaimName(conversationId);
-    try {
-      await this.volumes.deletePersistentVolumeClaim(this.options.namespace, claim);
-      summary.volumesDeleted.push(claim);
-      logger.info(`[operator] volume deleted for ${conversationId}`);
-    } catch (err) {
-      if (!isNotFoundLike(err)) throw err;
-    }
+  private canRetireDeletePendingInstance(instance: InstanceView): boolean {
+    return instance.cleanupOwnerId === (this.options.cleanupOwnerId ?? DEFAULT_CLEANUP_OWNER)
+      && isPersistentDataArtifactId(instance.cleanupArtifactId)
+      && isPersistentDataStateTimestamp(instance.cleanupStateSince);
   }
 
   private async setInstanceStatus(name: string, status: Record<string, unknown>): Promise<void> {
@@ -484,6 +554,7 @@ export async function runOperator(options?: RunOperatorOptions): Promise<() => v
       dryRun: !execute,
       ...(options?.refill ? { refill: options.refill } : {}),
       ...(options?.pvcStorage ? { pvcStorage: options.pvcStorage } : {}),
+      ...(options?.cleanupOwnerId ? { cleanupOwnerId: options.cleanupOwnerId } : {}),
     },
     execute
       ? createLiveExecutor({ ...(options?.apiKey ? { apiKey: options.apiKey } : {}), ...(options?.migrateTimeoutMs ? { timeoutMs: options.migrateTimeoutMs } : {}) })
@@ -501,4 +572,13 @@ export async function runOperator(options?: RunOperatorOptions): Promise<() => v
     controller.stop();
     stopMetrics?.();
   };
+}
+
+function isManagedConversationVolume(value: unknown, expectedName: string, conversationId: string): boolean {
+  const body = asRecord(value);
+  const metadata = asRecord(body.metadata);
+  const labels = asRecord(metadata.labels);
+  return metadata.name === expectedName
+    && labels['app.kubernetes.io/part-of'] === 'agent-orchestrator'
+    && labels['agentorchestrator.io/conversation'] === conversationId;
 }

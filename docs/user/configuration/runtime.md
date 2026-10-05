@@ -25,6 +25,7 @@ Spawns OpenCode as a child process on the host machine.
 | `binary` | string | Yes | — | OpenCode CLI command or absolute path. |
 | `version` | string | No | — | Version hint (e.g., `"1.17.8"`). |
 | `instanceHost` | string | No | `'127.0.0.1'` | Hostname for reaching the instance. |
+| `sessionStorage` | object | No | — | Managed per-conversation storage: `{ sharedRoot, mode?: "xdg" | "sqlite" }`. Required for Direct persistent-data cleanup. |
 
 **Use when:** OpenCode CLI is installed on the host machine.
 
@@ -39,7 +40,9 @@ Spawns OpenCode in a Docker container.
   "config": {
     "image": "ghcr.io/anomalyco/opencode:1.17.8",
     "instanceHost": "127.0.0.1",
-    "networkMode": "host"
+    "networkMode": "host",
+    "sessionStorage": { "sharedRoot": "./sessions", "mode": "xdg" },
+    "logging": { "driver": "local", "maxSize": "10m", "maxFiles": 3 }
   }
 }
 ```
@@ -49,8 +52,15 @@ Spawns OpenCode in a Docker container.
 | `image` | string | Yes | — | Docker image name (e.g., `ghcr.io/anomalyco/opencode:1.17.8`). |
 | `instanceHost` | string | No | `'127.0.0.1'` | Hostname for reaching the instance. |
 | `networkMode` | string | No | — | Docker network mode. |
+| `sessionStorage` | object | No | — | Managed per-conversation storage mounted in the container. Required for Docker persistent-data cleanup. |
+| `logging.driver` | `local` or `json-file` | No | Docker default | Engine log driver for spawned OpenCode containers. |
+| `logging.maxSize` | string | No | — | Per-file Docker log size, such as `10m`. |
+| `logging.maxFiles` | integer | No | — | Number of Docker log files retained. |
 
 **Use when:** OpenCode CLI is not installed locally, or you need isolation.
+
+`logging` above limits container stdout/stderr and is independent from AO's own
+rotating JSONL file logs. See [Logging and Cleanup Policy](cleanup.md).
 
 ## Network Modes
 

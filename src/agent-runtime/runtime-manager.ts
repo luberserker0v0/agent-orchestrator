@@ -17,6 +17,7 @@ export interface InstanceInfo {
   username?: string;
   password?: string;
   nodeName?: string;
+  persistentDataAnnotations?: Record<string, string>;
 }
 
 export class RuntimeManager {
@@ -52,8 +53,9 @@ export class RuntimeManager {
     let handle: InstanceHandle | undefined;
     let baseUrl: string | undefined;
     let nodeName: string | undefined;
+    let persistentDataAnnotations: Record<string, string> | undefined;
     try {
-      ({ client, port, handle, baseUrl, nodeName } = await runtime.start(id, workspacePath, auth, healthCheckConfig, runtimeAccess));
+      ({ client, port, handle, baseUrl, nodeName, persistentDataAnnotations } = await runtime.start(id, workspacePath, auth, healthCheckConfig, runtimeAccess));
     } catch (err) {
       instancesErrorsTotal.inc({ type: 'start' });
       throw err;
@@ -82,6 +84,7 @@ export class RuntimeManager {
       username: auth.username,
       password: auth.password,
       nodeName,
+      persistentDataAnnotations,
     };
 
     this.instances.set(id, instance);
@@ -122,6 +125,7 @@ export class RuntimeManager {
         port: result.port,
         baseUrl: result.baseUrl,
         nodeName: result.nodeName,
+        persistentDataAnnotations: result.persistentDataAnnotations ?? inst.persistentDataAnnotations,
         lastUsedAt: Date.now(),
       };
       if (result.handle) {
@@ -150,6 +154,11 @@ export class RuntimeManager {
   async deletePersistentData(id: string, agentType?: string): Promise<void> {
     const runtime = this.runtimes.get(agentType ?? this.defaultAgentType);
     await runtime?.deletePersistentData?.(id);
+  }
+
+  async preparePersistentDataDeletion(id: string, agentType?: string): Promise<void> {
+    const runtime = this.runtimes.get(agentType ?? this.defaultAgentType);
+    await runtime?.preparePersistentDataDeletion?.(id);
   }
 
   setOnDestroyed(cb: (id: string) => void): void {
@@ -245,16 +254,22 @@ export class RuntimeManager {
       if (pid !== undefined) {
         logger.info(`[${id}] killing process PID ${pid}...`);
       }
-      await this.safeKill(inst.handle, 'SIGTERM');
+      const gracefulSignalSent = await this.safeKill(inst.handle, 'SIGTERM');
       let exited = inst.handle.exitCode !== null;
       if (!exited) {
         await inst.handle.waitForExit(5000);
         exited = inst.handle.exitCode !== null;
       }
+      let forceSignalSent = true;
       if (!exited) {
         logger.debug(`[${id}] sending SIGKILL`);
-        await this.safeKill(inst.handle, 'SIGKILL');
+        forceSignalSent = await this.safeKill(inst.handle, 'SIGKILL');
         await inst.handle.waitForExit(5000);
+        exited = inst.handle.exitCode !== null;
+      }
+      if (!exited && !gracefulSignalSent && !forceSignalSent) {
+        this.instances.set(id, inst);
+        throw new Error(`Unable to stop instance ${id}; refusing destructive cleanup`);
       }
       if (pid !== undefined) {
         logger.debug(`[${id}] kill complete, exitCode=${inst.handle.exitCode}`);
@@ -281,11 +296,13 @@ export class RuntimeManager {
     this.onDestroyed?.(id);
   }
 
-  private async safeKill(handle: InstanceHandle, signal?: string): Promise<void> {
+  private async safeKill(handle: InstanceHandle, signal?: string): Promise<boolean> {
     try {
       await handle.kill(signal);
+      return true;
     } catch (err) {
       logger.warn(`kill error: ${(err as Error).message}`);
+      return false;
     }
   }
 }

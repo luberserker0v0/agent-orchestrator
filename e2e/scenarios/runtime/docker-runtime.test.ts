@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startServer, type E2EServer } from '../../helpers/server.js';
 import { OPENCODE_CONFIG } from '../../../src/test-fixtures/user-configs.js';
 import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
 import { TEST_DOCKER_IMAGE } from '../../../src/test-fixtures/ao-configs.js';
+import { sessionOwnershipRecordPath } from '../../../src/agent-runtime/session-storage.js';
+import type { SessionStorageConfig } from '../../../src/config-loader.js';
 
 const dockerAvailable =
   spawnSync('docker', ['info'], { stdio: 'ignore' }).status === 0 &&
@@ -34,15 +37,34 @@ function dockerInspect(name: string): DockerInspect | null {
 
 describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)', () => {
   let server: E2EServer;
+  let sessionRoot: string;
+  let sessionStorage: SessionStorageConfig;
+  let initialSessionId: string;
   const convId = 'e2e-docker-runtime';
 
   beforeAll(async () => {
-    server = await startServer();
+    sessionRoot = mkdtempSync(join(tmpdir(), 'e2e-docker-sessions-'));
+    sessionStorage = { sharedRoot: sessionRoot, mode: 'xdg' };
+    server = await startServer({
+      defaultAgentType: 'opencode-docker',
+      runtimes: [{
+        id: 'opencode-docker',
+        type: 'docker',
+        config: {
+          image: TEST_DOCKER_IMAGE,
+          sessionStorage,
+          cleanupOwnerId: 'e2e-docker-owner',
+        },
+      }],
+    });
   }, 30_000);
 
   afterAll(async () => {
-    try { await fetch(`${server.baseUrl}/api/conversations/${convId}`, { method: 'DELETE' }); } catch { /* ignore */ }
-    await server.cleanup();
+    if (server) {
+      try { await fetch(`${server.baseUrl}/api/conversations/${convId}`, { method: 'DELETE' }); } catch { /* ignore */ }
+      await server.cleanup();
+    }
+    if (sessionRoot) rmSync(sessionRoot, { recursive: true, force: true });
   }, 15_000);
 
   async function waitForReady(): Promise<string> {
@@ -105,8 +127,8 @@ describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)',
   });
 
   it('container is healthy and ready', async () => {
-    const sessionId = await waitForReady();
-    expect(sessionId).toBeTruthy();
+    initialSessionId = await waitForReady();
+    expect(initialSessionId).toBeTruthy();
   });
 
   it('sends message through container', async () => {
@@ -122,6 +144,11 @@ describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)',
   });
 
   it('stop removes container via docker rm -f', async () => {
+    const sessionPath = join(sessionRoot, convId);
+    const ownershipPath = sessionOwnershipRecordPath(sessionStorage, convId);
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(existsSync(ownershipPath)).toBe(true);
+
     const res = await fetch(`${server.baseUrl}/api/conversations/${convId}/stop`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -132,6 +159,8 @@ describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)',
 
     const containers = dockerPs('name=agentorchestrator-e2e-docker-runtime');
     expect(containers.length).toBe(0);
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(existsSync(ownershipPath)).toBe(true);
   });
 
   it('restart creates new container after stop', async () => {
@@ -151,12 +180,16 @@ describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)',
   });
 
   it('new container is healthy after restart', async () => {
-    await waitForReady();
+    expect(await waitForReady()).toBe(initialSessionId);
   });
 
-  it('delete removes container and workspace', async () => {
+  it('explicit delete removes the container, workspace, and persistent session data', async () => {
     const wsPath = join(server.workspaceDir, convId);
+    const sessionPath = join(sessionRoot, convId);
+    const ownershipPath = sessionOwnershipRecordPath(sessionStorage, convId);
     expect(existsSync(wsPath)).toBe(true);
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(existsSync(ownershipPath)).toBe(true);
 
     const del = await fetch(`${server.baseUrl}/api/conversations/${convId}`, { method: 'DELETE' });
     expect(del.status).toBe(204);
@@ -166,6 +199,8 @@ describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)',
       await new Promise((r) => setTimeout(r, 1000));
     }
     expect(existsSync(wsPath)).toBe(false);
+    expect(existsSync(sessionPath)).toBe(false);
+    expect(existsSync(ownershipPath)).toBe(false);
 
     const containers = dockerPs('name=agentorchestrator-e2e-docker-runtime');
     expect(containers.length).toBe(0);

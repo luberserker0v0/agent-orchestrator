@@ -25,6 +25,9 @@ Any config field can be overridden via environment variables:
 | `orchestrator.idleTimeoutMs` | `AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS` |
 | `orchestrator.idleSweepIntervalMs` | `AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS` |
 | `workspace.maxSizeBytes` | `AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES` |
+| `logging.file.maxFileSizeBytes` | `AGENTORCHESTRATOR_LOGGING_FILE_MAX_FILE_SIZE_BYTES` |
+| `cleanup.sweepIntervalMs` | `AGENTORCHESTRATOR_CLEANUP_SWEEP_INTERVAL_MS` |
+| `cleanup.orphanedData.gracePeriodMs` | `AGENTORCHESTRATOR_CLEANUP_ORPHANED_DATA_GRACE_PERIOD_MS` |
 
 **Note:** The `orchestrator.runtimes` array is not overridable via env vars. Use the config file for multi-runtime setups.
 
@@ -36,6 +39,7 @@ Any config field can be overridden via environment variables:
 | `orchestrator` | Instance lifecycle, runtimes, health checks | [Orchestrator Config](orchestrator.md) |
 | `workspace` | File storage, quotas | [Workspace Config](workspace.md) |
 | `websocket` | WebSocket connection settings | [Orchestrator Config](orchestrator.md#websocket) |
+| `logging`, `cleanup` | Rotating AO logs and persistent-data retention | [Cleanup Policy](cleanup.md) |
 
 ## Example Config
 
@@ -72,6 +76,23 @@ Any config field can be overridden via environment variables:
     "enforceCanonicalConfig": true,
     "maxSizeBytes": 52428800,
     "storage": { "type": "local" }
+  },
+  "logging": {
+    "file": {
+      "enabled": false,
+      "directory": "./logs",
+      "maxFileSizeBytes": 10485760,
+      "maxRotatedFiles": 10,
+      "retentionMs": 604800000
+    }
+  },
+  "cleanup": {
+    "ownerId": null,
+    "sweepIntervalMs": 3600000,
+    "orphanedData": {
+      "enabled": false,
+      "gracePeriodMs": 2592000000
+    }
   }
 }
 ```

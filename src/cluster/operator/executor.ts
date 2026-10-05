@@ -4,6 +4,7 @@ import * as k8s from '@kubernetes/client-node';
 import { PromiseCoreV1Api } from '@kubernetes/client-node/dist/gen/types/PromiseAPI.js';
 import { logger } from '../../utils/logger.js';
 import { conversationVolumeClaimName } from '../status-reporter.js';
+import { DEFAULT_CLEANUP_OWNER, persistentDataAnnotations } from '../../agent-runtime/runtimes/kubernetes.js';
 
 /** Minimal node inventory surface (structurally compatible). */
 export interface CoreNodesApi {
@@ -148,7 +149,11 @@ export class K8sVolumeObjects implements VolumeObjectsApi {
 }
 
 /** PVC body for a conversation volume (RWO, default provisioner). */
-export function conversationVolumeBody(conversationId: string, storage: string): object {
+export function conversationVolumeBody(
+  conversationId: string,
+  storage: string,
+  cleanupOwnerId = DEFAULT_CLEANUP_OWNER,
+): object {
   const claim = conversationVolumeClaimName(conversationId);
   return {
     apiVersion: 'v1',
@@ -156,6 +161,7 @@ export function conversationVolumeBody(conversationId: string, storage: string):
     metadata: {
       name: claim,
       labels: { 'app.kubernetes.io/part-of': 'agent-orchestrator', 'agentorchestrator.io/conversation': conversationId },
+      annotations: persistentDataAnnotations(cleanupOwnerId, 'active'),
     },
     spec: {
       accessModes: ['ReadWriteOnce'],

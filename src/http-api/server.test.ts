@@ -21,6 +21,7 @@ describe('HTTP API Server', () => {
   let mockRuntimeRegistry: any;
   let mockConfig: any;
   let mockRoleService: any;
+  let mockCleanupManager: any;
 
   beforeEach(() => {
     mockConfig = {
@@ -189,6 +190,17 @@ describe('HTTP API Server', () => {
       hasPermission: vi.fn().mockReturnValue(true),
     };
 
+    mockCleanupManager = {
+      preview: vi.fn().mockResolvedValue({
+        mode: 'preview', status: 'completed', startedAt: 1, finishedAt: 2,
+        summary: { scanned: 0, eligible: 0, eligibleBytes: 0 }, targets: [], items: [],
+      }),
+      run: vi.fn().mockResolvedValue({
+        mode: 'run', status: 'completed', startedAt: 1, finishedAt: 2,
+        summary: { scanned: 0, eligible: 0, eligibleBytes: 0, deleted: 0, failed: 0 }, targets: [], items: [],
+      }),
+    };
+
     httpServer = createHttpServer(
       { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000 },
       { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
@@ -204,9 +216,114 @@ describe('HTTP API Server', () => {
       mockSessionService,
       mockMessageService,
       mockRoleService,
-      mockConfig
+      mockConfig,
+      mockCleanupManager,
     );
     server = httpServer.server;
+  });
+
+  it('POST /api/cleanup/preview scans all targets by default', async () => {
+    const res = await request(server).post('/api/cleanup/preview').send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe('preview');
+    expect(mockCleanupManager.preview).toHaveBeenCalledWith(['logs', 'persistentData']);
+  });
+
+  it('POST /api/cleanup/preview accepts an omitted body', async () => {
+    const res = await request(server).post('/api/cleanup/preview');
+
+    expect(res.status).toBe(200);
+    expect(mockCleanupManager.preview).toHaveBeenCalledWith(['logs', 'persistentData']);
+  });
+
+  it('POST /api/cleanup/preview rejects unknown or duplicate targets', async () => {
+    const unknown = await request(server).post('/api/cleanup/preview').send({ targets: ['unknown'] });
+    const duplicate = await request(server).post('/api/cleanup/preview').send({ targets: ['logs', 'logs'] });
+    const extra = await request(server).post('/api/cleanup/preview').send({ extra: true });
+
+    expect(unknown.status).toBe(400);
+    expect(duplicate.status).toBe(400);
+    expect(extra.status).toBe(400);
+    expect(mockCleanupManager.preview).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/cleanup/run requires explicit targets and confirmation', async () => {
+    const missingConfirm = await request(server).post('/api/cleanup/run').send({ targets: ['logs'] });
+    const falseConfirm = await request(server).post('/api/cleanup/run').send({ targets: ['logs'], confirm: false });
+    const missingTargets = await request(server).post('/api/cleanup/run').send({ confirm: true });
+    const emptyTargets = await request(server).post('/api/cleanup/run').send({ targets: [], confirm: true });
+    const duplicateTargets = await request(server).post('/api/cleanup/run').send({ targets: ['logs', 'logs'], confirm: true });
+    const unknownTarget = await request(server).post('/api/cleanup/run').send({ targets: ['unknown'], confirm: true });
+    const extraField = await request(server).post('/api/cleanup/run').send({ targets: ['logs'], confirm: true, force: true });
+
+    expect(missingConfirm.status).toBe(400);
+    expect(missingConfirm.body.error.code).toBe(ErrorCodes.CLEANUP_CONFIRMATION_REQUIRED);
+    expect(falseConfirm.status).toBe(400);
+    expect(falseConfirm.body.error.code).toBe(ErrorCodes.CLEANUP_CONFIRMATION_REQUIRED);
+    expect(missingTargets.status).toBe(400);
+    expect(missingTargets.body.error.code).toBe(ErrorCodes.INVALID_REQUEST_BODY);
+    for (const response of [emptyTargets, duplicateTargets, unknownTarget, extraField]) {
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe(ErrorCodes.INVALID_REQUEST_BODY);
+    }
+    expect(mockCleanupManager.run).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/cleanup/run executes only selected configured targets', async () => {
+    const res = await request(server)
+      .post('/api/cleanup/run')
+      .send({ targets: ['persistentData'], confirm: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.mode).toBe('run');
+    expect(mockCleanupManager.run).toHaveBeenCalledWith(['persistentData']);
+  });
+
+  it('POST /api/cleanup/run returns cleanup concurrency errors', async () => {
+    mockCleanupManager.run.mockRejectedValueOnce(
+      new AppError(409, ErrorCodes.CLEANUP_IN_PROGRESS, 'cleanup busy'),
+    );
+    const res = await request(server)
+      .post('/api/cleanup/run')
+      .send({ targets: ['logs'], confirm: true });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe(ErrorCodes.CLEANUP_IN_PROGRESS);
+  });
+
+  it('POST /api/cleanup/run returns partial artifact failures as a 200 report', async () => {
+    mockCleanupManager.run.mockResolvedValueOnce({
+      mode: 'run', status: 'partial', startedAt: 1, finishedAt: 2,
+      summary: {
+        scanned: 2, eligible: 2, eligibleBytes: null,
+        deleted: 1, marked: 0, cleared: 0, skipped: 0, failed: 1, reclaimedBytes: null,
+      },
+      targets: [{
+        target: 'persistentData', enabled: true, scanned: 2, eligible: 2,
+        eligibleBytes: null, deleted: 1, marked: 0, cleared: 0, skipped: 0, failed: 1,
+        reclaimedBytes: null,
+      }],
+      items: [
+        { target: 'persistentData', artifactId: 'safe-id', backend: 'filesystem', state: 'eligible', reason: 'expired', sizeBytes: 4, outcome: 'deleted' },
+        { target: 'persistentData', artifactId: 'other-id', backend: 'filesystem', state: 'eligible', reason: 'expired', sizeBytes: 2, outcome: 'failed', code: 'EACCES', message: 'cleanup failed' },
+      ],
+    });
+
+    const res = await request(server)
+      .post('/api/cleanup/run')
+      .send({ targets: ['persistentData'], confirm: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      status: 'partial',
+      summary: { deleted: 1, failed: 1 },
+      items: [
+        { artifactId: 'safe-id', outcome: 'deleted' },
+        { artifactId: 'other-id', outcome: 'failed', code: 'EACCES' },
+      ],
+    });
+    expect(JSON.stringify(res.body)).not.toContain(process.cwd());
   });
 
   afterEach(() => {
@@ -329,7 +446,8 @@ describe('HTTP API Server', () => {
         mockSessionService,
         mockMessageService,
         mockRoleService,
-        mockConfig
+        mockConfig,
+        mockCleanupManager,
       );
       secureServer = hs.server;
       return secureServer;
@@ -371,7 +489,7 @@ describe('HTTP API Server', () => {
       secureServer?.close();
     });
 
-    function createRbacServer(rbacEnabled: boolean, apiKeys?: { key: string; role: 'admin' | 'user' | 'observer' }[]): HttpServer['server'] {
+    function createRbacServer(rbacEnabled: boolean, apiKeys?: { key: string; role: string }[]): HttpServer['server'] {
       const hs = createHttpServer(
         { port: 0, host: '127.0.0.1', shutdownTimeoutMs: 15000, apiKeys, rbac: { enabled: rbacEnabled } },
         { heartbeatIntervalMs: 30000, idleTimeoutMs: 600000 },
@@ -387,7 +505,8 @@ describe('HTTP API Server', () => {
         mockSessionService,
         mockMessageService,
         mockRoleService,
-        mockConfig
+        mockConfig,
+        mockCleanupManager,
       );
       secureServer = hs.server;
       return secureServer;
@@ -441,6 +560,8 @@ describe('HTTP API Server', () => {
       ['PATCH', '/api/conversations/conv-001/config'],
       ['DELETE', '/api/conversations/conv-001/agent/config'],
       ['DELETE', '/api/conversations/conv-001/agents/my-agent/skills/my-skill'],
+      ['POST', '/api/cleanup/preview'],
+      ['POST', '/api/cleanup/run'],
     ])('denies observer mutation %s %s', async (method, path) => {
       mockRoleService.hasPermission.mockImplementation((_role: string, permission: string) =>
         permission.endsWith(':get') || permission.endsWith(':list') || permission.endsWith(':history'),
@@ -451,6 +572,27 @@ describe('HTTP API Server', () => {
         .send({ text: 'hello' });
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('FORBIDDEN');
+    });
+
+    it('allows cleanup permissions to be granted independently to a custom role', async () => {
+      mockRoleService.hasPermission.mockImplementation((_role: string, permission: string) =>
+        permission === 'cleanup:read',
+      );
+      const srv = createRbacServer(true, [{ key: 'cleanup-reader-key', role: 'cleanup-reader' }]);
+
+      const preview = await request(srv)
+        .post('/api/cleanup/preview')
+        .set('Authorization', 'Bearer cleanup-reader-key')
+        .send({ targets: ['logs'] });
+      const run = await request(srv)
+        .post('/api/cleanup/run')
+        .set('Authorization', 'Bearer cleanup-reader-key')
+        .send({ targets: ['logs'], confirm: true });
+
+      expect(preview.status).toBe(200);
+      expect(run.status).toBe(403);
+      expect(mockRoleService.hasPermission).toHaveBeenCalledWith('cleanup-reader', 'cleanup:read');
+      expect(mockRoleService.hasPermission).toHaveBeenCalledWith('cleanup-reader', 'cleanup:run');
     });
 
     it('requires declared read permission for POST-based file reads', async () => {

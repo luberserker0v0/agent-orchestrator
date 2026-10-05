@@ -94,6 +94,8 @@ Permissions use the format `resource:action` (e.g. `conversation:start`, `messag
 | `POST /api/roles` | `role:write` | Yes | No | No |
 | `PUT /api/roles/:name` | `role:write` | Yes | No | No |
 | `DELETE /api/roles/:name` | `role:write` | Yes | No | No |
+| `POST /api/cleanup/preview` | `cleanup:read` | Yes | No | No |
+| `POST /api/cleanup/run` | `cleanup:run` | Yes | No | No |
 
 ### WebSocket Permission Matrix
 
@@ -174,3 +176,5 @@ The HTTP server adds the following security headers:
 6. **Ephemeral passwords** — OpenCode instance passwords are generated per spawn, never persisted
 7. **Graceful shutdown** — On SIGINT/SIGTERM, the system stops accepting new connections, waits for in-flight requests, then destroys all instances
 8. **WebSocket connection limits** — One connection per conversation; new connections replace existing ones
+9. **Owned cleanup only** — Orphan reaping requires a stable owner ID, two observations, a full grace period, and a final ownership/liveness check
+10. **Constrained file logging** — Files use restrictive permissions; filesystem roots, symlink destinations, and unrelated filenames are never pruned

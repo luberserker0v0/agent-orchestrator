@@ -12,6 +12,15 @@ import {
   type StatusObjectsApi,
 } from './status-reporter.js';
 import { ErrorCodes } from '../utils/errors.js';
+import {
+  CLEANUP_ARTIFACT_ANNOTATION,
+  CLEANUP_OWNER_ANNOTATION,
+  CLEANUP_STATE_ANNOTATION,
+  CLEANUP_STATE_SINCE_ANNOTATION,
+  persistentDataAnnotations,
+} from '../agent-runtime/runtimes/kubernetes.js';
+
+const ARTIFACT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 function httpError(statusCode: number): Error {
   const err = new Error(`k8s ${statusCode}`) as Error & { statusCode: number };
@@ -120,6 +129,7 @@ describe('K8sStatusReporter', () => {
     await reporter.trackInstance({ conversationId: 'c1' });
     await reporter.reportQuotaError('c1', { code: ErrorCodes.LLM_QUOTA_EXHAUSTED, message: 'x' });
     await reporter.reportSuccess('c1');
+    await reporter.markPersistentDataDeletePending('c1');
     await reporter.untrackInstance('c1');
     expect(reporter.trackedCount()).toBe(0);
     expect(api.calls).toEqual({});
@@ -133,6 +143,12 @@ describe('K8sStatusReporter', () => {
 
   it('trackInstance creates object and marks Ready', async () => {
     const reporter = enabledReporter(api);
+    const persistentDataAnnotations = {
+      'agentorchestrator.io/cleanup-owner': 'owner-a',
+      'agentorchestrator.io/cleanup-artifact': ARTIFACT,
+      'agentorchestrator.io/cleanup-state': 'active',
+      'agentorchestrator.io/cleanup-state-since': '2026-10-04T00:00:00.000Z',
+    };
     await reporter.trackInstance({
       conversationId: 'c1',
       runtimeType: 'direct',
@@ -140,11 +156,17 @@ describe('K8sStatusReporter', () => {
       volumeClaimName: 'conv-c1',
       model: { providerID: 'anthropic', id: 'm' },
       nodeName: 'worker-1',
+      persistentDataAnnotations,
     });
-    const created = api.calls.create[0][0] as { spec: Record<string, unknown> };
+    const created = api.calls.create[0][0] as {
+      metadata: { annotations: Record<string, string> };
+      spec: Record<string, unknown>;
+    };
     expect(created.spec.conversationId).toBe('c1');
     expect(created.spec.volumeClaimName).toBe('conv-c1');
     expect(created.spec.nodeName).toBe('worker-1');
+    expect(created.metadata.annotations).toEqual(persistentDataAnnotations);
+    expect(reporter.cleanupContext()).toEqual({ namespace: 'ao-instances', api });
     const patched = api.calls.replaceStatus[0][1] as { status: Record<string, unknown> };
     expect(patched.status.phase).toBe('Ready');
     expect(reporter.trackedCount()).toBe(1);
@@ -265,6 +287,47 @@ describe('K8sStatusReporter', () => {
     expect(last.status.reachable).toBe(false);
     expect(api.calls.delete ?? []).toHaveLength(0);
     reporter.destroy();
+  });
+
+  it('durably mirrors delete-pending ownership onto the instance record', async () => {
+    const reporter = enabledReporter(api);
+    const annotations = persistentDataAnnotations(
+      'owner-a',
+      'active',
+      '2026-10-04T00:00:00.000Z',
+      ARTIFACT,
+    );
+    await reporter.trackInstance({
+      conversationId: 'c1',
+      runtimeType: 'kubernetes',
+      volumeClaimName: 'conv-c1',
+      persistentDataAnnotations: annotations,
+    });
+
+    await reporter.markPersistentDataDeletePending('c1');
+
+    const updated = api.store.get('c1') as { metadata: { annotations: Record<string, string> } };
+    expect(updated.metadata.annotations).toMatchObject({
+      [CLEANUP_OWNER_ANNOTATION]: 'owner-a',
+      [CLEANUP_ARTIFACT_ANNOTATION]: ARTIFACT,
+      [CLEANUP_STATE_ANNOTATION]: 'delete-pending',
+    });
+    expect(Date.parse(updated.metadata.annotations[CLEANUP_STATE_SINCE_ANNOTATION]))
+      .toBeGreaterThan(Date.parse(annotations[CLEANUP_STATE_SINCE_ANNOTATION]));
+  });
+
+  it('refuses to mark malformed instance ownership metadata', async () => {
+    const reporter = enabledReporter(api);
+    await reporter.trackInstance({
+      conversationId: 'c1',
+      persistentDataAnnotations: {
+        ...persistentDataAnnotations('owner-a', 'active'),
+        [CLEANUP_ARTIFACT_ANNOTATION]: 'not-a-uuid',
+      },
+    });
+
+    await expect(reporter.markPersistentDataDeletePending('c1'))
+      .rejects.toThrow('incomplete cleanup ownership metadata');
   });
 
   it('untrackInstance deletes and tolerates 404', async () => {

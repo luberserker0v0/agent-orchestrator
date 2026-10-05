@@ -3,11 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('cross-spawn', () => ({ spawn: vi.fn() }));
 
 import { spawn } from 'cross-spawn';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { DockerRuntime } from './docker.js';
+import { readSessionOwnershipRecord, resolveSessionStorage } from '../session-storage.js';
 
 function createMockProc(opts: { exitCode?: number | null; pid?: number | undefined } = {}) {
   const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
@@ -152,6 +153,7 @@ describe('DockerRuntime', () => {
           expect.arrayContaining(['-e', 'XDG_DATA_HOME=/opencode-data']),
           expect.anything(),
         );
+        expect(readSessionOwnershipRecord({ sharedRoot: root }, 'sess-d')).toBeUndefined();
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -231,6 +233,28 @@ describe('DockerRuntime', () => {
       expect(dockerArgs).toContain('-p');
     });
 
+    it('applies optional Docker engine log limits', async () => {
+      const rt = new DockerRuntime(createPortPool(), {
+        image: 'img',
+        logging: { driver: 'local', maxSize: '10m', maxFiles: 3 },
+      });
+      (spawn as any).mockReturnValue(createMockProc({ exitCode: 0 }));
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.start(
+        'conv-logs', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      const dockerArgs = (spawn as any).mock.calls[0][1] as string[];
+      expect(dockerArgs).toEqual(expect.arrayContaining([
+        '--log-driver', 'local',
+        '--log-opt', 'max-size=10m',
+        '--log-opt', 'max-file=3',
+      ]));
+    });
+
     it('releases port when health check fails', async () => {
       const pool = createPortPool(30000, 30000);
       const rt = new DockerRuntime(pool, { image: 'img' });
@@ -279,6 +303,50 @@ describe('DockerRuntime', () => {
       const rt = new DockerRuntime(createPortPool(), { image: 'img' });
       await expect(rt.stop(undefined)).resolves.toBeUndefined();
     });
+  });
+
+  describe('persistent data deletion', () => {
+    it('marks, quarantines, and purges configured session storage', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'ao-docker-delete-'));
+      try {
+        const config = { sharedRoot: root };
+        const rt = new DockerRuntime(createPortPool(), {
+          image: 'img',
+          sessionStorage: config,
+          cleanupOwnerId: 'test-owner',
+        });
+        (spawn as any).mockReturnValue(createMockProc({ exitCode: 0 }));
+        mockFetch.mockResolvedValue(makeHealthyFetch());
+
+        await rt.start(
+          'docker-delete', '/tmp/ws',
+          { username: 'u', password: 'p' },
+          { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+        );
+        writeFileSync(join(root, 'docker-delete', 'opencode.db'), 'data');
+
+        await rt.preparePersistentDataDeletion('docker-delete');
+        expect(readSessionOwnershipRecord(config, 'docker-delete')?.state).toBe('delete-pending');
+        await rt.deletePersistentData('docker-delete');
+
+        expect(existsSync(join(root, 'docker-delete'))).toBe(false);
+        expect(readSessionOwnershipRecord(config, 'docker-delete')).toBeUndefined();
+
+        const recreated = resolveSessionStorage(config, 'docker-delete', 'test-owner');
+        writeFileSync(join(recreated.sessionDir, 'keep.txt'), 'new generation');
+        await rt.deletePersistentData('docker-delete');
+        expect(existsSync(join(recreated.sessionDir, 'keep.txt'))).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('is a no-op without configured session storage', async () => {
+      const rt = new DockerRuntime(createPortPool(), { image: 'img' });
+      await expect(rt.preparePersistentDataDeletion('docker-no-storage')).resolves.toBeUndefined();
+      await expect(rt.deletePersistentData('docker-no-storage')).resolves.toBeUndefined();
+    });
+
   });
 
   describe('cleanupOrphans', () => {

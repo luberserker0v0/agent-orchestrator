@@ -32,6 +32,25 @@
     "idleTimeoutMs": 600000       // Connection idle timeout (ms); 0 = no timeout
   },
 
+  // ── Logging and Cleanup ──────────────────────────────────────────
+  "logging": {
+    "file": {
+      "enabled": false,            // Console logging always remains enabled
+      "directory": "./logs",       // Rotating JSONL files; use a persistent mount in containers
+      "maxFileSizeBytes": 10485760,
+      "maxRotatedFiles": 10,       // Active agentorchestrator.jsonl is not counted
+      "retentionMs": 604800000     // Seven days
+    }
+  },
+  "cleanup": {
+    "ownerId": null,               // Required when orphanedData.enabled=true; keep stable across restarts
+    "sweepIntervalMs": 3600000,
+    "orphanedData": {
+      "enabled": false,            // Explicit conversation DELETE still removes managed data immediately
+      "gracePeriodMs": 2592000000  // 30 days from first observed orphan state
+    }
+  },
+
   // ── Orchestrator (OpenCode instance lifecycle) ────────────────────
   "orchestrator": {
     "maxInstances": 10,           // Strict upper limit of concurrent OpenCode instances
@@ -74,6 +93,9 @@
           "image": "ghcr.io/anomalyco/opencode:1.17.8"
           // "instanceHost": "127.0.0.1"  // Hostname to reach spawned instances (default: "127.0.0.1")
           // "networkMode": "bridge"       // Docker network mode: "host", "bridge", or custom network name
+          // To enable either optional property below, add a comma after "image" and
+          // between enabled properties.
+          // "logging": { "driver": "local", "maxSize": "10m", "maxFiles": 3 }
           // Same sessionStorage semantics as direct; mounted as /opencode-data in the container.
           // "sessionStorage": { "sharedRoot": "./sessions", "mode": "xdg" }
         }

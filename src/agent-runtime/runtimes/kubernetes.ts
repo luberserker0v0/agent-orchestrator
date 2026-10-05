@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { logger } from '../../utils/logger.js';
+import { AppError, ErrorCodes } from '../../utils/errors.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { waitForHealthy } from '../health.js';
@@ -18,6 +20,39 @@ export interface PodStatusView {
   nodeName?: string;
 }
 
+export interface PersistentVolumeClaimView {
+  name: string;
+  uid?: string;
+  resourceVersion?: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  deletionTimestamp?: string;
+}
+
+export interface PodClaimReferenceView {
+  name: string;
+  uid?: string;
+  phase?: string;
+}
+
+/**
+ * Narrow, cleanup-safe PVC surface. Cleanup orchestration combines this data
+ * with conversation/route/CR authority before changing any claim.
+ */
+export interface KubernetesPersistentDataApi {
+  readPersistentVolumeClaim(namespace: string, name: string): Promise<PersistentVolumeClaimView>;
+  listManagedPersistentVolumeClaims(namespace: string): Promise<PersistentVolumeClaimView[]>;
+  patchPersistentVolumeClaimAnnotations(
+    namespace: string,
+    name: string,
+    expectedUid: string,
+    expectedResourceVersion: string,
+    annotations: Record<string, string>,
+  ): Promise<PersistentVolumeClaimView>;
+  deletePersistentVolumeClaim(namespace: string, name: string, expectedUid?: string): Promise<void>;
+  listPodsReferencingPersistentVolumeClaim(namespace: string, claimName: string): Promise<PodClaimReferenceView[]>;
+}
+
 /** Opt-in node placement for runtimes (migration targets). */
 export interface NodePlaceable {
   setNodeOverride(id: string, nodeName: string): void;
@@ -25,10 +60,8 @@ export interface NodePlaceable {
 }
 
 /** Narrow pod/service surface used by the runtime (structurally compatible). */
-export interface InstancePodsApi {
-  readPersistentVolumeClaim(namespace: string, name: string): Promise<void>;
+export interface InstancePodsApi extends KubernetesPersistentDataApi {
   createPersistentVolumeClaim(namespace: string, body: object): Promise<unknown>;
-  deletePersistentVolumeClaim(namespace: string, name: string): Promise<void>;
   createPod(namespace: string, body: object): Promise<unknown>;
   readPod(namespace: string, name: string): Promise<PodStatusView>;
   deletePod(namespace: string, name: string, opts?: { force?: boolean }): Promise<void>;
@@ -37,9 +70,16 @@ export interface InstancePodsApi {
   listInstancePodNames(namespace: string): Promise<string[]>;
 }
 
-const PART_OF_LABEL = 'app.kubernetes.io/part-of';
-const PART_OF_VALUE = 'agent-orchestrator';
-const CONVERSATION_LABEL = 'agentorchestrator.io/conversation';
+export const PART_OF_LABEL = 'app.kubernetes.io/part-of';
+export const PART_OF_VALUE = 'agent-orchestrator';
+export const CONVERSATION_LABEL = 'agentorchestrator.io/conversation';
+export const CLEANUP_OWNER_ANNOTATION = 'agentorchestrator.io/cleanup-owner';
+export const CLEANUP_ARTIFACT_ANNOTATION = 'agentorchestrator.io/cleanup-artifact';
+export const CLEANUP_STATE_ANNOTATION = 'agentorchestrator.io/cleanup-state';
+export const CLEANUP_STATE_SINCE_ANNOTATION = 'agentorchestrator.io/cleanup-state-since';
+export const DEFAULT_CLEANUP_OWNER = 'agent-orchestrator';
+export type PersistentDataCleanupState = 'active' | 'delete-pending' | 'orphan-candidate';
+const CLEANUP_ARTIFACT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INSTANCE_POD_SELECTOR = `${PART_OF_LABEL}=${PART_OF_VALUE},${CONVERSATION_LABEL}`;
 const DEFAULT_NAMESPACE = 'ao-instances';
 const DEFAULT_POD_READY_TIMEOUT_MS = 180000;
@@ -63,6 +103,49 @@ export function instanceVolumeClaimName(id: string): string {
 
 export function instancePodLabelSelector(): string {
   return INSTANCE_POD_SELECTOR;
+}
+
+export function managedPersistentVolumeClaimSelector(): string {
+  return `${PART_OF_LABEL}=${PART_OF_VALUE},${CONVERSATION_LABEL}`;
+}
+
+export function persistentDataAnnotations(
+  ownerId: string,
+  state: PersistentDataCleanupState,
+  stateSince: string = new Date().toISOString(),
+  artifactId: string = randomUUID(),
+): Record<string, string> {
+  return {
+    [CLEANUP_OWNER_ANNOTATION]: ownerId,
+    [CLEANUP_ARTIFACT_ANNOTATION]: artifactId,
+    [CLEANUP_STATE_ANNOTATION]: state,
+    [CLEANUP_STATE_SINCE_ANNOTATION]: stateSince,
+  };
+}
+
+export function isPersistentDataArtifactId(value: string | undefined): value is string {
+  return typeof value === 'string' && CLEANUP_ARTIFACT_ID_PATTERN.test(value);
+}
+
+export function isPersistentDataStateTimestamp(value: string | undefined): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
+export function isPersistentDataCleanupState(value: string | undefined): value is PersistentDataCleanupState {
+  return value === 'active' || value === 'delete-pending' || value === 'orphan-candidate';
+}
+
+export function isManagedPersistentVolumeClaim(
+  claim: PersistentVolumeClaimView,
+  conversationId?: string,
+): boolean {
+  if (claim.labels?.[PART_OF_LABEL] !== PART_OF_VALUE) return false;
+  const conversation = claim.labels?.[CONVERSATION_LABEL];
+  if (!conversation) return false;
+  return conversationId === undefined || (
+    conversation === sanitizeK8sName(conversationId)
+    && claim.name === instanceVolumeClaimName(conversationId)
+  );
 }
 
 function httpStatusOf(err: unknown): number | undefined {
@@ -252,6 +335,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
   private portPool: PortPool;
   private config: KubernetesRuntimeConfig;
   private podsApi?: InstancePodsApi;
+  private cleanupOwnerId: string;
   private nodeOverrides = new Map<string, string>();
   private instanceState = new Map<string, {
     podName: string;
@@ -260,14 +344,36 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     auth: { username: string; password: string };
   }>();
 
-  constructor(portPool: PortPool, config: KubernetesRuntimeConfig, podsApi?: InstancePodsApi) {
+  constructor(
+    portPool: PortPool,
+    config: KubernetesRuntimeConfig,
+    podsApi?: InstancePodsApi,
+    cleanupOwnerId = DEFAULT_CLEANUP_OWNER,
+  ) {
     this.portPool = portPool;
     this.config = config;
     this.podsApi = podsApi;
+    this.cleanupOwnerId = config.cleanupOwnerId?.trim() || cleanupOwnerId.trim() || DEFAULT_CLEANUP_OWNER;
   }
 
   private namespace(): string {
     return this.config.namespace ?? DEFAULT_NAMESPACE;
+  }
+
+  /** Wire the process-wide stable cleanup owner before starting instances. */
+  setCleanupOwnerId(ownerId: string): void {
+    const normalized = ownerId.trim();
+    if (!normalized) throw new Error('Kubernetes cleanup owner must be non-empty');
+    this.cleanupOwnerId = normalized;
+  }
+
+  /** Coordinator-safe access to the namespace, owner, and narrow PVC API. */
+  persistentDataCleanupContext(): {
+    namespace: string;
+    ownerId: string;
+    api: KubernetesPersistentDataApi;
+  } {
+    return { namespace: this.namespace(), ownerId: this.cleanupOwnerId, api: this.api() };
   }
 
   /** Pin the next start/restart of `id` to a node. Cleared explicitly. */
@@ -320,6 +426,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     let createdPVC = false;
     try {
       createdPVC = await this.ensurePersistentVolumeClaim(namespace, id);
+      const persistentDataAnnotations = await this.readPersistentDataAnnotations(namespace, id);
       logger.info(`Creating OpenCode instance Pod ${podName} on port ${port} (image: ${this.config.image})`);
       await this.api().createService(namespace, {
         apiVersion: 'v1',
@@ -341,7 +448,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
 
       const handle = new K8sPodHandle(this.api(), namespace, podName, serviceName);
       this.instanceState.set(id, { podName, serviceName, port, auth });
-      return { client, port, handle, baseUrl, nodeName: readyPod.nodeName };
+      return { client, port, handle, baseUrl, nodeName: readyPod.nodeName, persistentDataAnnotations };
     } catch (err) {
       await deletePodAndWait(this.api(), namespace, podName).catch(() => {});
       await this.deleteIgnoringNotFound(() => this.api().deleteService(namespace, serviceName)).catch(() => {});
@@ -385,6 +492,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     let createdPVC = false;
     try {
       createdPVC = await this.ensurePersistentVolumeClaim(namespace, id);
+      const persistentDataAnnotations = await this.readPersistentDataAnnotations(namespace, id);
       await api.createService(namespace, {
         apiVersion: 'v1',
         kind: 'Service',
@@ -405,7 +513,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
 
       const handle = new K8sPodHandle(api, namespace, state.podName, state.serviceName);
       this.instanceState.set(id, { podName: state.podName, serviceName: state.serviceName, port, auth: state.auth });
-      return { client, port, handle, baseUrl, nodeName: readyPod.nodeName };
+      return { client, port, handle, baseUrl, nodeName: readyPod.nodeName, persistentDataAnnotations };
     } catch (err) {
       await deletePodAndWait(api, namespace, state.podName).catch(() => {});
       await this.deleteIgnoringNotFound(() => api.deleteService(namespace, state.serviceName)).catch(() => {});
@@ -434,15 +542,191 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
     }
   }
 
+  /**
+   * Record destructive intent before the instance Pod is stopped. If the
+   * subsequent Pod/PVC deletion is interrupted, the cleanup coordinator can
+   * safely resume from this durable marker.
+   */
+  async preparePersistentDataDeletion(id: string): Promise<void> {
+    await this.markPersistentDataForDeletion(id);
+  }
+
   async deletePersistentData(id: string): Promise<void> {
+    const namespace = this.namespace();
+    const name = instanceVolumeClaimName(id);
+    const claim = await this.markPersistentDataForDeletion(id);
+    if (!claim) return;
+    const expectedUid = claim.uid!;
+    const artifactId = claim.annotations[CLEANUP_ARTIFACT_ANNOTATION];
+
+    const references = await this.api().listPodsReferencingPersistentVolumeClaim(namespace, name);
+    if (references.length > 0) {
+      const podNames = references.map((pod) => pod.name).join(', ');
+      throw new Error(`Persistent volume claim ${name} is still referenced by Pod(s): ${podNames}`);
+    }
+
+    let current: PersistentVolumeClaimView;
+    try {
+      current = await this.api().readPersistentVolumeClaim(namespace, name);
+    } catch (err) {
+      if (isNotFound(err)) return;
+      throw err;
+    }
+    if (current.deletionTimestamp) {
+      throw new Error(`Persistent volume claim ${name} is already being deleted`);
+    }
+    this.assertOwnedManagedClaim(current, id, true);
+    if (
+      current.uid !== expectedUid
+      || current.annotations[CLEANUP_OWNER_ANNOTATION] !== this.cleanupOwnerId
+      || current.annotations[CLEANUP_ARTIFACT_ANNOTATION] !== artifactId
+      || current.annotations[CLEANUP_STATE_ANNOTATION] !== 'delete-pending'
+      || current.annotations[CLEANUP_STATE_SINCE_ANNOTATION]
+        !== claim.annotations[CLEANUP_STATE_SINCE_ANNOTATION]
+    ) {
+      throw new Error(`Persistent volume claim ${name} changed while deletion was being prepared`);
+    }
+
     await this.deleteIgnoringNotFound(() =>
-      this.api().deletePersistentVolumeClaim(this.namespace(), instanceVolumeClaimName(id)));
+      this.api().deletePersistentVolumeClaim(namespace, name, expectedUid));
+  }
+
+  private async markPersistentDataForDeletion(id: string): Promise<PersistentVolumeClaimView | undefined> {
+    const namespace = this.namespace();
+    const name = instanceVolumeClaimName(id);
+    let claim: PersistentVolumeClaimView;
+    try {
+      claim = await this.api().readPersistentVolumeClaim(namespace, name);
+    } catch (err) {
+      if (isNotFound(err)) return undefined;
+      throw err;
+    }
+
+    this.assertOwnedManagedClaim(claim, id, true);
+    if (!claim.uid || !claim.resourceVersion) {
+      throw new Error(`Refusing to update persistent volume claim ${name} without UID and resourceVersion preconditions`);
+    }
+
+    const artifactId = claim.annotations[CLEANUP_ARTIFACT_ANNOTATION] || randomUUID();
+    const alreadyPending = claim.annotations[CLEANUP_STATE_ANNOTATION] === 'delete-pending';
+    const stateSince = alreadyPending
+      ? claim.annotations[CLEANUP_STATE_SINCE_ANNOTATION] || new Date().toISOString()
+      : new Date().toISOString();
+    if (
+      alreadyPending
+      && claim.annotations[CLEANUP_OWNER_ANNOTATION] === this.cleanupOwnerId
+      && claim.annotations[CLEANUP_ARTIFACT_ANNOTATION]
+      && claim.annotations[CLEANUP_STATE_SINCE_ANNOTATION]
+    ) {
+      return claim;
+    }
+
+    try {
+      return await this.api().patchPersistentVolumeClaimAnnotations(namespace, name, claim.uid, claim.resourceVersion, {
+        ...claim.annotations,
+        ...persistentDataAnnotations(this.cleanupOwnerId, 'delete-pending', stateSince, artifactId),
+      });
+    } catch (err) {
+      if (isNotFound(err)) return undefined;
+      throw err;
+    }
+  }
+
+  private assertOwnedManagedClaim(
+    claim: PersistentVolumeClaimView,
+    id: string,
+    requireCompleteOwnership = false,
+  ): void {
+    const name = instanceVolumeClaimName(id);
+    if (!isManagedPersistentVolumeClaim(claim, id)) {
+      throw new Error(`Refusing to modify unmanaged persistent volume claim ${name}`);
+    }
+    const recordedOwner = claim.annotations[CLEANUP_OWNER_ANNOTATION];
+    const recordedArtifact = claim.annotations[CLEANUP_ARTIFACT_ANNOTATION];
+    const recordedState = claim.annotations[CLEANUP_STATE_ANNOTATION];
+    const recordedStateSince = claim.annotations[CLEANUP_STATE_SINCE_ANNOTATION];
+    if (recordedOwner && recordedOwner !== this.cleanupOwnerId) {
+      throw new Error(`Refusing to modify persistent volume claim ${name} owned by another orchestrator`);
+    }
+    if (recordedArtifact && !isPersistentDataArtifactId(recordedArtifact)) {
+      throw new Error(`Refusing to modify persistent volume claim ${name} with an invalid cleanup artifact id`);
+    }
+    if (recordedState && !isPersistentDataCleanupState(recordedState)) {
+      throw new Error(`Refusing to modify persistent volume claim ${name} with an invalid cleanup state`);
+    }
+    if (recordedStateSince && !isPersistentDataStateTimestamp(recordedStateSince)) {
+      throw new Error(`Refusing to modify persistent volume claim ${name} with an invalid cleanup timestamp`);
+    }
+    if (requireCompleteOwnership && (
+      recordedOwner !== this.cleanupOwnerId
+      || !isPersistentDataArtifactId(recordedArtifact)
+      || !isPersistentDataCleanupState(recordedState)
+      || !isPersistentDataStateTimestamp(recordedStateSince)
+    )) {
+      throw new Error(`Refusing to modify persistent volume claim ${name} without complete cleanup ownership metadata`);
+    }
+  }
+
+  private async readPersistentDataAnnotations(namespace: string, id: string): Promise<Record<string, string>> {
+    const claim = await this.api().readPersistentVolumeClaim(namespace, instanceVolumeClaimName(id));
+    this.assertOwnedManagedClaim(claim, id);
+    const annotations: Record<string, string> = {};
+    for (const key of [
+      CLEANUP_OWNER_ANNOTATION,
+      CLEANUP_ARTIFACT_ANNOTATION,
+      CLEANUP_STATE_ANNOTATION,
+      CLEANUP_STATE_SINCE_ANNOTATION,
+    ]) {
+      const value = claim.annotations[key];
+      if (value) annotations[key] = value;
+    }
+    if (Object.keys(annotations).length !== 4) {
+      throw new Error(`Persistent volume claim ${claim.name} has incomplete cleanup metadata`);
+    }
+    return annotations;
   }
 
   private async ensurePersistentVolumeClaim(namespace: string, id: string): Promise<boolean> {
     const name = instanceVolumeClaimName(id);
     try {
-      await this.api().readPersistentVolumeClaim(namespace, name);
+      const existing = await this.api().readPersistentVolumeClaim(namespace, name);
+      this.assertOwnedManagedClaim(existing, id);
+      if (existing.annotations[CLEANUP_STATE_ANNOTATION] === 'delete-pending') {
+        throw new AppError(
+          409,
+          ErrorCodes.PERSISTENT_DATA_CLEANUP_PENDING,
+          `Persistent data cleanup is still pending for ${id}`,
+        );
+      }
+      const recordedOwner = existing.annotations[CLEANUP_OWNER_ANNOTATION];
+      const isActive = existing.annotations[CLEANUP_STATE_ANNOTATION] === 'active';
+      const hasCompleteOwnership = Boolean(
+        recordedOwner
+        && isPersistentDataArtifactId(existing.annotations[CLEANUP_ARTIFACT_ANNOTATION])
+        && isPersistentDataStateTimestamp(existing.annotations[CLEANUP_STATE_SINCE_ANNOTATION]),
+      );
+      if (!isActive || !hasCompleteOwnership) {
+        if (!existing.uid || !existing.resourceVersion) {
+          throw new Error(`Persistent volume claim ${name} lacks UID/resourceVersion; cannot establish cleanup ownership`);
+        }
+        await this.api().patchPersistentVolumeClaimAnnotations(
+          namespace,
+          name,
+          existing.uid,
+          existing.resourceVersion,
+          {
+            ...existing.annotations,
+            ...persistentDataAnnotations(
+              this.cleanupOwnerId,
+              'active',
+              isActive && existing.annotations[CLEANUP_STATE_SINCE_ANNOTATION]
+                ? existing.annotations[CLEANUP_STATE_SINCE_ANNOTATION]
+                : new Date().toISOString(),
+              existing.annotations[CLEANUP_ARTIFACT_ANNOTATION] || randomUUID(),
+            ),
+          },
+        );
+      }
       return false;
     } catch (err) {
       if (!isNotFound(err)) throw err;
@@ -455,6 +739,7 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
         metadata: {
           name,
           labels: { [PART_OF_LABEL]: PART_OF_VALUE, [CONVERSATION_LABEL]: sanitizeK8sName(id) },
+          annotations: persistentDataAnnotations(this.cleanupOwnerId, 'active'),
         },
         spec: {
           accessModes: ['ReadWriteOnce'],
@@ -464,10 +749,32 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
       return true;
     } catch (err) {
       // The placement controller may win the create race. Both owners render
-      // the same durable claim, so AlreadyExists is a successful outcome.
+      // the same durable claim. Read it back so ownership is validated and
+      // any incomplete metadata is adopted before the Pod mounts it.
       if (!isConflict(err)) throw err;
-      return false;
     }
+    const raced = await this.api().readPersistentVolumeClaim(namespace, name);
+    this.assertOwnedManagedClaim(raced, id);
+    if (raced.annotations[CLEANUP_STATE_ANNOTATION] === 'delete-pending') {
+      throw new AppError(
+        409,
+        ErrorCodes.PERSISTENT_DATA_CLEANUP_PENDING,
+        `Persistent data cleanup is still pending for ${id}`,
+      );
+    }
+    if (!raced.uid || !raced.resourceVersion) {
+      throw new Error(`Persistent volume claim ${name} lacks UID/resourceVersion; cannot establish cleanup ownership`);
+    }
+    await this.api().patchPersistentVolumeClaimAnnotations(namespace, name, raced.uid, raced.resourceVersion, {
+      ...raced.annotations,
+      ...persistentDataAnnotations(
+        this.cleanupOwnerId,
+        'active',
+        raced.annotations[CLEANUP_STATE_SINCE_ANNOTATION] || new Date().toISOString(),
+        raced.annotations[CLEANUP_ARTIFACT_ANNOTATION] || randomUUID(),
+      ),
+    });
+    return false;
   }
 
   private podBody(
@@ -550,19 +857,83 @@ export class KubernetesRuntime implements AgentRuntime, NodePlaceable {
   }
 }
 
-class LivePodsApi implements InstancePodsApi {
+export class LivePodsApi implements InstancePodsApi {
   constructor(private readonly api: PromiseCoreV1Api, private readonly labelSelector = INSTANCE_POD_SELECTOR) {}
 
-  async readPersistentVolumeClaim(namespace: string, name: string): Promise<void> {
-    await this.api.readNamespacedPersistentVolumeClaim(name, namespace);
+  async readPersistentVolumeClaim(namespace: string, name: string): Promise<PersistentVolumeClaimView> {
+    return toPersistentVolumeClaimView(await this.api.readNamespacedPersistentVolumeClaim(name, namespace));
+  }
+
+  async listManagedPersistentVolumeClaims(namespace: string): Promise<PersistentVolumeClaimView[]> {
+    const list = await this.api.listNamespacedPersistentVolumeClaim(
+      namespace,
+      undefined, undefined, undefined, undefined,
+      managedPersistentVolumeClaimSelector(),
+    );
+    return (list.items ?? []).map(toPersistentVolumeClaimView);
+  }
+
+  async patchPersistentVolumeClaimAnnotations(
+    namespace: string,
+    name: string,
+    expectedUid: string,
+    expectedResourceVersion: string,
+    annotations: Record<string, string>,
+  ): Promise<PersistentVolumeClaimView> {
+    const current = await this.readPersistentVolumeClaim(namespace, name);
+    if (current.uid !== expectedUid) {
+      throw new Error(`Persistent volume claim ${name} UID changed before annotation update`);
+    }
+    if (current.resourceVersion !== expectedResourceVersion) {
+      throw new Error(`Persistent volume claim ${name} resourceVersion changed before annotation update`);
+    }
+    const patched = await this.api.patchNamespacedPersistentVolumeClaim(
+      name,
+      namespace,
+      [
+        { op: 'test', path: '/metadata/uid', value: expectedUid },
+        { op: 'test', path: '/metadata/resourceVersion', value: expectedResourceVersion },
+        { op: 'add', path: '/metadata/annotations', value: annotations },
+      ],
+    );
+    const view = toPersistentVolumeClaimView(patched);
+    if (view.uid !== expectedUid) {
+      throw new Error(`Persistent volume claim ${name} UID changed during annotation update`);
+    }
+    return view;
   }
 
   async createPersistentVolumeClaim(namespace: string, body: object): Promise<unknown> {
     return this.api.createNamespacedPersistentVolumeClaim(namespace, body);
   }
 
-  async deletePersistentVolumeClaim(namespace: string, name: string): Promise<void> {
-    await this.api.deleteNamespacedPersistentVolumeClaim(name, namespace);
+  async deletePersistentVolumeClaim(namespace: string, name: string, expectedUid?: string): Promise<void> {
+    await this.api.deleteNamespacedPersistentVolumeClaim(
+      name,
+      namespace,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      expectedUid
+        ? { apiVersion: 'v1', kind: 'DeleteOptions', preconditions: { uid: expectedUid } }
+        : undefined,
+    );
+  }
+
+  async listPodsReferencingPersistentVolumeClaim(
+    namespace: string,
+    claimName: string,
+  ): Promise<PodClaimReferenceView[]> {
+    const list = await this.api.listNamespacedPod(namespace);
+    return (list.items ?? []).flatMap((pod) => {
+      const referencesClaim = (pod.spec?.volumes ?? []).some(
+        (volume) => volume.persistentVolumeClaim?.claimName === claimName,
+      );
+      if (!referencesClaim || !pod.metadata?.name) return [];
+      return [{
+        name: pod.metadata.name,
+        ...(pod.metadata.uid ? { uid: pod.metadata.uid } : {}),
+        ...(pod.status?.phase ? { phase: pod.status.phase } : {}),
+      }];
+    });
   }
 
   async createPod(namespace: string, body: object): Promise<unknown> {
@@ -604,6 +975,28 @@ class LivePodsApi implements InstancePodsApi {
     )) as { items?: Array<{ metadata?: { name?: string } }> };
     return (list.items ?? []).map((item) => item.metadata?.name ?? '').filter(Boolean);
   }
+}
+
+function toPersistentVolumeClaimView(claim: {
+  metadata?: {
+    name?: string;
+    uid?: string;
+    resourceVersion?: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+    deletionTimestamp?: Date;
+  };
+}): PersistentVolumeClaimView {
+  return {
+    name: claim.metadata?.name ?? '',
+    ...(claim.metadata?.uid ? { uid: claim.metadata.uid } : {}),
+    ...(claim.metadata?.resourceVersion ? { resourceVersion: claim.metadata.resourceVersion } : {}),
+    labels: { ...(claim.metadata?.labels ?? {}) },
+    annotations: { ...(claim.metadata?.annotations ?? {}) },
+    ...(claim.metadata?.deletionTimestamp
+      ? { deletionTimestamp: claim.metadata.deletionTimestamp.toISOString() }
+      : {}),
+  };
 }
 
 function createLivePodsApi(): InstancePodsApi {

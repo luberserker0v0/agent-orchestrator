@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { loadConfig, loadCanonicalConfig, validateSessionStorageConfig } from './config-loader.js';
+import { loadConfig, loadCanonicalConfig, validateDockerLoggingConfig, validateSessionStorageConfig } from './config-loader.js';
+import type { AgentOrchestratorConfig } from './config-loader.js';
 import { K8sStatusReporter } from './cluster/status-reporter.js';
 import { KubernetesRuntime } from './agent-runtime/runtimes/kubernetes.js';
 import { WorkspaceFactory } from './orchestrator/workspace-factory.js';
@@ -23,9 +24,28 @@ import { DockerRuntime } from './agent-runtime/runtimes/docker.js';
 import { PortPool } from './orchestrator/port-pool.js';
 import { SSEBridge } from './orchestrator/sse-bridge.js';
 import { createHttpServer } from './http-api/server.js';
-import { logger } from './utils/logger.js';
+import { configureFileLogging, logger, shutdownLogger } from './utils/logger.js';
+import { logFileErrorsTotal } from './metrics/registry.js';
+import { CleanupManager } from './cleanup/cleanup-manager.js';
+import { FileLogCleanupProvider } from './cleanup/file-log-provider.js';
+import { LocalPersistentDataProvider } from './cleanup/local-persistent-data-provider.js';
+import { KubernetesPersistentDataCleanupProvider } from './cleanup/kubernetes-persistent-data-provider.js';
+import type { CleanupProvider } from './cleanup/types.js';
+import { DEFAULT_SESSION_CLEANUP_OWNER } from './agent-runtime/session-storage.js';
 import { parseCliArgs, printHelp, handleSubcommand } from './cli.js';
 import { isRunningInContainer } from './utils/is-container.js';
+
+const FATAL_LOGGER_SHUTDOWN_TIMEOUT_MS = 1_000;
+
+/** Configure the optional process-wide JSONL sink before operational logs. */
+export async function initializeConfiguredFileLogging(
+  config: Pick<AgentOrchestratorConfig, 'logging'>,
+): Promise<void> {
+  if (!config.logging.file.enabled) return;
+  await configureFileLogging(config.logging.file, operation => {
+    logFileErrorsTotal.labels(operation).inc();
+  });
+}
 
 /**
  * Validate container + runtime + storage compatibility for in-container boot.
@@ -68,15 +88,22 @@ export async function main(cliArgs?: string[]) {
     return;
   }
 
-  if (await handleSubcommand(cli)) return;
-
   // Set env vars from CLI args so applyEnvOverrides picks them up
   if (cli.port !== undefined) process.env['AGENTORCHESTRATOR_SERVER_PORT'] = String(cli.port);
   if (cli.host !== undefined) process.env['AGENTORCHESTRATOR_SERVER_HOST'] = cli.host;
 
-  logger.info('AgentOrchestrator starting...');
+  // The operator is also a long-running process. Initialize its configured
+  // file sink before the controller emits any operational logs.
+  let operatorConfig: AgentOrchestratorConfig | undefined;
+  if (cli.subcommand === 'operator') {
+    operatorConfig = loadConfig(cli.configPath);
+    await initializeConfiguredFileLogging(operatorConfig);
+  }
+  if (await handleSubcommand(cli, operatorConfig)) return;
 
   const config = loadConfig(cli.configPath);
+  await initializeConfiguredFileLogging(config);
+  logger.info('AgentOrchestrator starting...');
 
   // Validate container + runtime + storage compatibility
   if (isRunningInContainer()) {
@@ -131,6 +158,7 @@ export async function main(cliArgs?: string[]) {
     if (cfg?.networkMode !== undefined && typeof cfg.networkMode !== 'string')
       errs.push('"networkMode" must be a string');
     errs.push(...validateSessionStorageConfig(cfg?.sessionStorage));
+    errs.push(...validateDockerLoggingConfig(cfg?.logging));
     return errs;
   });
   runtimeFactory.register('kubernetes', KubernetesRuntime, (config) => {
@@ -164,7 +192,14 @@ export async function main(cliArgs?: string[]) {
       continue;
     }
     try {
-      const runtime = runtimeFactory.create(entry.type, portPool, entry.config);
+      const runtimeConfig = {
+        ...entry.config,
+        ...(config.cleanup.ownerId ? { cleanupOwnerId: config.cleanup.ownerId } : {}),
+      };
+      const runtime = runtimeFactory.create(entry.type, portPool, runtimeConfig);
+      if (config.cleanup.ownerId && 'setCleanupOwnerId' in runtime && typeof runtime.setCleanupOwnerId === 'function') {
+        runtime.setCleanupOwnerId(config.cleanup.ownerId);
+      }
       runtimeRegistry.register(entry.id, runtime);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -198,11 +233,64 @@ export async function main(cliArgs?: string[]) {
   const messageService = new MessageService(instanceManager, conversationState, statusReporter);
   const roleService = new RoleService(cli.configPath ?? 'config/agentorchestrator.json', config.roles);
 
+  const cleanupProviders: CleanupProvider[] = [
+    new FileLogCleanupProvider(config.logging.file.enabled),
+  ];
+  const localSessionRoots = config.orchestrator.runtimes.flatMap(entry => {
+    if ((entry.type !== 'direct' && entry.type !== 'docker') || !entry.config.sessionStorage) return [];
+    return [{ runtimeId: entry.id, config: entry.config.sessionStorage }];
+  });
+  cleanupProviders.push(new LocalPersistentDataProvider({
+    enabled: config.cleanup.orphanedData.enabled,
+    retryPendingDeletes: localSessionRoots.length > 0,
+    ownerId: config.cleanup.ownerId ?? DEFAULT_SESSION_CLEANUP_OWNER,
+    gracePeriodMs: config.cleanup.orphanedData.gracePeriodMs,
+    roots: localSessionRoots,
+    isProtected: async id => conversationState.has(id) || runtimeManager.has(id) || await storage.hasWorkspace(id),
+    isRuntimeActive: id => runtimeManager.has(id),
+    withConversationLock: (id, operation) => conversationService.withLifecycleLock(id, operation),
+  }));
+
+  const clusterCleanupContext = statusReporter.cleanupContext();
+  if (clusterCleanupContext) {
+    const seenNamespaces = new Set<string>();
+    for (const entry of config.orchestrator.runtimes) {
+      if (entry.type !== 'kubernetes') continue;
+      const runtime = runtimeRegistry.get(entry.id);
+      if (!(runtime instanceof KubernetesRuntime)) continue;
+      const context = runtime.persistentDataCleanupContext();
+      if (seenNamespaces.has(context.namespace)) continue;
+      seenNamespaces.add(context.namespace);
+      cleanupProviders.push(new KubernetesPersistentDataCleanupProvider({
+        orphanCleanupEnabled: config.cleanup.orphanedData.enabled,
+        retryPendingDeletes: true,
+        clusterStatusReportingEnabled: true,
+        namespace: context.namespace,
+        authorityNamespace: clusterCleanupContext.namespace,
+        ownerId: context.ownerId,
+        gracePeriodMs: config.cleanup.orphanedData.gracePeriodMs,
+        api: context.api,
+        objectsApi: clusterCleanupContext.api,
+        runtimeId: entry.id,
+        hasLiveConversation: id => conversationState.has(id) || runtimeManager.has(id),
+        hasLocalWorkspace: id => storage.hasWorkspace(id),
+        withConversationLock: (id, operation) => conversationService.withLifecycleLock(id, operation),
+      }));
+    }
+  } else if (
+    config.cleanup.orphanedData.enabled
+    && config.orchestrator.runtimes.some(entry => entry.type === 'kubernetes')
+  ) {
+    logger.warn('Kubernetes orphan cleanup is unavailable because cluster status reporting is not healthy');
+  }
+  const cleanupManager = new CleanupManager(cleanupProviders, config.cleanup.sweepIntervalMs);
+
   // Clean up orphan resources from previous runs (e.g., after SIGKILL/crash)
   await instanceManager.cleanupOrphanContainers();
   await workspaceFactory.cleanupOrphans();
+  cleanupManager.start();
 
-  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService, roleService, config);
+  const httpServer = createHttpServer(config.server, config.websocket, instanceManager, workspaceFactory, conversationState, configService, agentService, skillService, runtimeRegistry, conversationService, fileService, sessionService, messageService, roleService, config, cleanupManager);
 
   httpServer.server.listen(config.server.port, config.server.host, () => {
     const addr = httpServer.server.address();
@@ -236,7 +324,11 @@ export async function main(cliArgs?: string[]) {
   });
 
   // Graceful shutdown
+  let shutdownStarted = false;
   const shutdown = async (signal: string) => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    const shutdownDeadline = Date.now() + config.server.shutdownTimeoutMs;
     logger.info(`Received ${signal}, shutting down...`);
 
     // Hard timeout for the entire shutdown sequence
@@ -248,6 +340,7 @@ export async function main(cliArgs?: string[]) {
     try {
       // Stop idle sweep timer to prevent interference during shutdown
       instanceManager.destroy();
+      await cleanupManager.shutdown();
 
       // Stop instance status heartbeats
       statusReporter.destroy();
@@ -272,10 +365,12 @@ export async function main(cliArgs?: string[]) {
       }
 
       logger.info('Shutdown complete');
+      await shutdownLogger(Math.max(0, shutdownDeadline - Date.now()));
       clearTimeout(hardTimeout);
       process.exit(0);
     } catch (err) {
       logger.error('Error during shutdown:', err);
+      await shutdownLogger(Math.max(0, shutdownDeadline - Date.now()));
       clearTimeout(hardTimeout);
       process.exit(1);
     }
@@ -287,7 +382,7 @@ export async function main(cliArgs?: string[]) {
   // Unhandled errors
   process.on('uncaughtException', (err) => {
     logger.error('Uncaught exception:', err);
-    process.exit(1);
+    void shutdownLogger(FATAL_LOGGER_SHUTDOWN_TIMEOUT_MS).finally(() => process.exit(1));
   });
   process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled rejection:', reason);
@@ -297,8 +392,9 @@ export async function main(cliArgs?: string[]) {
 // Allow running as a script
 const isMain = process.argv.length > 1 && process.argv[1]?.endsWith('index.js') || process.argv[1]?.endsWith('index.ts');
 if (isMain) {
-  main().catch((err) => {
+  main().catch(async (err) => {
     logger.error('Fatal error during startup:', err);
+    await shutdownLogger(FATAL_LOGGER_SHUTDOWN_TIMEOUT_MS);
     process.exit(1);
   });
 }

@@ -4,7 +4,13 @@ import { logger } from '../../utils/logger.js';
 import { OpenCodeAgentClient } from '../../opencode-http/client.js';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import { waitForHealthy } from '../health.js';
-import { resolveSessionStorage, sessionContainerArgs } from '../session-storage.js';
+import {
+  DEFAULT_SESSION_CLEANUP_OWNER,
+  deleteManagedSessionStorage,
+  markSessionStorageDeletePending,
+  resolveSessionStorage,
+  sessionContainerArgs,
+} from '../session-storage.js';
 import type { AgentRuntime, AgentCapabilities, AgentEndpoint, InstanceHandle, AgentClient, HealthCheckConfig, RuntimeAccess } from '../types.js';
 import type { DockerRuntimeConfig } from '../../config-loader.js';
 
@@ -27,15 +33,22 @@ class DockerHandle implements InstanceHandle {
   }
 
   async kill(): Promise<void> {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       const rm = spawn('docker', ['rm', '-f', this.containerName], { stdio: 'ignore' });
-      if (rm.exitCode !== null || rm.killed) {
-        resolve();
+      if (rm.exitCode !== null) {
+        if (rm.exitCode === 0) resolve();
+        else reject(new Error(`docker rm -f exited with code ${rm.exitCode}`));
         return;
       }
-      const timer = setTimeout(() => resolve(), 10000);
-      rm.on('error', () => { clearTimeout(timer); resolve(); });
-      rm.on('exit', () => { clearTimeout(timer); resolve(); });
+      const timer = setTimeout(() => {
+        reject(new Error(`Timed out removing Docker container ${this.containerName}`));
+      }, 10000);
+      rm.once('error', (err) => { clearTimeout(timer); reject(err); });
+      rm.once('exit', (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else reject(new Error(`docker rm -f exited with code ${code ?? 'unknown'}`));
+      });
     });
   }
 
@@ -101,6 +114,7 @@ export class DockerRuntime implements AgentRuntime {
   private instanceAuth = new Map<string, { baseUrl: string; auth: { username: string; password: string } }>();
   private clients = new Map<string, AgentClient>();
   private ports = new Map<string, number>();
+  private pendingPersistentDataDeletes = new Map<string, string>();
 
   constructor(portPool: PortPool, config: DockerRuntimeConfig) {
     this.portPool = portPool;
@@ -128,6 +142,15 @@ export class DockerRuntime implements AgentRuntime {
       this.containerNames.set(id, containerName);
 
       const dockerArgs: string[] = ['run', '-d', '--name', containerName];
+      if (this.config.logging?.driver) {
+        dockerArgs.push('--log-driver', this.config.logging.driver);
+      }
+      if (this.config.logging?.maxSize) {
+        dockerArgs.push('--log-opt', `max-size=${this.config.logging.maxSize}`);
+      }
+      if (this.config.logging?.maxFiles !== undefined) {
+        dockerArgs.push('--log-opt', `max-file=${this.config.logging.maxFiles}`);
+      }
       if (this.config.networkMode === 'host') {
         dockerArgs.push('--network', 'host');
       } else {
@@ -140,7 +163,11 @@ export class DockerRuntime implements AgentRuntime {
       // Skipped with docker-volume access (storage owned by the data container).
       const sessionMountArgs: string[] =
         !vol && this.config.sessionStorage
-          ? sessionContainerArgs(resolveSessionStorage(this.config.sessionStorage, id))
+          ? sessionContainerArgs(resolveSessionStorage(
+            this.config.sessionStorage,
+            id,
+            this.config.cleanupOwnerId,
+          ))
           : [];
       dockerArgs.push(
         ...(vol ? ['--volumes-from', vol.container] : ['-v', `${workspacePath}:/workspace`]),
@@ -182,6 +209,36 @@ export class DockerRuntime implements AgentRuntime {
   async stop(handle?: InstanceHandle): Promise<void> {
     if (handle) {
       await handle.kill();
+    }
+  }
+
+  /** Mark the current generation before an explicit conversation delete stops it. */
+  async preparePersistentDataDeletion(id: string): Promise<void> {
+    if (!this.config.sessionStorage) return;
+    const artifactId = markSessionStorageDeletePending(
+      this.config.sessionStorage,
+      id,
+      this.config.cleanupOwnerId ?? DEFAULT_SESSION_CLEANUP_OWNER,
+    );
+    if (artifactId) this.pendingPersistentDataDeletes.set(id, artifactId);
+  }
+
+  /** Quarantine and purge only the generation marked by the explicit delete. */
+  async deletePersistentData(id: string): Promise<void> {
+    if (!this.config.sessionStorage) return;
+    const expectedArtifactId = this.pendingPersistentDataDeletes.get(id);
+    if (!expectedArtifactId) return;
+    try {
+      await deleteManagedSessionStorage(
+        this.config.sessionStorage,
+        id,
+        this.config.cleanupOwnerId ?? DEFAULT_SESSION_CLEANUP_OWNER,
+        expectedArtifactId,
+      );
+      this.pendingPersistentDataDeletes.delete(id);
+    } catch (err) {
+      logger.warn(`Persistent session cleanup remains pending for ${id}`);
+      throw err;
     }
   }
 

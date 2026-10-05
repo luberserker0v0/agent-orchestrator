@@ -6,12 +6,13 @@ vi.mock('../../utils/logger.js', () => ({
 
 import { PlacementController, type ReconcileSummary } from './controller.js';
 import type { StatusObjectsApi } from '../status-reporter.js';
+import { persistentDataAnnotations } from '../../agent-runtime/runtimes/kubernetes.js';
 
 const MODEL = { providerID: 'anthropic', id: 'claude-sonnet-4' };
 
 function instanceBody(overrides: Record<string, unknown> = {}): object {
   return {
-    metadata: { name: 'x' },
+    metadata: { name: 'x', ...((overrides.metadata ?? {}) as object) },
     spec: { conversationId: 'x', endpoint: 'http://x:1', volumeClaimName: 'conv-x', ...((overrides.spec ?? {}) as object) },
     status: { phase: 'Ready', ...(overrides.status ?? {}) },
   };
@@ -59,7 +60,10 @@ function createFake(stores: { instances: Map<string, object>; routes: Map<string
     listNamespacedCustomObject: vi.fn(async (_g: string, _v: string, _ns: string, plural: string) => {
       const items = [...storeFor(plural).entries()].map(([name, body]) => ({
         ...((body ?? {}) as object),
-        metadata: { name },
+        metadata: {
+          ...(((body as { metadata?: object } | undefined)?.metadata) ?? {}),
+          name,
+        },
       }));
       return { body: { items } };
     }),
@@ -97,7 +101,15 @@ function volumeFake(state: { claims: Set<string> }): import('./executor.js').Vol
   return {
     readPersistentVolumeClaim: vi.fn(async (_ns: string, name: string) => {
       if (!state.claims.has(name)) throw notFound();
-      return {};
+      return {
+        metadata: {
+          name,
+          labels: {
+            'app.kubernetes.io/part-of': 'agent-orchestrator',
+            'agentorchestrator.io/conversation': name.replace(/^conv-/, ''),
+          },
+        },
+      };
     }),
     createPersistentVolumeClaim: vi.fn(async (_ns: string, body: object) => {
       const name = ((body as { metadata: { name: string } }).metadata.name);
@@ -411,13 +423,82 @@ describe('PlacementController', () => {
       expect(volumes.createPersistentVolumeClaim).not.toHaveBeenCalled();
     });
 
-    it('deletes route and volume when the instance is gone', async () => {
+    it('deletes a stale route but leaves its volume to the retention cleanup policy', async () => {
       stores.routes.set('ghost', routeBody());
       const volumes = volumeFake({ claims: new Set(['conv-ghost']) });
       const { controller } = controllerWith(stores, undefined, volumes);
       const summary = await controller.reconcileOnce();
       expect(summary.routesDeleted).toEqual(['ghost']);
-      expect(summary.volumesDeleted).toEqual(['conv-ghost']);
+      expect(summary.volumesDeleted).toEqual([]);
+      expect(volumes.deletePersistentVolumeClaim).not.toHaveBeenCalled();
+    });
+
+    it('never recreates storage or routes for delete-pending instance records', async () => {
+      stores.instances.set('a', instanceBody({
+        metadata: { annotations: persistentDataAnnotations('agent-orchestrator', 'delete-pending') },
+        status: { phase: 'QuotaExhausted' },
+      }));
+      stores.routes.set('a', routeBody());
+      const volumes = volumeFake({ claims: new Set(['conv-a']) });
+      const { controller } = controllerWith(stores, undefined, volumes);
+
+      const summary = await controller.reconcileOnce();
+
+      expect(summary.routesDeleted).toEqual(['a']);
+      expect(summary.routesCreated).toEqual([]);
+      expect(summary.migrationsPlanned).toEqual([]);
+      expect(stores.instances.has('a')).toBe(true);
+      expect(volumes.createPersistentVolumeClaim).not.toHaveBeenCalled();
+      expect(volumes.deletePersistentVolumeClaim).not.toHaveBeenCalled();
+    });
+
+    it('removes a delete-pending instance tombstone only after its PVC is gone', async () => {
+      stores.instances.set('a', instanceBody({
+        metadata: { annotations: persistentDataAnnotations('agent-orchestrator', 'delete-pending') },
+      }));
+      const volumes = volumeFake({ claims: new Set() });
+      const { controller } = controllerWith(stores, undefined, volumes);
+
+      const summary = await controller.reconcileOnce();
+
+      expect(summary.errors).toEqual([]);
+      expect(stores.instances.has('a')).toBe(false);
+      expect(volumes.createPersistentVolumeClaim).not.toHaveBeenCalled();
+    });
+
+    it('retains malformed or foreign delete-pending instance records for review', async () => {
+      stores.instances.set('a', instanceBody({
+        metadata: { annotations: persistentDataAnnotations('another-owner', 'delete-pending') },
+      }));
+      const volumes = volumeFake({ claims: new Set() });
+      const { controller } = controllerWith(stores, undefined, volumes);
+
+      const summary = await controller.reconcileOnce();
+
+      expect(stores.instances.has('a')).toBe(true);
+      expect(summary.errors).toEqual([
+        expect.stringContaining('invalid cleanup ownership metadata'),
+      ]);
+      expect(volumes.createPersistentVolumeClaim).not.toHaveBeenCalled();
+    });
+
+    it('refuses to route an instance through a foreign PVC', async () => {
+      stores.instances.set('a', instanceBody());
+      const volumes = volumeFake({ claims: new Set(['conv-a']) });
+      volumes.readPersistentVolumeClaim.mockResolvedValue({
+        metadata: {
+          name: 'conv-a',
+          labels: { 'app.kubernetes.io/part-of': 'another-application' },
+        },
+      });
+      const { controller } = controllerWith(stores, undefined, volumes);
+
+      const summary = await controller.reconcileOnce();
+
+      expect(summary.routesCreated).toEqual([]);
+      expect(summary.errors).toEqual([expect.stringContaining('unmanaged persistent volume claim conv-a')]);
+      expect(volumes.createPersistentVolumeClaim).not.toHaveBeenCalled();
+      expect(volumes.deletePersistentVolumeClaim).not.toHaveBeenCalled();
     });
   });
 });

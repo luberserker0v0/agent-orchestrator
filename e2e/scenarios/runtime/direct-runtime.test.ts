@@ -1,24 +1,42 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startServer, type E2EServer } from '../../helpers/server.js';
 import { OPENCODE_CONFIG } from '../../../src/test-fixtures/user-configs.js';
 import { uploadOpencodeConfig } from '../../../src/test-fixtures/helpers.js';
+import { sessionOwnershipRecordPath } from '../../../src/agent-runtime/session-storage.js';
+import type { SessionStorageConfig } from '../../../src/config-loader.js';
 
 const hasOpencode = spawnSync('opencode', ['--version'], { stdio: 'ignore' }).status === 0;
 
 describe.skipIf(!hasOpencode)('DirectRuntime — process lifecycle (E2E)', () => {
   let server: E2EServer;
+  let sessionRoot: string;
+  let sessionStorage: SessionStorageConfig;
+  let initialSessionId: string;
   const convId = 'e2e-direct-runtime';
 
   beforeAll(async () => {
-    server = await startServer();
+    sessionRoot = mkdtempSync(join(tmpdir(), 'e2e-direct-sessions-'));
+    sessionStorage = { sharedRoot: sessionRoot, mode: 'xdg' };
+    server = await startServer({
+      defaultAgentType: 'opencode-direct',
+      runtimes: [{
+        id: 'opencode-direct',
+        type: 'direct',
+        config: { binary: 'opencode', sessionStorage, cleanupOwnerId: 'e2e-direct-owner' },
+      }],
+    });
   }, 30_000);
 
   afterAll(async () => {
-    try { await fetch(`${server.baseUrl}/api/conversations/${convId}`, { method: 'DELETE' }); } catch { /* ignore */ }
-    await server.cleanup();
+    if (server) {
+      try { await fetch(`${server.baseUrl}/api/conversations/${convId}`, { method: 'DELETE' }); } catch { /* ignore */ }
+      await server.cleanup();
+    }
+    if (sessionRoot) rmSync(sessionRoot, { recursive: true, force: true });
   }, 15_000);
 
   async function waitForReady(): Promise<string> {
@@ -53,8 +71,8 @@ describe.skipIf(!hasOpencode)('DirectRuntime — process lifecycle (E2E)', () =>
   });
 
   it('process is healthy and ready', async () => {
-    const sessionId = await waitForReady();
-    expect(sessionId).toBeTruthy();
+    initialSessionId = await waitForReady();
+    expect(initialSessionId).toBeTruthy();
   });
 
   it('sends message through spawned process', async () => {
@@ -70,6 +88,11 @@ describe.skipIf(!hasOpencode)('DirectRuntime — process lifecycle (E2E)', () =>
   });
 
   it('graceful stop sends SIGTERM and cleans up process', async () => {
+    const sessionPath = join(sessionRoot, convId);
+    const ownershipPath = sessionOwnershipRecordPath(sessionStorage, convId);
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(existsSync(ownershipPath)).toBe(true);
+
     const res = await fetch(`${server.baseUrl}/api/conversations/${convId}/stop`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -81,6 +104,8 @@ describe.skipIf(!hasOpencode)('DirectRuntime — process lifecycle (E2E)', () =>
     const detail = await fetch(`${server.baseUrl}/api/conversations/${convId}`);
     const body = await detail.json() as { port?: number };
     expect(body.port).toBeUndefined();
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(existsSync(ownershipPath)).toBe(true);
   });
 
   it('restart spawns new process on fresh port', async () => {
@@ -96,12 +121,16 @@ describe.skipIf(!hasOpencode)('DirectRuntime — process lifecycle (E2E)', () =>
   });
 
   it('new process is healthy after restart', async () => {
-    await waitForReady();
+    expect(await waitForReady()).toBe(initialSessionId);
   });
 
-  it('delete kills process and removes workspace', async () => {
+  it('explicit delete kills the process and removes workspace and persistent session data', async () => {
     const wsPath = join(server.workspaceDir, convId);
+    const sessionPath = join(sessionRoot, convId);
+    const ownershipPath = sessionOwnershipRecordPath(sessionStorage, convId);
     expect(existsSync(wsPath)).toBe(true);
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(existsSync(ownershipPath)).toBe(true);
 
     const del = await fetch(`${server.baseUrl}/api/conversations/${convId}`, { method: 'DELETE' });
     expect(del.status).toBe(204);
@@ -111,5 +140,7 @@ describe.skipIf(!hasOpencode)('DirectRuntime — process lifecycle (E2E)', () =>
       await new Promise((r) => setTimeout(r, 1000));
     }
     expect(existsSync(wsPath)).toBe(false);
+    expect(existsSync(sessionPath)).toBe(false);
+    expect(existsSync(ownershipPath)).toBe(false);
   });
 });

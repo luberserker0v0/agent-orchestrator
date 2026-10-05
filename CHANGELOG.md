@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: slim root README.md to landing page pointing to docs/
 
 ### Added
+- feat(cleanup): add admin preview/run APIs and grace-based cleanup for orphaned local session stores and Kubernetes PVCs
+- feat(logging): add opt-in rotating JSONL AgentOrchestrator logs and configurable Docker runtime log limits
 - test(kubernetes): add an isolated two-worker k3d suite for execute-mode cross-node migration, failure quarantine, and manual recovery
 - test(kubernetes): add opt-in k3d lifecycle, persistence, migration, and failed-start cleanup E2E coverage
 - feat(k8s): orchestrator Deployment/Service/Config-Secret/RBAC, sticky Traefik Ingress, ServiceMonitor, and per-conversation workspace PVC

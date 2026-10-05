@@ -1,11 +1,14 @@
 # Template: one instance of this PVC exists per conversation.
-# Lifecycle (enforced by the operator, Phase E):
+# Lifecycle (enforced by the orchestrator cleanup policy):
 #   - Created on conversation create, named `conv-<conversationId>`.
 #   - Mounted by at most one instance Pod at a time (ReadWriteOnce).
-#   - Deleted ONLY on explicit conversation DELETE (API, confirm=true).
+#   - Deleted immediately on explicit conversation DELETE.
 #     Never deleted on migration, eviction, or idle timeout.
-#   - Orphan-reaper removes PVCs whose conversation record is gone AND
-#     older than the configured retention window.
+#   - Missing instances only remove stale routes; they do not delete storage.
+#   - Owned orphan PVCs are first annotated as candidates, then removed only
+#     after the full configured grace period, a second observation, no Pod
+#     references, and a UID-preconditioned final ownership check.
+#   - Foreign and unlabeled PVCs are never deleted.
 # Replace <conv-id> with the conversation id before applying.
 apiVersion: v1
 kind: PersistentVolumeClaim

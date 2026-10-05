@@ -100,6 +100,9 @@ Read-only access. Can view everything but cannot modify anything.
 | Create role | Yes | No | No |
 | Update role | Yes | No | No |
 | Delete role | Yes | No | No |
+| **Cleanup** | | | |
+| Preview cleanup | Yes | No | No |
+| Run cleanup | Yes | No | No |
 
 ## Custom Roles
 
@@ -160,3 +163,5 @@ Assign the custom role to an API key:
 - Role names must start with a letter and contain only alphanumeric, hyphen, or underscore characters (max 64 characters)
 - Built-in roles (`admin`, `user`, `observer`) cannot be modified, deleted, or overridden
 - Custom roles are persisted to the config file automatically
+- Cleanup access is intentionally absent from built-in `user` and `observer`
+  roles. Grant `cleanup:read` and/or `cleanup:run` explicitly to custom roles.

@@ -155,6 +155,8 @@ describe('RoleService', () => {
       expect(service.hasPermission('user', 'conversation:start')).toBe(true);
       expect(service.hasPermission('user', 'message:send')).toBe(true);
       expect(service.hasPermission('user', 'role:write')).toBe(false);
+      expect(service.hasPermission('user', 'cleanup:read')).toBe(false);
+      expect(service.hasPermission('user', 'cleanup:run')).toBe(false);
     });
 
     it('observer has read-only permissions', () => {
@@ -162,6 +164,8 @@ describe('RoleService', () => {
       expect(service.hasPermission('observer', 'message:history')).toBe(true);
       expect(service.hasPermission('observer', 'conversation:start')).toBe(false);
       expect(service.hasPermission('observer', 'message:send')).toBe(false);
+      expect(service.hasPermission('observer', 'cleanup:read')).toBe(false);
+      expect(service.hasPermission('observer', 'cleanup:run')).toBe(false);
     });
 
     it('custom role permissions work', () => {
