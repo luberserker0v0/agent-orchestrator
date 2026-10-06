@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { openapiSpec } from './openapi.js';
@@ -37,16 +37,17 @@ describe('cleanup OpenAPI contract', () => {
 
 describe('OpenAPI route coverage', () => {
   it('documents every explicitly registered HTTP operation', () => {
-    const serverSource = readFileSync(
-      fileURLToPath(new URL('./server.ts', import.meta.url)),
-      'utf8',
-    );
+    const routesDirectory = fileURLToPath(new URL('./routes/', import.meta.url));
+    const routeSources = readdirSync(routesDirectory)
+      .filter(name => name.endsWith('.ts'))
+      .map(name => readFileSync(new URL(`./routes/${name}`, import.meta.url), 'utf8'));
     const registered = new Set<string>();
     const routePattern = /app\.(get|post|put|patch|delete)\(\s*'([^']+)'/g;
-    for (const match of serverSource.matchAll(routePattern)) {
-      const method = match[1].toUpperCase();
-      const path = match[2].replace(/:([A-Za-z][A-Za-z0-9_]*)/g, '{$1}');
-      registered.add(`${method} ${path}`);
+    for (const source of routeSources) {
+      for (const match of source.matchAll(routePattern)) addRoute(registered, match[1], match[2]);
+      for (const match of source.matchAll(/registerScope\(app, '([^']+)'/g)) {
+        addSkillRoutes(registered, match[1]);
+      }
     }
 
     const paths = openapiSpec.paths as Record<string, Record<string, unknown>>;
@@ -73,3 +74,16 @@ describe('OpenAPI route coverage', () => {
     });
   });
 });
+
+function addRoute(routes: Set<string>, method: string, path: string): void {
+  routes.add(`${method.toUpperCase()} ${path.replace(/:([A-Za-z][A-Za-z0-9_]*)/g, '{$1}')}`);
+}
+
+function addSkillRoutes(routes: Set<string>, base: string): void {
+  addRoute(routes, 'post', `${base}/upload`);
+  addRoute(routes, 'post', `${base}/import`);
+  addRoute(routes, 'get', base);
+  addRoute(routes, 'get', `${base}/:name`);
+  addRoute(routes, 'get', `${base}/:name/info`);
+  addRoute(routes, 'delete', `${base}/:name`);
+}

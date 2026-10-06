@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs(setup): add linked end-to-end Direct, Docker, and Kubernetes setup tutorials with a Mermaid architecture diagram
 
 ### Changed
+- refactor(core): decompose HTTP, WebSocket, startup, validation, cleanup, and placement responsibilities with a project-wide 100-line production-function limit
 - test(e2e): pin the default Docker OpenCode image so local and CI runs use the same runtime version
 - refactor(cli): replace permissive argument parsing with a strict nested Commander command tree while preserving `aor` server startup
 - build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package

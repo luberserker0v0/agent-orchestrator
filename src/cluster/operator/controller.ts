@@ -215,14 +215,33 @@ export class PlacementController {
     const activeInstances = instances.filter((instance) => instance.cleanupState !== 'delete-pending');
     const activeInstanceByName = new Map(activeInstances.map((instance) => [instance.name, instance]));
 
-    // Time-based refill first: quota windows that elapsed clear back to Ready
-    // so later passes (and the planner) see recovered capacity.
-    const refillPolicy = this.options.refill ?? { defaultWindowMs: 24 * 60 * 60 * 1000 };
+    await this.refillQuota(instances, summary);
+
+    await this.createMissingRoutes(instances, routeByName, summary);
+
+    // Keep established routes aligned with lifecycle changes. A stopped
+    // instance must not remain routable, and a restarted/moved instance must
+    // publish its refreshed endpoint before clients are sent to it.
+    await this.synchronizeRoutes(instances, routeByName, summary);
+
+    await this.deleteStaleRoutes(routes, activeInstanceByName, summary);
+
+    // A delete-pending instance record is a durable tombstone, not placement
+    // authority. Never recreate its route or PVC. Once UID-safe cleanup has
+    // removed the claim, remove the corresponding CR as well.
+    await this.retireDeletePendingInstances(instances, summary);
+
+    await this.planMigrations(instances, activeInstances, routeByName, summary);
+
+    return summary;
+  }
+
+  private async refillQuota(instances: InstanceView[], summary: ReconcileSummary): Promise<void> {
+    const policy = this.options.refill ?? { defaultWindowMs: 24 * 60 * 60 * 1000 };
     const nowMs = Date.now();
     for (const instance of instances) {
-      if (instance.cleanupState === 'delete-pending') continue;
-      if (instance.phase !== 'QuotaExhausted') continue;
-      if (!isRefillDue(instance.lastQuotaErrorAt, nowMs, refillWindowMs(refillPolicy, instance.model))) continue;
+      if (instance.cleanupState === 'delete-pending' || instance.phase !== 'QuotaExhausted') continue;
+      if (!isRefillDue(instance.lastQuotaErrorAt, nowMs, refillWindowMs(policy, instance.model))) continue;
       try {
         await this.setInstanceStatus(instance.name, {
           phase: 'Ready',
@@ -237,23 +256,34 @@ export class PlacementController {
         summary.errors.push(`refill ${instance.name} failed: ${(err as Error).message}`);
       }
     }
+  }
 
+  private async createMissingRoutes(
+    instances: InstanceView[],
+    routeByName: Map<string, RouteView>,
+    summary: ReconcileSummary,
+  ): Promise<void> {
     for (const instance of instances) {
-      if (instance.cleanupState === 'delete-pending') continue;
-      if (routeByName.has(instance.name)) continue;
+      if (instance.cleanupState === 'delete-pending' || routeByName.has(instance.name)) continue;
       try {
         await this.ensureVolume(instance.name, summary);
-        await this.api.createNamespacedCustomObject(GROUP, VERSION, namespace, ROUTES_PLURAL, {
-          apiVersion: `${GROUP}/${VERSION}`,
-          kind: 'ConversationRoute',
-          metadata: { name: instance.name, labels: { 'app.kubernetes.io/part-of': 'agent-orchestrator' } },
-          spec: { conversationId: instance.name },
-        });
+        await this.api.createNamespacedCustomObject(
+          GROUP, VERSION, this.options.namespace, ROUTES_PLURAL,
+          {
+            apiVersion: `${GROUP}/${VERSION}`,
+            kind: 'ConversationRoute',
+            metadata: { name: instance.name, labels: { 'app.kubernetes.io/part-of': 'agent-orchestrator' } },
+            spec: { conversationId: instance.name },
+          },
+        );
         await this.setRouteStatus(instance.name, {
           phase: 'Active',
-          ...(instance.name ? { currentInstanceRef: instance.name } : {}),
+          currentInstanceRef: instance.name,
           ...(instance.endpoint ? { currentEndpoint: instance.endpoint } : {}),
-          conditions: [{ type: 'Routable', status: 'True', reason: 'InstanceActive', lastTransitionTime: new Date().toISOString() }],
+          conditions: [{
+            type: 'Routable', status: 'True', reason: 'InstanceActive',
+            lastTransitionTime: new Date().toISOString(),
+          }],
         });
         summary.routesCreated.push(instance.name);
         logger.info(`[operator] route created for ${instance.name}`);
@@ -261,10 +291,13 @@ export class PlacementController {
         summary.errors.push(`create route ${instance.name} failed: ${(err as Error).message}`);
       }
     }
+  }
 
-    // Keep established routes aligned with lifecycle changes. A stopped
-    // instance must not remain routable, and a restarted/moved instance must
-    // publish its refreshed endpoint before clients are sent to it.
+  private async synchronizeRoutes(
+    instances: InstanceView[],
+    routeByName: Map<string, RouteView>,
+    summary: ReconcileSummary,
+  ): Promise<void> {
     for (const instance of instances) {
       if (instance.cleanupState === 'delete-pending') continue;
       const route = routeByName.get(instance.name);
@@ -280,11 +313,7 @@ export class PlacementController {
               lastTransitionTime: new Date().toISOString(),
             }],
           });
-        } else if (instance.phase === 'Ready' && (
-          route.phase !== 'Active'
-          || route.currentInstanceRef !== instance.name
-          || route.currentEndpoint !== instance.endpoint
-        )) {
+        } else if (this.routeNeedsActivation(instance, route)) {
           await this.setRouteStatus(instance.name, {
             phase: 'Active',
             currentInstanceRef: instance.name,
@@ -299,67 +328,89 @@ export class PlacementController {
         summary.errors.push(`sync route ${instance.name} failed: ${(err as Error).message}`);
       }
     }
+  }
 
+  private routeNeedsActivation(instance: InstanceView, route: RouteView): boolean {
+    return instance.phase === 'Ready' && (
+      route.phase !== 'Active'
+      || route.currentInstanceRef !== instance.name
+      || route.currentEndpoint !== instance.endpoint
+    );
+  }
+
+  private async deleteStaleRoutes(
+    routes: RouteView[],
+    activeInstanceByName: Map<string, InstanceView>,
+    summary: ReconcileSummary,
+  ): Promise<void> {
     for (const route of routes) {
       if (activeInstanceByName.has(route.name)) continue;
-      // A missing or delete-pending instance makes its route stale, but does
-      // not prove the PVC is safe to delete. Cleanup owns Pod checks, owner
-      // verification, retention, and UID-preconditioned deletion.
       try {
-        await this.api.deleteNamespacedCustomObject(GROUP, VERSION, namespace, ROUTES_PLURAL, route.name);
+        await this.api.deleteNamespacedCustomObject(
+          GROUP, VERSION, this.options.namespace, ROUTES_PLURAL, route.name,
+        );
         summary.routesDeleted.push(route.name);
         logger.info(`[operator] route deleted for ${route.name} (instance unavailable)`);
       } catch (err) {
         summary.errors.push(`delete route ${route.name} failed: ${(err as Error).message}`);
       }
     }
+  }
 
-    // A delete-pending instance record is a durable tombstone, not placement
-    // authority. Never recreate its route or PVC. Once UID-safe cleanup has
-    // removed the claim, remove the corresponding CR as well.
-    if (this.volumes) {
-      for (const instance of instances) {
-        if (instance.cleanupState !== 'delete-pending') continue;
-        if (!this.canRetireDeletePendingInstance(instance)) {
-          summary.errors.push(`delete-pending instance ${instance.name} has invalid cleanup ownership metadata`);
+  private async retireDeletePendingInstances(
+    instances: InstanceView[],
+    summary: ReconcileSummary,
+  ): Promise<void> {
+    if (!this.volumes) return;
+    for (const instance of instances) {
+      if (instance.cleanupState !== 'delete-pending') continue;
+      if (!this.canRetireDeletePendingInstance(instance)) {
+        summary.errors.push(`delete-pending instance ${instance.name} has invalid cleanup ownership metadata`);
+        continue;
+      }
+      try {
+        await this.volumes.readPersistentVolumeClaim(
+          this.options.namespace,
+          conversationVolumeClaimName(instance.name),
+        );
+      } catch (err) {
+        if (!isNotFoundLike(err)) {
+          summary.errors.push(`read delete-pending volume ${instance.name} failed: ${(err as Error).message}`);
           continue;
         }
-        try {
-          await this.volumes.readPersistentVolumeClaim(
-            namespace,
-            conversationVolumeClaimName(instance.name),
-          );
-        } catch (err) {
-          if (!isNotFoundLike(err)) {
-            summary.errors.push(`read delete-pending volume ${instance.name} failed: ${(err as Error).message}`);
-            continue;
-          }
-          try {
-            await this.api.deleteNamespacedCustomObject(
-              GROUP, VERSION, namespace, INSTANCES_PLURAL, instance.name,
-            );
-            logger.info(`[operator] delete-pending instance record removed for ${instance.name}`);
-          } catch (deleteErr) {
-            if (!isNotFoundLike(deleteErr)) {
-              summary.errors.push(`delete pending instance ${instance.name} failed: ${(deleteErr as Error).message}`);
-            }
-          }
-        }
+        await this.deleteRetiredInstanceRecord(instance.name, summary);
       }
     }
+  }
 
+  private async deleteRetiredInstanceRecord(name: string, summary: ReconcileSummary): Promise<void> {
+    try {
+      await this.api.deleteNamespacedCustomObject(
+        GROUP, VERSION, this.options.namespace, INSTANCES_PLURAL, name,
+      );
+      logger.info(`[operator] delete-pending instance record removed for ${name}`);
+    } catch (err) {
+      if (!isNotFoundLike(err)) {
+        summary.errors.push(`delete pending instance ${name} failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private async planMigrations(
+    instances: InstanceView[],
+    activeInstances: InstanceView[],
+    routeByName: Map<string, RouteView>,
+    summary: ReconcileSummary,
+  ): Promise<void> {
     for (const instance of instances) {
-      if (instance.cleanupState === 'delete-pending') continue;
-      if (instance.phase !== 'QuotaExhausted') continue;
+      if (instance.cleanupState === 'delete-pending' || instance.phase !== 'QuotaExhausted') continue;
       const route = routeByName.get(instance.name);
       if (!route || route.phase !== 'Active' || route.desiredInstanceRef) continue;
       if (!this.options.dryRun) {
         await this.executeMigration(instance, summary, loadByNode(activeInstances));
         continue;
       }
-      const candidates: MigrationCandidate[] = instances
-        .filter((c) => c.name !== instance.name && c.cleanupState !== 'delete-pending')
-        .map((c) => ({ name: c.name, ...(c.nodeName ? { nodeName: c.nodeName } : {}), ...(c.model ? { model: c.model } : {}), phase: c.phase ?? 'Unknown' }));
+      const candidates = this.migrationCandidates(instance, instances);
       const decision = planMigration(
         {
           name: instance.name,
@@ -369,16 +420,27 @@ export class PlacementController {
         candidates,
         loadByNode(activeInstances),
       );
-      if (decision.action === 'migrate') {
-        summary.migrationsPlanned.push({ from: instance.name, target: decision.target, reason: decision.reason });
-        logger.info(`[operator] [dry-run] would migrate ${instance.name} -> ${decision.target} (${decision.reason})`);
-      } else {
-        summary.migrationsPlanned.push({ from: instance.name, reason: decision.reason });
-        logger.info(`[operator] no migration target for ${instance.name} (${decision.reason})`);
-      }
+      summary.migrationsPlanned.push({
+        from: instance.name,
+        ...(decision.action === 'migrate' ? { target: decision.target } : {}),
+        reason: decision.reason,
+      });
+      const outcome = decision.action === 'migrate'
+        ? `would migrate ${instance.name} -> ${decision.target}`
+        : `no migration target for ${instance.name}`;
+      logger.info(`[operator] ${decision.action === 'migrate' ? '[dry-run] ' : ''}${outcome} (${decision.reason})`);
     }
+  }
 
-    return summary;
+  private migrationCandidates(instance: InstanceView, instances: InstanceView[]): MigrationCandidate[] {
+    return instances
+      .filter(candidate => candidate.name !== instance.name && candidate.cleanupState !== 'delete-pending')
+      .map(candidate => ({
+        name: candidate.name,
+        ...(candidate.nodeName ? { nodeName: candidate.nodeName } : {}),
+        ...(candidate.model ? { model: candidate.model } : {}),
+        phase: candidate.phase ?? 'Unknown',
+      }));
   }
 
   /**

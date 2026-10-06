@@ -31,6 +31,7 @@ npm run lint:fix    # Auto-fix
 | `no-console` | Warn (use logger instead) |
 | `prefer-const` | Error |
 | `eqeqeq` | Error |
+| `max-lines-per-function` | Error: 100 logical lines for all production TypeScript |
 
 **Note:** `*.test.ts` files may use `any` for mocks (existing warnings tolerated).
 
@@ -144,6 +145,9 @@ describe('PortPool', () => {
 - Co-locate tests with source: `foo.ts` → `foo.test.ts`
 - Group related functions in the same file
 - Export types from the same file as the implementation
+- Keep transport composition roots free of endpoint business logic; group REST
+  adapters by resource under `src/http-api/routes/`
+- Keep WebSocket connection lifecycle separate from RPC method dispatch
 
 ## Naming Conventions
 

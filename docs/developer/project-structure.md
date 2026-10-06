@@ -7,13 +7,25 @@ agent-orchestrator/
 │   ├── cli.ts                    # CLI argument parsing
 │   ├── config-loader.ts          # Configuration loading
 │   │
+│   ├── bootstrap/                # Server composition by responsibility
+│   │   ├── application-services.ts
+│   │   ├── runtime-environment.ts
+│   │   └── cleanup.ts
+│   │
 │   ├── http-api/                 # HTTP layer
-│   │   ├── server.ts             # Express 5 server, middleware
+│   │   ├── server.ts             # Thin HTTP/WebSocket composition root
+│   │   ├── auth.ts               # HTTP authentication and authorization
+│   │   ├── middleware.ts         # CORS, security headers, error handling
+│   │   ├── request-tracker.ts     # In-flight request draining
+│   │   ├── websocket-server.ts    # WebSocket upgrade lifecycle
+│   │   ├── route-helpers.ts       # Shared HTTP response adapters
+│   │   ├── routes/               # Cohesive REST route modules by resource
 │   │   └── dashboard.ts          # Dashboard static file serving
 │   │
 │   ├── websocket/                # WebSocket layer
 │   │   ├── connection.ts         # JSON-RPC 2.0 handler
-│   │   └── router.ts             # WebSocket routing, auth
+│   │   ├── router.ts             # Connection lifecycle and authorization
+│   │   └── method-dispatcher.ts  # Cohesive RPC-to-service dispatch
 │   │
 │   ├── services/                 # Business logic
 │   │   ├── conversation-service.ts
@@ -124,3 +136,5 @@ agent-orchestrator/
 - Auth middleware
 - Request/response transformation
 - No business logic (delegates to services)
+- REST routes are grouped by resource under `src/http-api/routes/`; `server.ts`
+  only composes middleware, routes, request tracking, and WebSocket lifecycle
