@@ -55,7 +55,7 @@ npm run build
 
 ## Config Migration
 
-When upgrading, check the [CHANGELOG](../../CHANGELOG.md) for config schema changes. Common migrations:
+When upgrading, check the [CHANGELOG](../../../CHANGELOG.md) for config schema changes. Common migrations:
 
 1. Add new required fields
 2. Rename deprecated fields

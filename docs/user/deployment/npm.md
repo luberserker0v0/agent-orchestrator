@@ -2,6 +2,10 @@
 
 Deploy AgentOrchestrator using npm for single-server environments.
 
+For a first installation, follow the [Direct host setup](../setup/direct.md).
+It includes an authenticated configuration, managed session storage, a complete
+lifecycle smoke test, persistence verification, and troubleshooting.
+
 ## Global Install
 
 ```bash

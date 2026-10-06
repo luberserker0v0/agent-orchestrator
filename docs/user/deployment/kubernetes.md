@@ -3,6 +3,10 @@
 > **Status:** Supported via manifests in `k8s/` (CRDs, operator RBAC, volume templates).
 > Verified on k3d (k3s v1.31.5, 1 server + 2 agents).
 
+For a first installation, follow the complete
+[Kubernetes setup tutorial](../setup/kubernetes.md). This page is the deeper
+reference for manifests, CRDs, placement, cleanup, and the k3d test suites.
+
 ## Manifest Layout
 
 ```

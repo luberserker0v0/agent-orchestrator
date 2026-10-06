@@ -17,6 +17,10 @@ Installation, configuration, API reference, and operations.
 
 - [Prerequisites](user/prerequisites.md) — System requirements
 - [Installation](user/install.md) — Docker, npm, source install
+- [Setup tutorials](user/setup/) — End-to-end Direct, Docker, and Kubernetes paths
+  - [Direct host](user/setup/direct.md) — Local AgentOrchestrator and OpenCode processes
+  - [Docker container](user/setup/docker.md) — Containerized AO with durable volumes
+  - [Kubernetes](user/setup/kubernetes.md) — Managed installation, smoke test, and teardown
 - [Quick Start](user/quick-start.md) — 5-minute tutorial
 - [`aor` CLI](user/cli.md) — Operational and Kubernetes command reference
 - [Configuration](user/configuration/) — All config fields
@@ -51,6 +55,7 @@ Contributing, testing, coding standards, and architecture deep dives.
 | Task | Document |
 |------|----------|
 | Install | [Installation](user/install.md) |
+| Complete a production-shaped setup | [Setup tutorials](user/setup/) |
 | Configure | [Configuration](user/configuration/) |
 | First API call | [Quick Start](user/quick-start.md) |
 | Deploy to production | [Deployment](user/deployment/) |

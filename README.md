@@ -10,39 +10,65 @@ A Node.js orchestrator that manages [OpenCode](https://opencode.ai) AI coding ag
 - **WebSocket real-time** — JSON-RPC 2.0 with event streaming
 - **Role-based access control** — Admin and observer roles via API keys
 - **Prometheus metrics** — 9 custom metrics for monitoring
-- **Multi-runtime** — Direct process or Docker container execution
+- **Multi-runtime** — Direct process, Docker container, or Kubernetes Pod execution
 - **Built-in dashboard** — Web UI for managing conversations
 
-## Quick Install
+## Choose a Setup
 
-```bash
-# npm
-npm install -g @luberserker0v0/agent-orchestrator
-aor
+Each guide starts from prerequisites and finishes with a verified conversation,
+session-persistence check, cleanup, and troubleshooting steps.
 
-# Docker
-docker run -d -p 8080:8080 ghcr.io/anomalyco/opencode:latest
+| Setup | Best for | End-to-end tutorial |
+|-------|----------|---------------------|
+| **Direct host process** | Development and a single trusted host; AgentOrchestrator spawns the local `opencode` binary | [Direct setup](docs/user/setup/direct.md) |
+| **Docker container** | A self-contained single-host deployment with durable named volumes | [Docker setup](docs/user/setup/docker.md) |
+| **Kubernetes** | Cluster scheduling, per-conversation PVCs, status CRDs, and optional placement automation | [Kubernetes setup](docs/user/setup/kubernetes.md) |
 
-# Source
-git clone https://github.com/luberserker0v0/agent-orchestrator.git
-cd agent-orchestrator && npm install && npm run dev
+## Architecture
+
+```mermaid
+flowchart TB
+    User[Users and automation] --> CLI[aor CLI]
+    User --> Dashboard[Web dashboard]
+    CLI --> API
+    Dashboard --> API
+
+    subgraph AO[AgentOrchestrator control plane]
+        API[REST and WebSocket API<br/>authentication and RBAC]
+        Services[Conversation, session, message,<br/>file, cleanup, and role services]
+        Lifecycle[Conversation state and<br/>instance lifecycle manager]
+        Runtime[Runtime abstraction]
+        API --> Services --> Lifecycle --> Runtime
+    end
+
+    Runtime -->|Direct setup| Process[OpenCode child process]
+    Runtime -->|Docker runtime| Container[OpenCode container]
+    Runtime -->|Kubernetes setup| KubeAPI[Kubernetes API]
+    KubeAPI --> Pod[OpenCode Pod and Service]
+    KubeAPI --> PVC[Per-conversation PVC]
+    Operator[Placement operator] <--> KubeAPI
+    Process --> Provider[LLM provider]
+    Container --> Provider
+    Pod --> Provider
+    Lifecycle --> Workspace[Conversation workspace]
+    Lifecycle --> Metrics[Prometheus metrics and logs]
 ```
+
+AgentOrchestrator owns the control-plane lifecycle. OpenCode performs the agent
+work, while the selected runtime decides whether each instance is a host process,
+Docker container, or Kubernetes Pod. See the [architecture overview](docs/architecture/README.md)
+for the module and event flows.
 
 ## Quick Start
 
+After completing one setup tutorial, use its API-key file and server URL:
+
 ```bash
-# 1. Create conversation
-curl -X POST http://localhost:8080/api/conversations -H "Content-Type: application/json" -d '{}'
-
-# 2. Start instance
-curl -X POST http://localhost:8080/api/conversations/{id}/start
-
-# 3. Send message
-curl -X POST http://localhost:8080/api/conversations/{id}/message \
-  -H "Content-Type: application/json" -d '{"text": "Hello!"}'
-
-# 4. Open dashboard
-aor dashboard
+aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key status
+aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation create readme-smoke --start
+aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key session create readme-smoke --title "First session"
+aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation delete readme-smoke --confirm
+aor dashboard --server http://127.0.0.1:8080
 ```
 
 The `aor` CLI also manages conversation/session lifecycle, cleanup, status, and
@@ -53,6 +79,7 @@ AgentOrchestrator-owned Kubernetes components. See the [CLI command reference](d
 | Path | Description |
 |------|-------------|
 | [Architecture](docs/architecture/) | System design, data flows, security model |
+| [Setup Tutorials](docs/user/setup/) | Direct, Docker, and Kubernetes end-to-end setup |
 | [User Guide](docs/user/) | Installation, configuration, API reference, operations |
 | [Developer Guide](docs/developer/) | Contributing, testing, coding standards, deep dives |
 | [Full Docs Hub](docs/README.md) | Complete documentation index |

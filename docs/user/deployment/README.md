@@ -1,33 +1,31 @@
 # Deployment
 
-AgentOrchestrator can be deployed via Docker, npm, or from source.
+AgentOrchestrator can be deployed as a direct host process, a Docker container,
+or a Kubernetes installation. For first-time installation, use the complete
+[setup tutorials](../setup/) before the operational references in this section.
 
 ## Method Comparison
 
 | Method | Best For | Complexity | Isolation |
 |--------|----------|------------|-----------|
-| [Docker](docker.md) | Production, multi-tenant | Low | Container |
-| [npm Global](npm.md) | Single server, development | Low | Process |
+| [Docker](../setup/docker.md) | Single-host production | Low | Container |
+| [Direct host](../setup/direct.md) | Single server, development | Low | Process |
+| [Kubernetes](../setup/kubernetes.md) | Cluster deployment | Medium | Pod + PVC |
 | Source | Contributing, customization | Medium | Process |
 
 ## Quick Deploy
 
 ### Docker (Production)
 
-```bash
-docker run -d \
-  --name agent-orchestrator \
-  -p 8080:8080 \
-  -v /path/to/config:/app/config \
-  -v /path/to/workspace:/app/workspace \
-  ghcr.io/anomalyco/opencode:latest
-```
+Use the AgentOrchestrator image—not the OpenCode runtime image—and mount a
+validated configuration plus durable workspace/session volumes. Follow the
+[Docker end-to-end setup](../setup/docker.md).
 
 ### npm Global
 
 ```bash
 npm install -g @luberserker0v0/agent-orchestrator
-aor
+aor serve --config ./ao.config.json
 ```
 
 ### Source
