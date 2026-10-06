@@ -26,6 +26,9 @@ jobs:
       - name: Run preflight (lint + test + build)
         run: npm run preflight
 
+      - name: Audit dependencies
+        run: npm run audit:dependencies
+
       - name: Run tests with coverage
         run: npm run test:coverage
 
