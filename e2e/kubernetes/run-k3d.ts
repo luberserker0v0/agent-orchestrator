@@ -2,10 +2,10 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '../..');
 const namespace = 'ao-instances';
 const suffix = randomBytes(4).toString('hex');
 const clusterName = `ao-xnode-${suffix}`;
@@ -103,7 +103,7 @@ async function run(command: string, args: string[], options: RunOptions = {}): P
           reject(new Error(`${label} unexpectedly succeeded`));
           return;
         }
-        resolve((stderr || stdout).trim());
+        resolvePromise((stderr || stdout).trim());
         return;
       }
       if (code === 0 || options.tolerateFailure) {
@@ -129,7 +129,7 @@ function kubectl(args: string[], options: RunOptions = {}): Promise<string> {
 }
 
 async function applyFile(relativePath: string): Promise<void> {
-  await kubectl(['apply', '-f', resolve(repoRoot, relativePath)], {
+  await kubectl(['apply', '-f', resolvePath(repoRoot, relativePath)], {
     label: `apply ${relativePath}`,
   });
 }
@@ -137,7 +137,7 @@ async function applyFile(relativePath: string): Promise<void> {
 async function aorK8s(args: string[], label: string): Promise<string> {
   if (!kubeconfigPath) throw new Error('isolated kubeconfig has not been created');
   return run(process.execPath, [
-    resolve(repoRoot, 'bin/aor.js'),
+    resolvePath(repoRoot, 'bin/aor.js'),
     '--json',
     'k8s',
     '--kubeconfig', kubeconfigPath,
@@ -151,7 +151,7 @@ async function aorK8s(args: string[], label: string): Promise<string> {
 async function aorK8sMustFail(args: string[], label: string): Promise<string> {
   if (!kubeconfigPath) throw new Error('isolated kubeconfig has not been created');
   return run(process.execPath, [
-    resolve(repoRoot, 'bin/aor.js'),
+    resolvePath(repoRoot, 'bin/aor.js'),
     '--json',
     'k8s',
     '--kubeconfig', kubeconfigPath,
@@ -268,10 +268,10 @@ async function prepareCluster(): Promise<{ sourceNode: string; targetNode: strin
 
   const orchestratorDockerfile = join(tempDirectory, 'Dockerfile.agent-orchestrator');
   const orchestratorDockerignore = `${orchestratorDockerfile}.dockerignore`;
-  await writeFile(orchestratorDockerfile, await readFile(resolve(repoRoot, 'Dockerfile.template')));
+  await writeFile(orchestratorDockerfile, await readFile(resolvePath(repoRoot, 'Dockerfile.template')));
   await writeFile(
     orchestratorDockerignore,
-    `${await readFile(resolve(repoRoot, '.dockerignore'), 'utf8')}\nconfig/agentorchestrator.json\nconfig/canonical-opencode.json\n`,
+    `${await readFile(resolvePath(repoRoot, '.dockerignore'), 'utf8')}\nconfig/agentorchestrator.json\nconfig/canonical-opencode.json\n`,
     { encoding: 'utf8' },
   );
 
@@ -536,9 +536,9 @@ async function main(): Promise<void> {
     };
     for (let runNumber = 1; runNumber <= repeat; runNumber += 1) {
       await run(process.execPath, [
-        resolve(repoRoot, 'node_modules/vitest/vitest.mjs'),
+        resolvePath(repoRoot, 'node_modules/vitest/vitest.mjs'),
         'run',
-        '--config', resolve(repoRoot, 'e2e/vitest.config.kubernetes-migration.ts'),
+        '--config', resolvePath(repoRoot, 'e2e/vitest.config.kubernetes-migration.ts'),
       ], {
         env: testEnvironment,
         label: `cross-node migration suite (${runNumber}/${repeat})`,

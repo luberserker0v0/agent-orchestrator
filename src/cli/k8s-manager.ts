@@ -558,24 +558,37 @@ function assertAdoptable(current: KubernetesObject, desired: KubernetesObject): 
     }
   }
   if (current.kind === 'CustomResourceDefinition') {
-    const currentSpec = (current as Record<string, any>).spec ?? {};
-    const desiredSpec = (desired as Record<string, any>).spec ?? {};
-    const currentIdentity = {
-      group: currentSpec.group,
-      scope: currentSpec.scope,
-      names: currentSpec.names,
-      versions: (currentSpec.versions ?? []).map((version: any) => ({ name: version.name, served: version.served, storage: version.storage })),
-    };
-    const desiredIdentity = {
-      group: desiredSpec.group,
-      scope: desiredSpec.scope,
-      names: desiredSpec.names,
-      versions: (desiredSpec.versions ?? []).map((version: any) => ({ name: version.name, served: version.served, storage: version.storage })),
-    };
+    const currentIdentity = crdApiIdentity((current as Record<string, unknown>).spec);
+    const desiredIdentity = crdApiIdentity((desired as Record<string, unknown>).spec);
     if (stableObject(currentIdentity) !== stableObject(desiredIdentity)) {
       throw new Error(`CustomResourceDefinition ${current.metadata?.name} has an incompatible API identity`);
     }
   }
+}
+
+function crdApiIdentity(value: unknown): unknown {
+  const spec = objectRecord(value);
+  const names = objectRecord(spec.names);
+  const versions = Array.isArray(spec.versions) ? spec.versions : [];
+  return {
+    group: spec.group,
+    scope: spec.scope,
+    names: {
+      plural: names.plural,
+      singular: names.singular,
+      kind: names.kind,
+    },
+    versions: versions.map(version => {
+      const entry = objectRecord(version);
+      return { name: entry.name, served: entry.served, storage: entry.storage };
+    }),
+  };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function stableObject(value: unknown): string {

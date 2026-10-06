@@ -13,8 +13,10 @@ export interface ProviderConfig {
   models: Array<{ name: string }>;
 }
 
+export const DEFAULT_DOCKER_TEST_IMAGE = 'ghcr.io/anomalyco/opencode:1.17.8';
+
 export function loadDockerConfig(): { image: string } {
   return {
-    image: process.env.AO_TEST_DOCKER_IMAGE || 'ghcr.io/anomalyco/opencode:latest',
+    image: process.env.AO_TEST_DOCKER_IMAGE || DEFAULT_DOCKER_TEST_IMAGE,
   };
 }

@@ -14,10 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs(setup): add linked end-to-end Direct, Docker, and Kubernetes setup tutorials with a Mermaid architecture diagram
 
 ### Changed
+- test(e2e): pin the default Docker OpenCode image so local and CI runs use the same runtime version
 - refactor(cli): replace permissive argument parsing with a strict nested Commander command tree while preserving `aor` server startup
 - build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package
 
 ### Fixed
+- test(kubernetes): complete expected-failure management checks and always clean up the isolated k3d environment
+- fix(kubernetes): allow adoption of compatible CRDs after Kubernetes adds defaulted discovery fields
 - chore(deps): update vulnerable transitive dependencies and enforce a moderate-or-higher audit gate in CI
 - fix(openapi): document every registered REST operation and enforce route coverage in tests
 - fix(skills): stage whole skill trees before replacement and preserve the prior version when upload or import fails
