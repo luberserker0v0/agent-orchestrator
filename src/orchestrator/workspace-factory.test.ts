@@ -3,6 +3,7 @@ import { existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WorkspaceFactory, validateSkillName, validateAgentName, getDirSize, hashDirectory } from './workspace-factory.js';
 import { LocalStorage } from '../storage/index.js';
+import { workspacesActive } from '../metrics/registry.js';
 
 vi.mock('../metrics/registry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../metrics/registry.js')>();
@@ -39,6 +40,7 @@ function createFactoryWithCanonical(canonical: Record<string, unknown>): Workspa
 
 describe('WorkspaceFactory', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     if (existsSync(TEST_BASE_PATH)) {
       rmSync(TEST_BASE_PATH, { recursive: true, force: true });
     }
@@ -89,6 +91,7 @@ describe('WorkspaceFactory', () => {
     const factory = createFactory();
     await factory.create('conv-004');
     await expect(factory.create('conv-004')).resolves.not.toThrow();
+    expect(workspacesActive.inc).toHaveBeenCalledTimes(1);
   });
 
   it('should destroy workspace and remove files', async () => {
@@ -103,6 +106,26 @@ describe('WorkspaceFactory', () => {
   it('should not throw when destroying non-existent workspace', async () => {
     const factory = createFactory();
     await expect(factory.destroy('non-existent')).resolves.not.toThrow();
+    expect(workspacesActive.dec).not.toHaveBeenCalled();
+  });
+
+  it('enrolls a durable workspace when it is first ensured after restart', async () => {
+    mkdirSync(join(TEST_BASE_PATH, 'existing', '.opencode'), { recursive: true });
+    const factory = createFactory();
+
+    await factory.ensure('existing');
+    await factory.ensure('existing');
+
+    expect(workspacesActive.inc).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not decrement the gauge for an untracked durable workspace', async () => {
+    mkdirSync(join(TEST_BASE_PATH, 'existing'), { recursive: true });
+    const factory = createFactory();
+
+    await factory.destroy('existing');
+
+    expect(workspacesActive.dec).not.toHaveBeenCalled();
   });
 
   it('should propagate destroy workspace errors so callers retain lifecycle state', async () => {
@@ -114,6 +137,7 @@ describe('WorkspaceFactory', () => {
     );
     await factory.create('conv-destroy-fail');
     await expect(factory.destroy('conv-destroy-fail')).rejects.toThrow('Permission denied');
+    expect(workspacesActive.dec).not.toHaveBeenCalled();
   });
 
   it('should ensure workspace directory exists without config', async () => {

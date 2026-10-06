@@ -85,6 +85,7 @@ export class WorkspaceFactory {
   private enforceCanonicalConfig: boolean;
   private maxSizeBytes: number;
   private allowedCopySources: string[];
+  private metricWorkspaceIds = new Set<string>();
 
   constructor(config: WorkspaceConfig, storage: StorageBackend, canonicalConfig?: Record<string, unknown>) {
     this.basePath = resolve(process.cwd(), config.basePath);
@@ -108,7 +109,7 @@ export class WorkspaceFactory {
     await this.storage.ensureDir(wsId, '.opencode');
 
     logger.info(`Workspace created: ${wsPath}${agentType ? ` (agent: ${agentType})` : ''}`);
-    workspacesActive.inc();
+    this.trackWorkspace(wsId);
     return {
       id: wsId,
       path: wsPath,
@@ -124,8 +125,8 @@ export class WorkspaceFactory {
     if (!await this.storage.hasWorkspace(wsId)) {
       await this.storage.createWorkspaceDir(wsId);
       await this.storage.ensureDir(wsId, '.opencode');
-      workspacesActive.inc();
     }
+    this.trackWorkspace(wsId);
     return {
       id: wsId,
       path: wsPath,
@@ -139,15 +140,27 @@ export class WorkspaceFactory {
     const wsPath = join(this.basePath, wsId);
     if (await this.storage.hasWorkspace(wsId)) {
       await this.storage.destroyWorkspace(wsId);
-      workspacesActive.dec();
+      this.untrackWorkspace(wsId);
       logger.info(`Workspace destroyed: ${wsPath}`);
     } else {
+      this.untrackWorkspace(wsId);
       logger.warn(`Workspace not found for destruction: ${wsPath}`);
     }
   }
 
   async cleanupOrphans(): Promise<void> {
     await this.storage.cleanupOrphans();
+  }
+
+  private trackWorkspace(id: string): void {
+    if (this.metricWorkspaceIds.has(id)) return;
+    this.metricWorkspaceIds.add(id);
+    workspacesActive.inc();
+  }
+
+  private untrackWorkspace(id: string): void {
+    if (!this.metricWorkspaceIds.delete(id)) return;
+    workspacesActive.dec();
   }
 
   // ─── Config ──────────────────────────────────────────────
