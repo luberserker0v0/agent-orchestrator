@@ -1,21 +1,21 @@
 # Installation
 
-AgentOrchestrator can be installed via Docker, npm, or from source.
+AgentOrchestrator can run as a host process, a Docker container, or a Kubernetes
+installation. Use one of the end-to-end tutorials for a validated configuration,
+authenticated smoke test, persistence check, and safe teardown:
+
+| Mode | Tutorial |
+|------|----------|
+| Direct host process | [Direct setup](setup/direct.md) |
+| Docker container | [Docker setup](setup/docker.md) |
+| Kubernetes | [Kubernetes setup](setup/kubernetes.md) |
 
 ## Docker (Recommended for Production)
 
-```bash
-# Pull the latest image
-docker pull ghcr.io/anomalyco/opencode:latest
-
-# Run AgentOrchestrator
-docker run -d \
-  --name agent-orchestrator \
-  -p 8080:8080 \
-  -v /path/to/config:/app/config \
-  -v /path/to/workspace:/app/workspace \
-  ghcr.io/anomalyco/opencode:latest
-```
+The AgentOrchestrator image is `luberserker/agent-orchestrator:<version>`.
+It is different from `ghcr.io/anomalyco/opencode`, which is an OpenCode runtime
+image. Follow the [Docker setup](setup/docker.md) for the required configuration,
+volumes, API key, startup checks, and lifecycle test.
 
 ## npm Global Install
 
@@ -23,8 +23,8 @@ docker run -d \
 # Install globally
 npm install -g @luberserker0v0/agent-orchestrator
 
-# Run
-aor
+# Run with an explicit, validated config
+aor serve --config ./ao.config.json
 ```
 
 ### CLI Options

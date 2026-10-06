@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - feat(cli): add operational conversation, session, message, cleanup, status, metrics, and config commands
 - feat(kubernetes): add owned manifest rendering, install, upgrade, status, doctor, adoption, and guarded uninstall commands
+- docs(setup): add linked end-to-end Direct, Docker, and Kubernetes setup tutorials with a Mermaid architecture diagram
 
 ### Changed
 - refactor(cli): replace permissive argument parsing with a strict nested Commander command tree while preserving `aor` server startup
