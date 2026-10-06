@@ -62,17 +62,32 @@ export function createHttpServer(
   app.use(express.text({ limit: '5mb' }));
 
   let activeRequests = 0;
+  const requestWaiters = new Set<() => void>();
 
-  // Track active requests, duration, and count finished requests
+  const notifyRequestWaiters = (): void => {
+    if (activeRequests !== 0) return;
+    for (const waiter of requestWaiters) waiter();
+    requestWaiters.clear();
+  };
+
+  // Track requests until the response finishes or the connection closes. Node
+  // emits "close" after "finish" for normal responses, so finalization must be
+  // idempotent to avoid under-counting active requests.
   app.use((req, res, next) => {
     activeRequests++;
     const endTimer = httpRequestDurationSeconds.startTimer({ method: req.method });
-    res.on('finish', () => {
+    let finalized = false;
+    const finalize = (completed: boolean): void => {
+      if (finalized) return;
+      finalized = true;
       activeRequests--;
-      const status = String(res.statusCode);
+      const status = completed ? String(res.statusCode) : '499';
       endTimer({ status });
       httpRequestsTotal.inc({ method: req.method, status });
-    });
+      notifyRequestWaiters();
+    };
+    res.once('finish', () => finalize(true));
+    res.once('close', () => finalize(res.writableFinished));
     next();
   });
 
@@ -1268,17 +1283,20 @@ export function createHttpServer(
         resolve();
         return;
       }
+
+      let settled = false;
+      const settle = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        requestWaiters.delete(settle);
+        resolve();
+      };
+      requestWaiters.add(settle);
       const timer = setTimeout(() => {
         logger.warn(`Graceful shutdown: ${activeRequests} request(s) still in-flight after ${timeoutMs}ms`);
-        resolve();
+        settle();
       }, timeoutMs);
-      const checkInterval = setInterval(() => {
-        if (activeRequests === 0) {
-          clearTimeout(timer);
-          clearInterval(checkInterval);
-          resolve();
-        }
-      }, 100);
     });
   };
 

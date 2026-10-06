@@ -713,6 +713,25 @@ describe('HTTP API Server', () => {
     await reqPromise.catch(() => {});
   });
 
+  it('stops tracking a request when the client aborts', async () => {
+    mockInstanceManager.createInstance.mockImplementation(() => new Promise(() => {}));
+
+    const hangingRequest = request(server).post('/api/conversations').send({});
+    const completion = new Promise<void>((resolve) => {
+      hangingRequest.end(() => resolve());
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    hangingRequest.abort();
+    await completion;
+
+    const drained = await Promise.race([
+      httpServer.waitForRequests(1000).then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250)),
+    ]);
+    expect(drained).toBe(true);
+  });
+
   // ─── Start / Stop / Restart ──────────────────────────────
 
   it('POST /api/conversations/:id/start returns 200 and transitions to running', async () => {
