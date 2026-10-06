@@ -23,6 +23,13 @@ aor [options] [subcommand]
 | Subcommand | Description |
 |------------|-------------|
 | `aor dashboard` | Open dashboard in browser |
+| `aor status` | Check health and authenticated role |
+| `aor conversation ...` | Operate conversations |
+| `aor session ...` | Operate sessions |
+| `aor cleanup ...` | Preview or run cleanup |
+| `aor k8s ...` | Manage AO Kubernetes components |
+
+See the full [CLI command reference](../cli.md).
 
 ### Examples
 

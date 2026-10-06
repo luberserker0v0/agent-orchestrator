@@ -1,0 +1,56 @@
+{
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0",
+    "apiKeys": [
+      {
+        "key": "example-admin-key-123456",
+        "role": "admin",
+        "name": "Admin"
+      }
+    ],
+    "rbac": {
+      "enabled": true
+    }
+  },
+  "cleanup": {
+    "ownerId": "agent-orchestrator",
+    "sweepIntervalMs": 3600000,
+    "orphanedData": {
+      "enabled": false,
+      "gracePeriodMs": 2592000000
+    }
+  },
+  "orchestrator": {
+    "maxInstances": 10,
+    "defaultAgentType": "opencode-k8s",
+    "runtimes": [
+      {
+        "id": "opencode-k8s",
+        "type": "kubernetes",
+        "config": {
+          "image": "ghcr.io/anomalyco/opencode:1.17.8",
+          "namespace": "ao-instances",
+          "sessionMode": "xdg",
+          "pvcStorage": "10Gi",
+          "podReadyTimeoutMs": 180000
+        }
+      }
+    ]
+  },
+  "workspace": {
+    "basePath": "/data/workspace",
+    "enforceCanonicalConfig": true,
+    "maxSizeBytes": 52428800,
+    "storage": {
+      "type": "local"
+    }
+  },
+  "cluster": {
+    "enabled": true,
+    "namespace": "ao-instances",
+    "heartbeatIntervalMs": 60000,
+    "quotaFailureThreshold": 2,
+    "advertiseBaseUrl": "http://agent-orchestrator.ao-instances.svc.cluster.local:8080"
+  }
+}

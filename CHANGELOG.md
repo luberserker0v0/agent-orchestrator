@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- feat(cli): add operational conversation, session, message, cleanup, status, metrics, and config commands
+- feat(kubernetes): add owned manifest rendering, install, upgrade, status, doctor, adoption, and guarded uninstall commands
+
+### Changed
+- refactor(cli): replace permissive argument parsing with a strict nested Commander command tree while preserving `aor` server startup
+- build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package
+
 ## [1.2.2] - 2026-10-05
 
 ### Fixed

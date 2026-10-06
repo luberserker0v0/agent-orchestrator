@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { loadConfig, loadCanonicalConfig, validateDockerLoggingConfig, validateSessionStorageConfig } from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
 import { K8sStatusReporter } from './cluster/status-reporter.js';
@@ -24,7 +24,7 @@ import { DockerRuntime } from './agent-runtime/runtimes/docker.js';
 import { PortPool } from './orchestrator/port-pool.js';
 import { SSEBridge } from './orchestrator/sse-bridge.js';
 import { createHttpServer } from './http-api/server.js';
-import { configureFileLogging, logger, shutdownLogger } from './utils/logger.js';
+import { configureFileLogging, logger, pruneFileLogs, shutdownLogger } from './utils/logger.js';
 import { logFileErrorsTotal } from './metrics/registry.js';
 import { CleanupManager } from './cleanup/cleanup-manager.js';
 import { FileLogCleanupProvider } from './cleanup/file-log-provider.js';
@@ -32,10 +32,12 @@ import { LocalPersistentDataProvider } from './cleanup/local-persistent-data-pro
 import { KubernetesPersistentDataCleanupProvider } from './cleanup/kubernetes-persistent-data-provider.js';
 import type { CleanupProvider } from './cleanup/types.js';
 import { DEFAULT_SESSION_CLEANUP_OWNER } from './agent-runtime/session-storage.js';
-import { parseCliArgs, printHelp, handleSubcommand } from './cli.js';
+import { executeCli, type OperatorCliOptions } from './cli.js';
 import { isRunningInContainer } from './utils/is-container.js';
 
 const FATAL_LOGGER_SHUTDOWN_TIMEOUT_MS = 1_000;
+
+dotenv.config({ quiet: true });
 
 /** Configure the optional process-wide JSONL sink before operational logs. */
 export async function initializeConfiguredFileLogging(
@@ -69,37 +71,50 @@ export function validateContainerRuntimeStorage(
   );
 }
 
+async function runOperatorCli(options: OperatorCliOptions, configPath?: string): Promise<void> {
+  const config = loadConfig(configPath);
+  await initializeConfiguredFileLogging(config);
+  const { runOperator } = await import('./cluster/operator/controller.js');
+  const stop = await runOperator({
+    namespace: options.namespace,
+    intervalMs: options.intervalMs,
+    execute: options.execute,
+    ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+    migrateTimeoutMs: options.migrateTimeoutMs,
+    refill: { defaultWindowMs: options.refillWindowMs, perModel: options.modelRefillWindows },
+    ...(options.metricsPort > 0 ? { metricsPort: options.metricsPort } : {}),
+    pvcStorage: options.pvcStorage,
+    ...(config.cleanup.ownerId ? { cleanupOwnerId: config.cleanup.ownerId } : {}),
+  });
+  const logPruneTimer = config.logging.file.enabled
+    ? setInterval(() => {
+        void pruneFileLogs().catch(() => logger.warn('Scheduled operator file-log pruning failed'));
+      }, config.cleanup.sweepIntervalMs)
+    : undefined;
+  logPruneTimer?.unref?.();
+  const keepAlive = setInterval(() => {}, 60_000);
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    clearInterval(keepAlive);
+    if (logPruneTimer) clearInterval(logPruneTimer);
+    stop();
+    void shutdownLogger(config.server.shutdownTimeoutMs).finally(() => process.exit(0));
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  logger.info(`Placement controller running (namespace: ${options.namespace}, interval: ${options.intervalMs}ms, ${options.execute ? 'execute' : 'dry-run'})`);
+}
+
 export async function main(cliArgs?: string[]) {
-  const cli = parseCliArgs(cliArgs ?? process.argv.slice(2));
-
-  if (cli.help) {
-    printHelp();
-    return;
-  }
-
-  if (cli.version) {
-    const { readFileSync } = await import('node:fs');
-    const { join, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const __dirname = dirname(fileURLToPath(import.meta.url));
-    const pkgPath = join(__dirname, '..', 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    console.log(`v${pkg.version}`);
-    return;
-  }
+  const execution = await executeCli(cliArgs ?? process.argv.slice(2), { runOperator: runOperatorCli });
+  if (execution.mode === 'handled') return;
+  const cli = execution.options;
 
   // Set env vars from CLI args so applyEnvOverrides picks them up
   if (cli.port !== undefined) process.env['AGENTORCHESTRATOR_SERVER_PORT'] = String(cli.port);
   if (cli.host !== undefined) process.env['AGENTORCHESTRATOR_SERVER_HOST'] = cli.host;
-
-  // The operator is also a long-running process. Initialize its configured
-  // file sink before the controller emits any operational logs.
-  let operatorConfig: AgentOrchestratorConfig | undefined;
-  if (cli.subcommand === 'operator') {
-    operatorConfig = loadConfig(cli.configPath);
-    await initializeConfiguredFileLogging(operatorConfig);
-  }
-  if (await handleSubcommand(cli, operatorConfig)) return;
 
   const config = loadConfig(cli.configPath);
   await initializeConfiguredFileLogging(config);

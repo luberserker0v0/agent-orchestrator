@@ -1,259 +1,170 @@
 import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentOrchestratorConfig } from './config-loader.js';
-import { exec } from 'node:child_process';
-import { logger, pruneFileLogs, shutdownLogger } from './utils/logger.js';
+import { Command, CommanderError } from 'commander';
+import { registerK8sCommands } from './cli/k8s-command.js';
+import { CliActionError, registerOperationalCommands } from './cli/operational.js';
 
-export interface CliOptions {
+export interface ServerCliOptions {
   port?: number;
   host?: string;
   configPath?: string;
-  help?: boolean;
-  version?: boolean;
-  subcommand?: string;
-  subcommandArgs?: string[];
+}
+
+export interface OperatorCliOptions {
+  namespace: string;
+  intervalMs: number;
+  execute: boolean;
+  apiKey?: string;
+  migrateTimeoutMs: number;
+  refillWindowMs: number;
+  modelRefillWindows: Record<string, number>;
+  metricsPort: number;
+  pvcStorage: string;
+}
+
+export type CliExecution =
+  | { mode: 'serve'; options: ServerCliOptions }
+  | { mode: 'handled' };
+
+export interface CliDependencies {
+  runOperator(options: OperatorCliOptions, configPath?: string): Promise<void>;
+}
+
+export async function executeCli(
+  argv: string[] = process.argv.slice(2),
+  dependencies?: Partial<CliDependencies>,
+): Promise<CliExecution> {
+  const version = readVersion();
+  let execution: CliExecution = { mode: 'handled' };
+  const program = new Command();
+  program
+    .name('aor')
+    .description('AgentOrchestrator operational and Kubernetes management CLI')
+    .version(version, '-v, --version', 'Show version number')
+    .showHelpAfterError()
+    .exitOverride()
+    .configureOutput({
+      writeOut: value => process.stdout.write(value),
+      writeErr: value => process.stderr.write(value),
+    })
+    .option('-p, --port <number>', 'HTTP server port')
+    .option('-H, --host <host>', 'HTTP server bind address')
+    .option('-c, --config <path>', 'Path to AgentOrchestrator configuration')
+    .option('--server <url>', 'AgentOrchestrator API URL', process.env['AOR_SERVER_URL'] ?? 'http://127.0.0.1:8080')
+    .option('--api-key-file <path>', 'Read the API key from a file')
+    .option('--timeout <ms>', 'API request timeout', '30000')
+    .option('--json', 'Emit machine-readable JSON')
+    .action(options => {
+      execution = { mode: 'serve', options: serverOptions(options) };
+    });
+
+  program.command('serve')
+    .description('Start the AgentOrchestrator server')
+    .option('-p, --port <number>', 'HTTP server port')
+    .option('-H, --host <host>', 'HTTP server bind address')
+    .option('-c, --config <path>', 'Path to AgentOrchestrator configuration')
+    .action((options, command) => {
+      execution = { mode: 'serve', options: serverOptions({ ...command.optsWithGlobals(), ...options }) };
+    });
+
+  registerOperationalCommands(program);
+  registerK8sCommands(program, version);
+  registerOperatorCommand(program, dependencies);
+
+  try {
+    await program.parseAsync(argv, { from: 'user' });
+  } catch (error) {
+    if (error instanceof CommanderError) {
+      if (error.code === 'commander.helpDisplayed' || error.code === 'commander.version') return { mode: 'handled' };
+      process.exitCode = 2;
+      return { mode: 'handled' };
+    }
+    if (error instanceof CliActionError) {
+      process.stderr.write(`Error: ${error.message}\n`);
+      process.exitCode = error.exitCode;
+      return { mode: 'handled' };
+    }
+    const message = error instanceof Error ? error.message : 'Unknown CLI error';
+    process.stderr.write(`Error: ${message}\n`);
+    process.exitCode = 1;
+    return { mode: 'handled' };
+  }
+  return execution;
+}
+
+function registerOperatorCommand(program: Command, dependencies?: Partial<CliDependencies>): void {
+  program.command('operator')
+    .description('Run the quota-aware Kubernetes placement controller')
+    .option('--namespace <namespace>', 'Kubernetes namespace', 'ao-instances')
+    .option('--interval-ms <ms>', 'Reconcile interval', '15000')
+    .option('--execute', 'Execute planned migrations')
+    .option('--api-key <key>', 'Bearer token for migration callbacks')
+    .option('--migrate-timeout-ms <ms>', 'Migration callback timeout', '300000')
+    .option('--refill-window-ms <ms>', 'Default quota refill window', String(24 * 60 * 60 * 1000))
+    .option('--model-refill-window <provider/model=ms>', 'Per-model refill window; repeatable', collect, [])
+    .option('--metrics-port <port>', 'Prometheus metrics port (0 disables)', '0')
+    .option('--pvc-storage <size>', 'Per-conversation PVC size', '10Gi')
+    .action(async (options, command) => {
+      if (!dependencies?.runOperator) throw new CliActionError('Operator runner is unavailable');
+      const modelRefillWindows: Record<string, number> = {};
+      for (const entry of options.modelRefillWindow as string[]) {
+        const separator = entry.lastIndexOf('=');
+        const model = entry.slice(0, separator);
+        const duration = positiveInteger(entry.slice(separator + 1), '--model-refill-window');
+        if (separator < 1 || !model.includes('/')) throw new CliActionError(`Invalid model refill window: ${entry}`, 2);
+        modelRefillWindows[model] = duration;
+      }
+      await dependencies.runOperator({
+        namespace: options.namespace,
+        intervalMs: positiveInteger(options.intervalMs, '--interval-ms'),
+        execute: options.execute === true,
+        apiKey: options.apiKey ?? process.env['AOR_OPERATOR_API_KEY'],
+        migrateTimeoutMs: positiveInteger(options.migrateTimeoutMs, '--migrate-timeout-ms'),
+        refillWindowMs: positiveInteger(options.refillWindowMs, '--refill-window-ms'),
+        modelRefillWindows,
+        metricsPort: nonNegativeInteger(options.metricsPort, '--metrics-port'),
+        pvcStorage: options.pvcStorage,
+      }, (command.optsWithGlobals() as { config?: string }).config);
+    });
+}
+
+function serverOptions(options: { port?: string; host?: string; config?: string }): ServerCliOptions {
+  return {
+    ...(options.port !== undefined ? { port: portNumber(options.port) } : {}),
+    ...(options.host ? { host: options.host } : {}),
+    ...(options.config ? { configPath: options.config } : {}),
+  };
+}
+
+function portNumber(value: string): number {
+  const port = nonNegativeInteger(value, '--port');
+  if (port > 65535) throw new CliActionError('Port must be between 0 and 65535', 2);
+  return port;
+}
+
+function positiveInteger(value: string, option: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new CliActionError(`${option} must be a positive integer`, 2);
+  return parsed;
+}
+
+function nonNegativeInteger(value: string, option: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new CliActionError(`${option} must be a non-negative integer`, 2);
+  return parsed;
+}
+
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
 }
 
 function readVersion(): string {
   try {
-    const __dirname = dirname(fileURLToPath(import.meta.url));
-    const pkgPath = join(__dirname, '..', 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    return pkg.version || '1.0.0';
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as { version?: string };
+    return pkg.version ?? '1.0.0';
   } catch {
     return '1.0.0';
   }
-}
-
-export function parseCliArgs(argv: string[] = process.argv.slice(2)): CliOptions {
-  const options: CliOptions = {};
-
-  // Check for subcommand before parsing options
-  if (argv.length > 0 && !argv[0].startsWith('-')) {
-    options.subcommand = argv[0];
-    options.subcommandArgs = argv.slice(1);
-    return options;
-  }
-
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-
-    if (arg === '--help' || arg === '-h') {
-      options.help = true;
-    } else if (arg === '--version' || arg === '-v') {
-      options.version = true;
-    } else if ((arg === '--port' || arg === '-p') && i + 1 < argv.length) {
-      options.port = Number(argv[++i]);
-    } else if ((arg === '--host' || arg === '-H') && i + 1 < argv.length) {
-      options.host = argv[++i];
-    } else if ((arg === '--config' || arg === '-c') && i + 1 < argv.length) {
-      options.configPath = argv[++i];
-    } else if (!arg.startsWith('-')) {
-      // Found a non-flag argument after options - treat as subcommand
-      options.subcommand = arg;
-      options.subcommandArgs = argv.slice(i + 1);
-      break;
-    }
-  }
-
-  return options;
-}
-
-export function printHelp(): void {
-  const version = readVersion();
-  console.log(`
-aor v${version} - AgentOrchestrator
-
-Usage: aor [options]
-       aor <subcommand> [args]
-
-Options:
-  -p, --port <number>    HTTP server port (default: auto-assigned)
-  -H, --host <string>    Bind address (default: 127.0.0.1)
-  -c, --config <path>    Path to config JSON file
-  -h, --help             Show this help message
-  -v, --version          Show version number
-
-Subcommands:
-  dashboard              Open dashboard in browser
-  runtime list           List configured runtimes
-  runtime info <id>      Show runtime info for a specific id
-  operator               Run the placement controller (quota-aware routing)
-                         [--namespace <ns>] [--interval-ms <ms>]
-                         [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>]
-                         [--refill-window-ms <ms>] [--model-refill-window <provider/model=ms>]
-                         [--metrics-port <port>] [--pvc-storage <size>]
-`);
-}
-
-export async function handleSubcommand(
-  cli: CliOptions,
-  loadedConfig?: AgentOrchestratorConfig,
-): Promise<boolean> {
-  if (!cli.subcommand) return false;
-
-  const args = cli.subcommandArgs ?? [];
-
-  if (cli.subcommand === 'dashboard') {
-    const port = cli.port ?? await getPortFromConfig(cli.configPath);
-    const host = cli.host ?? '127.0.0.1';
-    openDashboard(host, port);
-    return true;
-  }
-
-  if (cli.subcommand === 'runtime') {
-    if (args[0] === 'list') {
-      (async () => {
-        const { loadConfig } = await import('./config-loader.js');
-        printRuntimeList(loadConfig);
-      })();
-      return true;
-    }
-    if (args[0] === 'info' && args[1]) {
-      (async () => {
-        const { loadConfig } = await import('./config-loader.js');
-        printRuntimeInfo(args[1], loadConfig);
-      })();
-      return true;
-    }
-    console.error('Usage: aor runtime list|info <id>');
-    return true;
-  }
-
-  if (cli.subcommand === 'operator') {
-    const { runOperator } = await import('./cluster/operator/controller.js');
-    let namespace = 'ao-instances';
-    let intervalMs = 15000;
-    let execute = false;
-    let apiKey: string | undefined;
-    let migrateTimeoutMs = 300000;
-    let refillWindowMs = 24 * 60 * 60 * 1000;
-    let metricsPort = 0;
-    let pvcStorage = '10Gi';
-    const modelRefillWindows: Record<string, number> = {};
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === '--namespace' && i + 1 < args.length) namespace = args[++i];
-      if (args[i] === '--interval-ms' && i + 1 < args.length) intervalMs = Number(args[++i]);
-      if (args[i] === '--execute') execute = true;
-      if (args[i] === '--api-key' && i + 1 < args.length) apiKey = args[++i];
-      if (args[i] === '--migrate-timeout-ms' && i + 1 < args.length) migrateTimeoutMs = Number(args[++i]);
-      if (args[i] === '--refill-window-ms' && i + 1 < args.length) refillWindowMs = Number(args[++i]);
-      if (args[i] === '--model-refill-window' && i + 1 < args.length) {
-        const [model, ms] = args[++i].split('=');
-        if (model && Number.isFinite(Number(ms)) && Number(ms) > 0) {
-          modelRefillWindows[model] = Number(ms);
-        }
-      }
-      if (args[i] === '--metrics-port' && i + 1 < args.length) metricsPort = Number(args[++i]);
-      if (args[i] === '--pvc-storage' && i + 1 < args.length) pvcStorage = args[++i];
-    }
-    if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(migrateTimeoutMs) || migrateTimeoutMs <= 0 || !Number.isFinite(refillWindowMs) || refillWindowMs <= 0 || !Number.isFinite(metricsPort) || metricsPort < 0) {
-      console.error('Usage: aor operator [--namespace <ns>] [--interval-ms <ms>] [--execute] [--api-key <key>] [--migrate-timeout-ms <ms>] [--refill-window-ms <ms>] [--model-refill-window <provider/model=ms>] [--metrics-port <port>]');
-      process.exit(1);
-    }
-    const stop = await runOperator({
-      namespace,
-      intervalMs,
-      execute,
-      ...(apiKey ? { apiKey } : {}),
-      migrateTimeoutMs,
-      refill: { defaultWindowMs: refillWindowMs, perModel: modelRefillWindows },
-      ...(metricsPort > 0 ? { metricsPort } : {}),
-      pvcStorage,
-      ...(loadedConfig?.cleanup.ownerId ? { cleanupOwnerId: loadedConfig.cleanup.ownerId } : {}),
-    });
-    const logPruneTimer = loadedConfig?.logging.file.enabled
-      ? setInterval(() => {
-          void pruneFileLogs().catch(() => logger.warn('Scheduled operator file-log pruning failed'));
-        }, loadedConfig.cleanup.sweepIntervalMs)
-      : undefined;
-    logPruneTimer?.unref?.();
-    // Ref'd keepalive: the controller's poll timer is unref'd so embedded
-    // use never blocks exit; the CLI must stay alive explicitly.
-    const keepAlive = setInterval(() => {}, 60000);
-    let shuttingDown = false;
-    const shutdown = () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      clearInterval(keepAlive);
-      if (logPruneTimer) clearInterval(logPruneTimer);
-      stop();
-      void shutdownLogger(loadedConfig?.server.shutdownTimeoutMs ?? 1_000)
-        .finally(() => process.exit(0));
-    };
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
-    logger.info(`Placement controller running (namespace: ${namespace}, interval: ${intervalMs}ms, ${execute ? 'execute' : 'dry-run'})`);
-    return true;
-  }
-
-  console.error(`Unknown subcommand: ${cli.subcommand}`);
-  return true;
-}
-
-function printRuntimeList(loadConfig: (configPath?: string) => AgentOrchestratorConfig): void {
-  try {
-    const config = loadConfig();
-    const entries = config.orchestrator.runtimes;
-    if (entries.length === 0) {
-      console.log('No runtimes configured.');
-      return;
-    }
-    console.log('Configured runtimes:');
-    for (const entry of entries) {
-      const version = entry.type === 'direct' ? (entry.config as any).version : (entry.config as any).image?.split(':')[1] ?? 'latest';
-      console.log(`  ${entry.id}  (${entry.type}, v${version})`);
-    }
-  } catch (err) {
-    console.error('Failed to load config:', (err as Error).message);
-  }
-}
-
-function printRuntimeInfo(id: string, loadConfig: (configPath?: string) => AgentOrchestratorConfig): void {
-  try {
-    const config = loadConfig();
-    const entry = config.orchestrator.runtimes.find((r: { id: string }) => r.id === id);
-    if (!entry) {
-      console.error(`Runtime "${id}" not found in config.`);
-      return;
-    }
-    const version = entry.type === 'direct' ? (entry.config as any).version : (entry.config as any).image?.split(':')[1] ?? 'latest';
-    console.log(`Runtime: ${entry.id}`);
-    console.log(`  Type: ${entry.type}`);
-    console.log(`  Version: ${version ?? 'unknown'}`);
-    console.log(`  Config: ${JSON.stringify(entry.config, null, 4)}`);
-  } catch (err) {
-    console.error('Failed to load config:', (err as Error).message);
-  }
-}
-
-async function getPortFromConfig(configPath?: string): Promise<number> {
-  try {
-    const { loadConfig } = await import('./config-loader.js');
-    const config = loadConfig(configPath);
-    return config.server.port ?? 8080;
-  } catch {
-    return 8080;
-  }
-}
-
-function openDashboard(host: string, port: number): void {
-  const url = `http://${host === '0.0.0.0' ? 'localhost' : host}:${port}/dashboard`;
-  const platform = process.platform;
-  let cmd: string;
-  if (platform === 'win32') {
-    cmd = `start "" "${url}"`;
-  } else if (platform === 'darwin') {
-    cmd = `open "${url}"`;
-  } else {
-    cmd = `xdg-open "${url}"`;
-  }
-  logger.info(`Opening dashboard: ${url}`);
-  exec(cmd, (err) => {
-    if (err) {
-      logger.warn(`Failed to open browser: ${err.message}`);
-      logger.info(`Dashboard URL: ${url}`);
-    }
-  });
 }

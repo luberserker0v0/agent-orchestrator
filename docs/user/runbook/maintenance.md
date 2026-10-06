@@ -63,7 +63,7 @@ When upgrading, check the [CHANGELOG](../../CHANGELOG.md) for config schema chan
 
 ```bash
 # Validate config
-node -e "require('./dist/config-loader').loadConfig()" 2>&1
+aor config validate ./config/agentorchestrator.json
 
 # If validation fails, update config and retry
 ```
@@ -138,10 +138,10 @@ curl http://localhost:8080/metrics | grep nodejs_heap
 
 | Task | Frequency | Command |
 |------|-----------|---------|
-| Check health | Daily | `curl http://localhost:8080/health` |
+| Check health | Daily | `aor status` |
 | Review metrics | Weekly | Check Grafana dashboard |
-| Preview retained data | Weekly | `POST /api/cleanup/preview` |
-| Run configured cleanup | As needed | `POST /api/cleanup/run` with `confirm: true` |
+| Preview retained data | Weekly | `aor cleanup preview --target persistentData` |
+| Run configured cleanup | As needed | `aor cleanup run --target persistentData --confirm` |
 | Update dependencies | Monthly | `npm update` |
 | Rotate API keys | Quarterly | Update `server.apiKeys` in config |
 | Backup workspace | Daily | See backup commands above |

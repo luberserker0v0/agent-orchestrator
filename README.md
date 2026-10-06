@@ -42,8 +42,11 @@ curl -X POST http://localhost:8080/api/conversations/{id}/message \
   -H "Content-Type: application/json" -d '{"text": "Hello!"}'
 
 # 4. Open dashboard
-open http://localhost:8080/dashboard
+aor dashboard
 ```
+
+The `aor` CLI also manages conversation/session lifecycle, cleanup, status, and
+AgentOrchestrator-owned Kubernetes components. See the [CLI command reference](docs/user/cli.md).
 
 ## Documentation
 

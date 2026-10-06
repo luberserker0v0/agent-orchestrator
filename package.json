@@ -12,8 +12,10 @@
   "files": [
     "dist/",
     "bin/",
+    "k8s/",
     "README.md",
     "config/agentorchestrator.example.json",
+    "config/agentorchestrator.k8s.example.json",
     "config/canonical-opencode.example.json"
   ],
   "type": "module",
@@ -29,15 +31,15 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:e2e:docker": "cross-env E2E_RUNTIME=docker vitest run --config e2e/vitest.config.e2e.ts",
-    "test:e2e:direct": "vitest run --config e2e/vitest.config.e2e.ts",
+    "test:e2e:docker": "npm run build && cross-env E2E_RUNTIME=docker vitest run --config e2e/vitest.config.e2e.ts",
+    "test:e2e:direct": "npm run build && vitest run --config e2e/vitest.config.e2e.ts",
     "test:e2e:runtime": "cross-env E2E_RUNTIME=docker vitest run --config e2e/vitest.config.runtime.ts",
     "test:e2e:kubernetes": "vitest run --config e2e/vitest.config.kubernetes.ts",
-    "test:e2e:k3d": "tsx e2e/kubernetes/run-k3d.ts",
+    "test:e2e:k3d": "npm run build && tsx e2e/kubernetes/run-k3d.ts",
     "test:e2e": "npm run test:e2e:docker",
     "test:e2e:watch": "cross-env E2E_RUNTIME=docker vitest --config e2e/vitest.config.e2e.ts",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json",
-    "preflight": "npm run verify:package && npm run lint && npm run test && npm run build && npm run typecheck:e2e"
+    "preflight": "npm run build && npm run verify:package && npm run lint && npm run test && npm run typecheck:e2e"
   },
   "keywords": [
     "opencode",
@@ -50,6 +52,7 @@
   "dependencies": {
     "@kubernetes/client-node": "^1.4.0",
     "adm-zip": "^0.6.1",
+    "commander": "^15.0.0",
     "cross-spawn": "^7.0.3",
     "dotenv": "^18.0.2",
     "express": "^5.2.1",
@@ -57,7 +60,8 @@
     "prom-client": "^15.1.3",
     "swagger-ui-express": "^5.0.1",
     "tree-kill": "^1.2.2",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

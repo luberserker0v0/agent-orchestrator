@@ -18,6 +18,7 @@ Installation, configuration, API reference, and operations.
 - [Prerequisites](user/prerequisites.md) — System requirements
 - [Installation](user/install.md) — Docker, npm, source install
 - [Quick Start](user/quick-start.md) — 5-minute tutorial
+- [`aor` CLI](user/cli.md) — Operational and Kubernetes command reference
 - [Configuration](user/configuration/) — All config fields
   - [Server](user/configuration/server.md) — HTTP, auth, API keys
   - [Orchestrator](user/configuration/orchestrator.md) — Instance lifecycle, runtimes

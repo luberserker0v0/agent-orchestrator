@@ -39,7 +39,15 @@ aor
 
 | Command | Description |
 |---------|-------------|
+| `aor serve` | Explicitly start the server |
+| `aor status` | Check health and authenticated role |
+| `aor conversation ...` | Manage conversation lifecycle |
+| `aor session ...` | Manage OpenCode sessions |
+| `aor cleanup ...` | Preview or execute configured cleanup |
+| `aor k8s ...` | Render and manage Kubernetes components |
 | `aor dashboard` | Open dashboard in browser |
+
+See the complete [`aor` command reference](cli.md).
 
 ## Source Install
 
