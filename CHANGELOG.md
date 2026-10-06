@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package
 
 ### Fixed
+- fix(openapi): document every registered REST operation and enforce route coverage in tests
 - fix(skills): stage whole skill trees before replacement and preserve the prior version when upload or import fails
 - fix(metrics): keep the active-workspace gauge non-negative across idempotent creation and process restarts
 - fix(http): drain aborted requests during shutdown and remove completed request waiters without leaking polling timers
