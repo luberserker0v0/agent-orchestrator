@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, existsSync, renameSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { parse as parseJSONC } from 'jsonc-parser';
 import type { BuiltinApiKeyRole, RolesConfig } from '../config-loader.js';
 import { AppError, ErrorCodes } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { atomicWriteFileSync } from '../storage/atomic-file.js';
 
 export interface RoleDefinition {
   name: string;
@@ -56,17 +57,18 @@ export class RoleService {
     if (initialRoles) {
       for (const [name, def] of Object.entries(initialRoles)) {
         if (this.roles.has(name)) continue;
-        this.roles.set(name, { name, permissions: def.permissions, builtin: false });
+        this.roles.set(name, { name, permissions: [...def.permissions], builtin: false });
       }
     }
   }
 
   list(): RoleDefinition[] {
-    return Array.from(this.roles.values());
+    return Array.from(this.roles.values(), role => this.cloneRole(role));
   }
 
   get(name: string): RoleDefinition | undefined {
-    return this.roles.get(name);
+    const role = this.roles.get(name);
+    return role ? this.cloneRole(role) : undefined;
   }
 
   create(name: string, permissions: string[]): RoleDefinition {
@@ -75,11 +77,13 @@ export class RoleService {
       throw new AppError(409, ErrorCodes.ROLE_ALREADY_EXISTS, `Role "${name}" already exists`);
     }
 
-    const role: RoleDefinition = { name, permissions, builtin: false };
-    this.roles.set(name, role);
-    this.persist();
+    const role: RoleDefinition = { name, permissions: [...permissions], builtin: false };
+    const nextRoles = new Map(this.roles);
+    nextRoles.set(name, role);
+    this.persist(nextRoles);
+    this.roles = nextRoles;
     logger.info(`Role created: ${name}`);
-    return role;
+    return this.cloneRole(role);
   }
 
   update(name: string, permissions: string[]): RoleDefinition {
@@ -91,10 +95,13 @@ export class RoleService {
       throw new AppError(403, ErrorCodes.CANNOT_MODIFY_BUILTIN_ROLE, `Cannot modify built-in role "${name}"`);
     }
 
-    existing.permissions = permissions;
-    this.persist();
+    const role: RoleDefinition = { ...existing, permissions: [...permissions] };
+    const nextRoles = new Map(this.roles);
+    nextRoles.set(name, role);
+    this.persist(nextRoles);
+    this.roles = nextRoles;
     logger.info(`Role updated: ${name}`);
-    return existing;
+    return this.cloneRole(role);
   }
 
   delete(name: string): void {
@@ -106,8 +113,10 @@ export class RoleService {
       throw new AppError(403, ErrorCodes.CANNOT_DELETE_BUILTIN_ROLE, `Cannot delete built-in role "${name}"`);
     }
 
-    this.roles.delete(name);
-    this.persist();
+    const nextRoles = new Map(this.roles);
+    nextRoles.delete(name);
+    this.persist(nextRoles);
+    this.roles = nextRoles;
     logger.info(`Role deleted: ${name}`);
   }
 
@@ -129,14 +138,17 @@ export class RoleService {
     }
   }
 
-  private persist(): void {
+  private cloneRole(role: RoleDefinition): RoleDefinition {
+    return { ...role, permissions: [...role.permissions] };
+  }
+
+  private persist(roles: ReadonlyMap<string, RoleDefinition>): void {
     const rolesObj: RolesConfig = {};
-    for (const [name, def] of this.roles) {
+    for (const [name, def] of roles) {
       if (def.builtin) continue;
       rolesObj[name] = { permissions: def.permissions };
     }
 
-    const temporaryPath = `${this.configPath}.${process.pid}.tmp`;
     try {
       let config: Record<string, unknown>;
       if (existsSync(this.configPath)) {
@@ -147,15 +159,9 @@ export class RoleService {
       }
 
       config['roles'] = rolesObj;
-      writeFileSync(temporaryPath, JSON.stringify(config, null, 2), 'utf-8');
-      renameSync(temporaryPath, this.configPath);
+      atomicWriteFileSync(this.configPath, JSON.stringify(config, null, 2));
     } catch (err) {
       logger.error(`Failed to persist roles to config: ${(err as Error).message}`);
-      try {
-        rmSync(temporaryPath, { force: true });
-      } catch {
-        // Best-effort cleanup; preserve the original persistence error.
-      }
       throw new AppError(500, ErrorCodes.INTERNAL_ERROR, 'Failed to persist role configuration');
     }
   }

@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 vi.mock('node:fs', () => ({
   mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
   readFileSync: vi.fn(),
   readdirSync: vi.fn(),
   existsSync: vi.fn(),
   rmSync: vi.fn(),
+}));
+
+vi.mock('../storage/atomic-file.js', () => ({
+  atomicWriteFileSync: vi.fn(),
 }));
 
 vi.mock('../orchestrator/workspace-factory.js', () => ({
@@ -24,6 +27,7 @@ vi.mock('../utils/logger.js', () => ({
 
 import { AgentService } from './agent-service.js';
 import { getDirSize } from '../orchestrator/workspace-factory.js';
+import { atomicWriteFileSync } from '../storage/atomic-file.js';
 
 describe('AgentService', () => {
   let agentService: AgentService;
@@ -69,10 +73,9 @@ describe('AgentService', () => {
 
       const expectedDir = join(mockWsPath, '.opencode', 'agents');
       expect(mkdirSync).toHaveBeenCalledWith(expectedDir, { recursive: true });
-      expect(writeFileSync).toHaveBeenCalledWith(
+      expect(atomicWriteFileSync).toHaveBeenCalledWith(
         join(expectedDir, 'my-agent.md'),
-        '# Agent content',
-        'utf-8'
+        '# Agent content'
       );
     });
 
@@ -80,10 +83,9 @@ describe('AgentService', () => {
       agentService.writeAgent(testId, 'my/agent', 'content');
 
       const agentsDir = join(mockWsPath, '.opencode', 'agents');
-      expect(writeFileSync).toHaveBeenCalledWith(
+      expect(atomicWriteFileSync).toHaveBeenCalledWith(
         join(agentsDir, 'my_agent.md'),
-        expect.any(String),
-        'utf-8'
+        expect.any(String)
       );
     });
 
@@ -91,10 +93,9 @@ describe('AgentService', () => {
       agentService.writeAgent(testId, 'my..agent', 'content');
 
       const agentsDir = join(mockWsPath, '.opencode', 'agents');
-      expect(writeFileSync).toHaveBeenCalledWith(
+      expect(atomicWriteFileSync).toHaveBeenCalledWith(
         join(agentsDir, 'my_agent.md'),
-        expect.any(String),
-        'utf-8'
+        expect.any(String)
       );
     });
 
@@ -122,7 +123,7 @@ describe('AgentService', () => {
       vi.mocked(readFileSync).mockReturnValue(Buffer.from('12345678'));
 
       expect(() => agentService.writeAgent(testId, 'existing', 'abcdefgh')).not.toThrow();
-      expect(writeFileSync).toHaveBeenCalled();
+      expect(atomicWriteFileSync).toHaveBeenCalled();
     });
   });
 
@@ -242,7 +243,7 @@ describe('AgentService', () => {
       agentService.writeAgentsMd(testId, content);
 
       const expectedPath = join(mockWsPath, 'AGENTS.md');
-      expect(writeFileSync).toHaveBeenCalledWith(expectedPath, content, 'utf-8');
+      expect(atomicWriteFileSync).toHaveBeenCalledWith(expectedPath, content);
     });
 
     it('should emit events', () => {

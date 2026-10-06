@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RoleService } from './role-service.js';
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -43,6 +43,16 @@ describe('RoleService', () => {
     it('marks built-in roles as builtin', () => {
       const admin = service.get('admin');
       expect(admin?.builtin).toBe(true);
+    });
+
+    it('does not expose mutable permission arrays', () => {
+      const admin = service.get('admin');
+      admin?.permissions.push('role:write');
+      const listedUser = service.list().find(role => role.name === 'user');
+      listedUser?.permissions.push('role:write');
+
+      expect(service.get('admin')?.permissions).toEqual(['*']);
+      expect(service.hasPermission('user', 'role:write')).toBe(false);
     });
   });
 
@@ -89,6 +99,15 @@ describe('RoleService', () => {
       expect(() => service.create('MyRole123', ['*'])).not.toThrow();
       expect(() => service.create('agent_dev', ['*'])).not.toThrow();
     });
+
+    it('does not publish a role when persistence fails', () => {
+      const failing = new RoleService(tmpDir);
+
+      expect(() => failing.create('moderator', ['conversation:start'])).toThrow(
+        'Failed to persist role configuration',
+      );
+      expect(failing.get('moderator')).toBeUndefined();
+    });
   });
 
   describe('update', () => {
@@ -115,6 +134,17 @@ describe('RoleService', () => {
 
     it('cannot modify user role', () => {
       expect(() => service.update('user', ['conversation:start'])).toThrow('Cannot modify built-in role');
+    });
+
+    it('keeps prior permissions when persistence fails', () => {
+      const failing = new RoleService(tmpDir, {
+        moderator: { permissions: ['conversation:start'] },
+      });
+
+      expect(() => failing.update('moderator', ['message:send'])).toThrow(
+        'Failed to persist role configuration',
+      );
+      expect(failing.get('moderator')?.permissions).toEqual(['conversation:start']);
     });
   });
 
@@ -143,6 +173,23 @@ describe('RoleService', () => {
     it('cannot delete user role', () => {
       expect(() => service.delete('user')).toThrow('Cannot delete built-in role');
     });
+
+    it('keeps the role when persistence fails', () => {
+      const failing = new RoleService(tmpDir, {
+        moderator: { permissions: ['conversation:start'] },
+      });
+
+      expect(() => failing.delete('moderator')).toThrow('Failed to persist role configuration');
+      expect(failing.get('moderator')?.permissions).toEqual(['conversation:start']);
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')('preserves config file permissions', () => {
+    chmodSync(configPath, 0o640);
+
+    service.create('moderator', ['conversation:start']);
+
+    expect(statSync(configPath).mode & 0o777).toBe(0o640);
   });
 
   describe('hasPermission', () => {

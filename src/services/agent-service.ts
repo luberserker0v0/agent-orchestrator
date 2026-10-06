@@ -1,9 +1,10 @@
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { basename } from 'node:path';
 import { WorkspaceFactory, getDirSize } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
 import { logger } from '../utils/logger.js';
+import { atomicWriteFileSync } from '../storage/atomic-file.js';
 
 export interface AgentItem {
   name: string;
@@ -26,7 +27,7 @@ export class AgentService {
     this.assertQuota(wsPath, size, filePath);
 
     mkdirSync(agentsDir, { recursive: true });
-    writeFileSync(filePath, content, 'utf-8');
+    atomicWriteFileSync(filePath, content);
     logger.info(`Agent written: ${filePath}`);
 
     this.markNeedsRestartIfRunning(id, `agent ${name} updated`);
@@ -91,7 +92,7 @@ export class AgentService {
 
     const size = Buffer.byteLength(content, 'utf-8');
     this.assertQuota(wsPath, size, filePath);
-    writeFileSync(filePath, content, 'utf-8');
+    atomicWriteFileSync(filePath, content);
     logger.info(`AGENTS.md written: ${filePath}`);
 
     this.markNeedsRestartIfRunning(id, 'AGENTS.md updated');

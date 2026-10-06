@@ -1,9 +1,10 @@
-import { mkdir, writeFile, readFile, readdir, rm, copyFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, copyFile } from 'node:fs/promises';
 import { existsSync, lstatSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { logger } from '../utils/logger.js';
 import type { StorageBackend, RuntimeAccess } from './types.js';
 import { resolvePathWithoutSymlinks } from './path-safety.js';
+import { atomicWriteFile } from './atomic-file.js';
 
 function sanitizeId(raw: string): string {
   return raw.replace(/[\\/]/g, '_').replace(/\.{2,}/g, '_');
@@ -85,7 +86,7 @@ export class LocalStorage implements StorageBackend {
   async writeFile(workspaceId: string, relativePath: string, content: string | Buffer): Promise<void> {
     const p = this.resolvePath(workspaceId, relativePath);
     await mkdir(join(p, '..'), { recursive: true });
-    await writeFile(p, content, 'utf-8');
+    await atomicWriteFile(p, content);
   }
 
   async listEntries(workspaceId: string, relativePath?: string): Promise<string[]> {
