@@ -5,6 +5,7 @@ import { WorkspaceFactory, validateSkillName, getDirSize, hashDirectory } from '
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { logger } from '../utils/logger.js';
 import { assertTreeHasNoSymlinks, resolveAllowedSource } from '../storage/path-safety.js';
+import { replaceDirectorySync } from '../storage/atomic-directory.js';
 
 export class SkillService {
   private allowedCopySources: string[];
@@ -75,18 +76,17 @@ export class SkillService {
     }
 
     const existingSize = existsSync(destPath) ? getDirSize(destPath) : 0;
+    if (existsSync(destPath)) assertTreeHasNoSymlinks(destPath);
     await this.workspaceFactory.assertQuota(id, Math.max(0, totalUncompressedSize - existingSize));
 
-    mkdirSync(destPath, { recursive: true });
-    for (const entry of entries) {
-      if (entry.isDirectory) continue;
-      const entryPath = this.workspaceFactory.resolveWorkspaceEntryPath(
-        id,
-        `${this.getSkillsRelativeDir(agentName)}/${skillName}/${entry.entryName}`,
-      );
-      mkdirSync(dirname(entryPath), { recursive: true });
-      writeFileSync(entryPath, entry.getData());
-    }
+    replaceDirectorySync(destPath, stagingPath => {
+      for (const entry of entries) {
+        if (entry.isDirectory) continue;
+        const entryPath = resolve(stagingPath, entry.entryName);
+        mkdirSync(dirname(entryPath), { recursive: true });
+        writeFileSync(entryPath, entry.getData());
+      }
+    });
 
     logger.info(`Skill uploaded: ${destPath}`);
     this.markNeedsRestartIfRunning(id, `skill ${name} uploaded`);
@@ -123,8 +123,10 @@ export class SkillService {
     const existingSize = existsSync(destPath) ? getDirSize(destPath) : 0;
     await this.workspaceFactory.assertQuota(id, Math.max(0, dirSize - existingSize));
 
-    mkdirSync(destPath, { recursive: true });
-    cpSync(resolvedSource, destPath, { recursive: true, force: true });
+    replaceDirectorySync(destPath, stagingPath => {
+      cpSync(resolvedSource, stagingPath, { recursive: true, force: true });
+      assertTreeHasNoSymlinks(stagingPath);
+    });
     logger.info(`Skill imported: ${resolvedSource} → ${destPath}`);
 
     this.markNeedsRestartIfRunning(id, `skill ${name} imported`);
@@ -137,7 +139,7 @@ export class SkillService {
     const skillsDir = this.getSkillsDir(id, agentName);
     if (!existsSync(skillsDir)) return [];
     return readdirSync(skillsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
       .map((entry) => entry.name);
   }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, statSync, cpSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync, existsSync, rmSync, statSync, cpSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
 vi.mock('node:fs', () => ({
@@ -43,8 +43,15 @@ vi.mock('../storage/path-safety.js', () => ({
   }),
 }));
 
+vi.mock('../storage/atomic-directory.js', () => ({
+  replaceDirectorySync: vi.fn((target: string, populate: (stagingPath: string) => void) => {
+    populate(`${target}.stage`);
+  }),
+}));
+
 import AdmZip from 'adm-zip';
 import { SkillService } from './skill-service.js';
+import { replaceDirectorySync } from '../storage/atomic-directory.js';
 
 function makeMockEntry(name: string, isDir = false, size = 100) {
   return {
@@ -106,7 +113,7 @@ describe('SkillService', () => {
       expect(mockWorkspaceFactory.resolveWorkspaceEntryPath).toHaveBeenCalledWith(testId, '.opencode/skills/my-skill');
 
       const destPath = join(mockWsPath, '.opencode', 'skills', 'my-skill');
-      expect(mkdirSync).toHaveBeenCalledWith(destPath, { recursive: true });
+      expect(replaceDirectorySync).toHaveBeenCalledWith(destPath, expect.any(Function));
     });
 
     it('should reject zip without SKILL.md at root', async () => {
@@ -187,7 +194,7 @@ describe('SkillService', () => {
       await skillService.importSkill(testId, srcPath, 'imported-skill');
 
       const destPath = join(mockWsPath, '.opencode', 'skills', 'imported-skill');
-      expect(cpSync).toHaveBeenCalledWith(srcPath, destPath, { recursive: true, force: true });
+      expect(cpSync).toHaveBeenCalledWith(srcPath, `${destPath}.stage`, { recursive: true, force: true });
     });
 
     it('should reject non-allowed source path', async () => {
@@ -252,6 +259,7 @@ describe('SkillService', () => {
       vi.mocked(readdirSync).mockReturnValue([
         makeDirent('skill-one', true),
         makeDirent('skill-two', true),
+        makeDirent('.skill-one.stage.123', true),
         makeDirent('readme.txt', false),
       ] as any);
 
@@ -341,7 +349,7 @@ describe('SkillService', () => {
         await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'), agentName);
 
         const destPath = join(mockWsPath, '.opencode', 'agents', agentName, 'skills', 'my-skill');
-        expect(mkdirSync).toHaveBeenCalledWith(destPath, { recursive: true });
+        expect(replaceDirectorySync).toHaveBeenCalledWith(destPath, expect.any(Function));
       });
 
       it('should emit event with agent-scoped changedFiles', async () => {
@@ -363,7 +371,7 @@ describe('SkillService', () => {
         await skillService.importSkill(testId, srcPath, 'imported-skill', agentName);
 
         const destPath = join(mockWsPath, '.opencode', 'agents', agentName, 'skills', 'imported-skill');
-        expect(cpSync).toHaveBeenCalledWith(srcPath, destPath, { recursive: true, force: true });
+        expect(cpSync).toHaveBeenCalledWith(srcPath, `${destPath}.stage`, { recursive: true, force: true });
       });
 
       it('should emit event with agent-scoped changedFiles', async () => {

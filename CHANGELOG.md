@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package
 
 ### Fixed
+- fix(skills): stage whole skill trees before replacement and preserve the prior version when upload or import fails
 - fix(metrics): keep the active-workspace gauge non-negative across idempotent creation and process restarts
 - fix(http): drain aborted requests during shutdown and remove completed request waiters without leaking polling timers
 - fix(storage): replace managed file and role-configuration writes atomically, preserving file permissions and rolling back failed role mutations
