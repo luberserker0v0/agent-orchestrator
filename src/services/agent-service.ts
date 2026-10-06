@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { basename } from 'node:path';
 import { WorkspaceFactory, getDirSize } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { InstanceManager } from '../orchestrator/instance-manager.js';
@@ -19,11 +19,11 @@ export class AgentService {
 
   writeAgent(id: string, name: string, content: string): void {
     const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const agentsDir = join(wsPath, '.opencode', 'agents');
-    const filePath = join(agentsDir, `${this.sanitize(name)}.md`);
+    const agentsDir = this.workspaceFactory.resolveWorkspaceEntryPath(id, '.opencode/agents');
+    const filePath = this.workspaceFactory.resolveWorkspaceEntryPath(id, `.opencode/agents/${this.sanitize(name)}.md`);
 
     const size = Buffer.byteLength(content, 'utf-8');
-    this.assertQuota(wsPath, size);
+    this.assertQuota(wsPath, size, filePath);
 
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(filePath, content, 'utf-8');
@@ -36,8 +36,7 @@ export class AgentService {
   }
 
   readAgent(id: string, name: string): string {
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const filePath = join(wsPath, '.opencode', 'agents', `${this.sanitize(name)}.md`);
+    const filePath = this.workspaceFactory.resolveWorkspaceEntryPath(id, `.opencode/agents/${this.sanitize(name)}.md`);
     if (!existsSync(filePath)) {
       throw new Error(`Agent not found: ${name}`);
     }
@@ -45,8 +44,7 @@ export class AgentService {
   }
 
   deleteAgent(id: string, name: string): void {
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const filePath = join(wsPath, '.opencode', 'agents', `${this.sanitize(name)}.md`);
+    const filePath = this.workspaceFactory.resolveWorkspaceEntryPath(id, `.opencode/agents/${this.sanitize(name)}.md`);
     if (existsSync(filePath)) {
       rmSync(filePath, { force: true });
       logger.info(`Agent deleted: ${filePath}`);
@@ -59,8 +57,7 @@ export class AgentService {
   }
 
   listAgents(id: string): string[] {
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const agentsDir = join(wsPath, '.opencode', 'agents');
+    const agentsDir = this.workspaceFactory.resolveWorkspaceEntryPath(id, '.opencode/agents');
     if (!existsSync(agentsDir)) return [];
     return readdirSync(agentsDir)
       .filter((f) => f.endsWith('.md'))
@@ -90,10 +87,10 @@ export class AgentService {
 
   writeAgentsMd(id: string, content: string): void {
     const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const filePath = join(wsPath, 'AGENTS.md');
+    const filePath = this.workspaceFactory.resolveWorkspaceEntryPath(id, 'AGENTS.md');
 
     const size = Buffer.byteLength(content, 'utf-8');
-    this.assertQuota(wsPath, size);
+    this.assertQuota(wsPath, size, filePath);
     writeFileSync(filePath, content, 'utf-8');
     logger.info(`AGENTS.md written: ${filePath}`);
 
@@ -104,8 +101,7 @@ export class AgentService {
   }
 
   readAgentsMd(id: string): string {
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const filePath = join(wsPath, 'AGENTS.md');
+    const filePath = this.workspaceFactory.resolveWorkspaceEntryPath(id, 'AGENTS.md');
     if (!existsSync(filePath)) {
       throw new Error('AGENTS.md not found');
     }
@@ -113,8 +109,7 @@ export class AgentService {
   }
 
   deleteAgentsMd(id: string): void {
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    const filePath = join(wsPath, 'AGENTS.md');
+    const filePath = this.workspaceFactory.resolveWorkspaceEntryPath(id, 'AGENTS.md');
     if (existsSync(filePath)) {
       rmSync(filePath, { force: true });
       logger.info(`AGENTS.md deleted: ${filePath}`);

@@ -4,6 +4,7 @@ import AdmZip from 'adm-zip';
 import { WorkspaceFactory, validateSkillName, getDirSize, hashDirectory } from '../orchestrator/workspace-factory.js';
 import { ConversationState } from '../orchestrator/conversation-state.js';
 import { logger } from '../utils/logger.js';
+import { assertTreeHasNoSymlinks, resolveAllowedSource } from '../storage/path-safety.js';
 
 export class SkillService {
   private allowedCopySources: string[];
@@ -20,11 +21,18 @@ export class SkillService {
   }
 
   private getSkillsDir(id: string, agentName?: string): string {
-    const wsPath = this.workspaceFactory.resolveWorkspacePath(id);
-    if (agentName) {
-      return join(wsPath, '.opencode', 'agents', agentName, 'skills');
-    }
-    return join(wsPath, '.opencode', 'skills');
+    return this.workspaceFactory.resolveWorkspaceEntryPath(id, this.getSkillsRelativeDir(agentName));
+  }
+
+  private getSkillsRelativeDir(agentName?: string): string {
+    return agentName ? `.opencode/agents/${agentName}/skills` : '.opencode/skills';
+  }
+
+  private getSkillDir(id: string, skillName: string, agentName?: string): string {
+    return this.workspaceFactory.resolveWorkspaceEntryPath(
+      id,
+      `${this.getSkillsRelativeDir(agentName)}/${skillName}`,
+    );
   }
 
   private getChangedFilePrefix(agentName?: string): string {
@@ -41,7 +49,7 @@ export class SkillService {
       throw new Error('Skill archive must contain SKILL.md at the root');
     }
 
-    const destPath = join(this.getSkillsDir(id, agentName), skillName);
+    const destPath = this.getSkillDir(id, skillName, agentName);
     let totalUncompressedSize = 0;
 
     for (const entry of entries) {
@@ -72,7 +80,10 @@ export class SkillService {
     mkdirSync(destPath, { recursive: true });
     for (const entry of entries) {
       if (entry.isDirectory) continue;
-      const entryPath = resolve(destPath, entry.entryName);
+      const entryPath = this.workspaceFactory.resolveWorkspaceEntryPath(
+        id,
+        `${this.getSkillsRelativeDir(agentName)}/${skillName}/${entry.entryName}`,
+      );
       mkdirSync(dirname(entryPath), { recursive: true });
       writeFileSync(entryPath, entry.getData());
     }
@@ -86,14 +97,12 @@ export class SkillService {
 
   async importSkill(id: string, source: string, name: string, agentName?: string): Promise<void> {
     const skillName = validateSkillName(name);
-    const destPath = join(this.getSkillsDir(id, agentName), skillName);
+    const destPath = this.getSkillDir(id, skillName, agentName);
 
-    const resolvedSource = resolve(process.cwd(), source);
-    const isAllowed = this.allowedCopySources.some((allowed) => {
-      const resolvedAllowed = resolve(allowed);
-      return resolvedSource === resolvedAllowed || resolvedSource.startsWith(resolvedAllowed + sep);
-    });
-    if (!isAllowed) {
+    let resolvedSource: string;
+    try {
+      resolvedSource = resolveAllowedSource(resolve(process.cwd(), source), this.allowedCopySources);
+    } catch {
       throw new Error(
         `Source path not allowed. Must be under one of: ${this.allowedCopySources.join(', ')}`
       );
@@ -107,6 +116,8 @@ export class SkillService {
     if (!srcStat.isDirectory()) {
       throw new Error(`Source must be a directory: ${source}`);
     }
+    assertTreeHasNoSymlinks(resolvedSource);
+    if (existsSync(destPath)) assertTreeHasNoSymlinks(destPath);
 
     const dirSize = getDirSize(resolvedSource);
     const existingSize = existsSync(destPath) ? getDirSize(destPath) : 0;
@@ -132,7 +143,10 @@ export class SkillService {
 
   readSkill(id: string, name: string, agentName?: string): string {
     const skillName = validateSkillName(name);
-    const skillPath = join(this.getSkillsDir(id, agentName), skillName, 'SKILL.md');
+    const skillPath = this.workspaceFactory.resolveWorkspaceEntryPath(
+      id,
+      `${this.getSkillsRelativeDir(agentName)}/${skillName}/SKILL.md`,
+    );
     if (!existsSync(skillPath)) {
       throw new Error(`Skill not found: ${name}`);
     }
@@ -141,7 +155,7 @@ export class SkillService {
 
   getSkillInfo(id: string, name: string, agentName?: string): { name: string; files: string[]; totalSize: number; sha256: string } {
     const skillName = validateSkillName(name);
-    const skillDir = join(this.getSkillsDir(id, agentName), skillName);
+    const skillDir = this.getSkillDir(id, skillName, agentName);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill not found: ${name}`);
     }
@@ -151,7 +165,7 @@ export class SkillService {
 
   deleteSkill(id: string, name: string, agentName?: string): void {
     const skillName = validateSkillName(name);
-    const skillDir = join(this.getSkillsDir(id, agentName), skillName);
+    const skillDir = this.getSkillDir(id, skillName, agentName);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill not found: ${name}`);
     }

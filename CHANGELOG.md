@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - refactor(cli): replace permissive argument parsing with a strict nested Commander command tree while preserving `aor` server startup
 - build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package
 
+### Fixed
+- fix(storage): reject symlinked workspace paths and canonicalize approved copy sources before file, agent, or skill access
+- fix(orchestrator): serialize duplicate conversation creation and retain lifecycle state when runtime or workspace deletion is incomplete
+- fix(runtime): require observed process, container, or Pod termination before releasing instance state and ports
+- fix(workspace): charge only the replacement-size delta when updating agent files under a workspace quota
+
 ## [1.2.2] - 2026-10-05
 
 ### Fixed

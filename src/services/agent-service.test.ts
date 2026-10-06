@@ -23,6 +23,7 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 import { AgentService } from './agent-service.js';
+import { getDirSize } from '../orchestrator/workspace-factory.js';
 
 describe('AgentService', () => {
   let agentService: AgentService;
@@ -37,9 +38,11 @@ describe('AgentService', () => {
     vi.mocked(existsSync).mockReturnValue(true);
     vi.mocked(readFileSync).mockReturnValue('agent content');
     vi.mocked(readdirSync).mockReturnValue([]);
+    vi.mocked(getDirSize).mockReturnValue(0);
 
     mockWorkspaceFactory = {
       resolveWorkspacePath: vi.fn().mockReturnValue(mockWsPath),
+      resolveWorkspaceEntryPath: vi.fn((_id: string, path: string) => join(mockWsPath, path)),
       getMaxSizeBytes: vi.fn().mockReturnValue(50 * 1024 * 1024),
     };
 
@@ -111,6 +114,15 @@ describe('AgentService', () => {
 
       expect(mockConversationState.markNeedsRestart).not.toHaveBeenCalled();
       expect(mockConversationState.emitEvent).toHaveBeenCalled();
+    });
+
+    it('charges only the size delta when replacing an existing agent', () => {
+      mockWorkspaceFactory.getMaxSizeBytes.mockReturnValue(10);
+      vi.mocked(getDirSize).mockReturnValue(8);
+      vi.mocked(readFileSync).mockReturnValue(Buffer.from('12345678'));
+
+      expect(() => agentService.writeAgent(testId, 'existing', 'abcdefgh')).not.toThrow();
+      expect(writeFileSync).toHaveBeenCalled();
     });
   });
 

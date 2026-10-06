@@ -32,6 +32,10 @@ class DockerHandle implements InstanceHandle {
     return this._exitCode;
   }
 
+  hasExited(): boolean {
+    return this.resolved;
+  }
+
   async kill(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const rm = spawn('docker', ['rm', '-f', this.containerName], { stdio: 'ignore' });

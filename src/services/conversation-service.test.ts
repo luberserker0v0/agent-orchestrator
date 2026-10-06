@@ -146,6 +146,40 @@ describe('ConversationService', () => {
       await expect(service.create(testId, 'broken-rt')).rejects.toThrow(AppError);
       await expect(service.create(testId, 'broken-rt')).rejects.toThrow(/not available/);
     });
+
+    it('serializes concurrent creates for the same conversation id', async () => {
+      let exists = false;
+      let releaseWorkspace!: () => void;
+      const workspaceGate = new Promise<void>((resolve) => { releaseWorkspace = resolve; });
+      mockConversationState.has.mockImplementation(() => exists);
+      mockRuntimeManager.hasAgentType.mockReturnValue(true);
+      mockWorkspaceFactory.create.mockImplementation(async () => {
+        await workspaceGate;
+        return { id: testId, path: '', opencodeDir: '', runtimeAccess: { type: 'local', cwd: '' } };
+      });
+      mockConversationState.create.mockImplementation(() => {
+        exists = true;
+        return {
+          id: testId,
+          agentType: 'opencode-direct',
+          status: 'prepared',
+          ready: false,
+          needsRestart: false,
+          createdAt: 100,
+          updatedAt: 100,
+        };
+      });
+
+      const first = service.create(testId);
+      await vi.waitFor(() => expect(mockWorkspaceFactory.create).toHaveBeenCalledTimes(1));
+      const second = service.create(testId);
+      expect(mockWorkspaceFactory.create).toHaveBeenCalledTimes(1);
+      releaseWorkspace();
+
+      await expect(first).resolves.toMatchObject({ id: testId, status: 'prepared' });
+      await expect(second).rejects.toMatchObject({ code: ErrorCodes.CONVERSATION_ALREADY_EXISTS });
+      expect(mockWorkspaceFactory.create).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('get', () => {
@@ -811,21 +845,26 @@ describe('ConversationService', () => {
       mockConversationState.has.mockReturnValue(true);
       mockInstanceManager.destroyInstance.mockRejectedValue(new Error('kill failed'));
 
-      await service.delete(testId);
+      await expect(service.delete(testId)).rejects.toMatchObject({
+        code: ErrorCodes.PERSISTENT_DATA_CLEANUP_PENDING,
+      });
 
       expect(mockInstanceManager.deletePersistentData).not.toHaveBeenCalled();
-      expect(mockWorkspaceFactory.destroy).toHaveBeenCalledWith(testId);
+      expect(mockWorkspaceFactory.destroy).not.toHaveBeenCalled();
+      expect(mockConversationState.remove).not.toHaveBeenCalled();
     });
 
-    it('should log warn on workspace destruction failure', async () => {
+    it('should retain conversation state on workspace destruction failure', async () => {
       const { logger } = await import('../utils/logger.js');
       mockConversationState.has.mockReturnValue(true);
       mockInstanceManager.destroyInstance.mockResolvedValue(undefined);
       mockWorkspaceFactory.destroy.mockImplementation(() => { throw new Error('permission denied'); });
 
-      await service.delete(testId);
+      await expect(service.delete(testId)).rejects.toThrow('permission denied');
 
       expect(logger.warn).toHaveBeenCalled();
+      expect(mockConversationState.transition).toHaveBeenCalledWith(testId, 'error', { error: 'permission denied' });
+      expect(mockConversationState.remove).not.toHaveBeenCalled();
     });
 
     it('marks the Kubernetes instance record before stopping the runtime', async () => {

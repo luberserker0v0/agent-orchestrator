@@ -105,7 +105,7 @@ describe('WorkspaceFactory', () => {
     await expect(factory.destroy('non-existent')).resolves.not.toThrow();
   });
 
-  it('should handle destroy workspace error gracefully', async () => {
+  it('should propagate destroy workspace errors so callers retain lifecycle state', async () => {
     const storage = new LocalStorage('test-workspace');
     vi.spyOn(storage, 'destroyWorkspace').mockRejectedValueOnce(new Error('Permission denied'));
     const factory = new WorkspaceFactory(
@@ -113,7 +113,7 @@ describe('WorkspaceFactory', () => {
       storage,
     );
     await factory.create('conv-destroy-fail');
-    await expect(factory.destroy('conv-destroy-fail')).resolves.not.toThrow();
+    await expect(factory.destroy('conv-destroy-fail')).rejects.toThrow('Permission denied');
   });
 
   it('should ensure workspace directory exists without config', async () => {

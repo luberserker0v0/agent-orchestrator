@@ -38,13 +38,15 @@ function cleanup(): void {
 
 function createMockHandle(overrides: Partial<InstanceHandle> & { exitCode?: number | null } = {}): InstanceHandle & { _fireExit: (code: number | null) => void } {
   const exitCallbacks: Array<(code: number | null) => void> = [];
+  let exited = overrides.exitCode !== undefined && overrides.exitCode !== null;
   return {
     pid: 12345,
     exitCode: overrides.exitCode ?? null,
-    kill: vi.fn().mockResolvedValue(undefined),
-    waitForExit: vi.fn().mockResolvedValue(undefined),
+    hasExited: overrides.hasExited ?? vi.fn(() => exited),
+    kill: overrides.kill ?? vi.fn(async () => { exited = true; }),
+    waitForExit: overrides.waitForExit ?? vi.fn().mockResolvedValue(undefined),
     onExit: vi.fn((cb: (code: number | null) => void) => { exitCallbacks.push(cb); }),
-    _fireExit: (code: number | null) => { exitCallbacks.forEach(cb => cb(code)); },
+    _fireExit: (code: number | null) => { exited = true; exitCallbacks.forEach(cb => cb(code)); },
   };
 }
 

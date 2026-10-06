@@ -25,6 +25,10 @@ class ChildProcessHandle implements InstanceHandle {
     return this.proc.exitCode;
   }
 
+  hasExited(): boolean {
+    return this.proc.exitCode !== null || this.proc.signalCode !== null;
+  }
+
   kill(signal?: string): Promise<void> {
     if (!this.proc || this.proc.killed || this.proc.exitCode !== null || this.proc.pid === undefined) {
       return Promise.resolve();

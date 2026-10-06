@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdir, writeFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readdir, rm, symlink } from 'node:fs/promises';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -66,6 +66,16 @@ describe('LocalStorage', () => {
       await storage.destroyWorkspace('ws-ghost');
       // should not throw
     });
+
+    it('refuses to destroy a symlinked workspace root', async () => {
+      const outside = join(tmpDir, 'outside-workspace');
+      await mkdir(outside);
+      await writeFile(join(outside, 'keep.txt'), 'keep');
+      await symlink(outside, join(tmpDir, 'linked-workspace'), process.platform === 'win32' ? 'junction' : 'dir');
+
+      await expect(storage.destroyWorkspace('linked-workspace')).rejects.toThrow('symbolic links');
+      expect(existsSync(join(outside, 'keep.txt'))).toBe(true);
+    });
   });
 
   describe('ensureDir', () => {
@@ -97,6 +107,18 @@ describe('LocalStorage', () => {
       await storage.writeFile('ws-rw3', 'sub/dir/file.txt', 'nested');
       const buf = await storage.readFile('ws-rw3', 'sub/dir/file.txt');
       expect(buf.toString()).toBe('nested');
+    });
+
+    it('rejects workspace paths that traverse a symbolic link', async () => {
+      await storage.createWorkspaceDir('ws-link');
+      const outside = join(tmpDir, 'outside');
+      await mkdir(outside);
+      await writeFile(join(outside, 'secret.txt'), 'secret');
+      await symlink(outside, join(tmpDir, 'ws-link', 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
+
+      await expect(storage.readFile('ws-link', 'escape/secret.txt')).rejects.toThrow('symbolic links');
+      await expect(storage.writeFile('ws-link', 'escape/new.txt', 'bad')).rejects.toThrow('symbolic links');
+      expect(existsSync(join(outside, 'new.txt'))).toBe(false);
     });
   });
 

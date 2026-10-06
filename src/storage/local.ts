@@ -1,8 +1,9 @@
 import { mkdir, writeFile, readFile, readdir, rm, copyFile } from 'node:fs/promises';
-import { existsSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { logger } from '../utils/logger.js';
 import type { StorageBackend, RuntimeAccess } from './types.js';
+import { resolvePathWithoutSymlinks } from './path-safety.js';
 
 function sanitizeId(raw: string): string {
   return raw.replace(/[\\/]/g, '_').replace(/\.{2,}/g, '_');
@@ -33,7 +34,7 @@ function getDirSize(dirPath: string): number {
     for (const entry of entries) {
       const fullPath = join(dirPath, entry.name);
       if (entry.isDirectory()) total += getDirSize(fullPath);
-      else total += statSync(fullPath).size;
+      else if (!entry.isSymbolicLink()) total += statSync(fullPath).size;
     }
   } catch { /* ignore */ }
   return total;
@@ -47,11 +48,11 @@ export class LocalStorage implements StorageBackend {
   }
 
   private wsPath(workspaceId: string): string {
-    return join(this.basePath, sanitizeId(workspaceId));
+    return resolvePathWithoutSymlinks(this.basePath, sanitizeId(workspaceId));
   }
 
   private resolvePath(workspaceId: string, relativePath: string): string {
-    return join(this.wsPath(workspaceId), relativePath);
+    return resolvePathWithoutSymlinks(this.basePath, sanitizeId(workspaceId), relativePath);
   }
 
   async createWorkspaceDir(workspaceId: string): Promise<void> {
@@ -65,11 +66,7 @@ export class LocalStorage implements StorageBackend {
   async destroyWorkspace(workspaceId: string): Promise<void> {
     const p = this.wsPath(workspaceId);
     if (existsSync(p)) {
-      try {
-        await retryRm(p);
-      } catch (err) {
-        logger.warn(`Failed to destroy workspace: ${p}`, err);
-      }
+      await retryRm(p);
     }
   }
 
@@ -106,7 +103,11 @@ export class LocalStorage implements StorageBackend {
 
   async getEntrySize(workspaceId: string, relativePath: string): Promise<number> {
     try {
-      return statSync(this.resolvePath(workspaceId, relativePath)).size;
+      const path = this.resolvePath(workspaceId, relativePath);
+      if (lstatSync(path).isSymbolicLink()) {
+        throw new Error('Unsafe path: symbolic links are not allowed in managed workspace paths');
+      }
+      return statSync(path).size;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0;
       throw err;

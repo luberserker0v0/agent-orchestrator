@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, statSync, cpSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 vi.mock('node:fs', () => ({
   mkdirSync: vi.fn(),
@@ -32,6 +32,17 @@ vi.mock('../utils/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+vi.mock('../storage/path-safety.js', () => ({
+  assertTreeHasNoSymlinks: vi.fn(),
+  resolveAllowedSource: vi.fn((source: string, roots: string[]) => {
+    const resolved = resolve(source);
+    if (!roots.some((root) => resolved === resolve(root) || resolved.startsWith(`${resolve(root)}${sep}`))) {
+      throw new Error('Source path not allowed');
+    }
+    return resolved;
+  }),
+}));
+
 import AdmZip from 'adm-zip';
 import { SkillService } from './skill-service.js';
 
@@ -60,6 +71,7 @@ describe('SkillService', () => {
 
     mockWorkspaceFactory = {
       resolveWorkspacePath: vi.fn().mockReturnValue(mockWsPath),
+      resolveWorkspaceEntryPath: vi.fn((_id: string, path: string) => join(mockWsPath, path)),
       assertQuota: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -91,7 +103,7 @@ describe('SkillService', () => {
       await skillService.uploadSkill(testId, 'my-skill', Buffer.from('zip data'));
 
       expect(AdmZip).toHaveBeenCalledWith(Buffer.from('zip data'));
-      expect(mockWorkspaceFactory.resolveWorkspacePath).toHaveBeenCalledWith(testId);
+      expect(mockWorkspaceFactory.resolveWorkspaceEntryPath).toHaveBeenCalledWith(testId, '.opencode/skills/my-skill');
 
       const destPath = join(mockWsPath, '.opencode', 'skills', 'my-skill');
       expect(mkdirSync).toHaveBeenCalledWith(destPath, { recursive: true });

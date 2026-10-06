@@ -233,6 +233,10 @@ class K8sPodHandle implements InstanceHandle {
     return this._exitCode;
   }
 
+  hasExited(): boolean {
+    return this.exited;
+  }
+
   async kill(): Promise<void> {
     await this.deleteIgnoringNotFound(() => this.api.deleteService(this.namespace, this.serviceName));
     await deletePodAndWait(this.api, this.namespace, this.podName);

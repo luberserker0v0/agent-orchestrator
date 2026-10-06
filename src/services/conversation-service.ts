@@ -62,6 +62,11 @@ export class ConversationService {
   async create(id?: string, agentType?: string): Promise<ConversationData> {
     const conversationId = id ?? this.generateId();
 
+    return this.runLifecycle(conversationId, () => this.createUnlocked(conversationId, agentType));
+  }
+
+  private async createUnlocked(conversationId: string, agentType?: string): Promise<ConversationData> {
+
     if (!isValidConversationId(conversationId)) {
       throw new AppError(
         400,
@@ -383,25 +388,28 @@ export class ConversationService {
         `Unable to record persistent-data deletion intent for ${id}: ${(err as Error).message}`,
       );
     }
-    this.sseBridge?.stop(id);
-    let runtimeStopped = false;
     try {
       await this.instanceManager.destroyInstance(id);
-      runtimeStopped = true;
     } catch (err) {
       logger.warn(`Failed to stop runtime for ${id}; persistent data remains delete-pending`, err);
+      throw new AppError(
+        500,
+        ErrorCodes.PERSISTENT_DATA_CLEANUP_PENDING,
+        `Unable to stop runtime for ${id}; persistent data was not removed`,
+      );
     }
-    if (runtimeStopped) {
-      await this.instanceManager.deletePersistentData?.(id, agentType).catch((err: unknown) => {
-        logger.warn(`Failed to remove persistent runtime data for ${id}:`, err);
-      });
-    }
+    this.sseBridge?.stop(id);
+    await this.instanceManager.deletePersistentData?.(id, agentType).catch((err: unknown) => {
+      logger.warn(`Failed to remove persistent runtime data for ${id}:`, err);
+    });
     logger.debug(`[${id}] delete: destroyInstance returned, attempting workspace cleanup`);
     try {
       await this.workspaceFactory.destroy(id);
       logger.info(`[${id}] delete: workspace cleanup completed`);
     } catch (wsErr) {
       logger.warn(`Failed to remove workspace for ${id}:`, wsErr);
+      this.conversationState.transition(id, 'error', { error: (wsErr as Error).message });
+      throw wsErr;
     }
     this.conversationState.transition(id, 'destroyed');
     this.conversationState.remove(id);
