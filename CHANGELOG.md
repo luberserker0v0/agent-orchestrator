@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package
 
 ### Fixed
+- test(kubernetes): allocate an isolated ephemeral port for runtime timeout coverage
 - test(kubernetes): complete expected-failure management checks and always clean up the isolated k3d environment
 - fix(kubernetes): allow adoption of compatible CRDs after Kubernetes adds defaulted discovery fields
 - chore(deps): update vulnerable transitive dependencies and enforce a moderate-or-higher audit gate in CI

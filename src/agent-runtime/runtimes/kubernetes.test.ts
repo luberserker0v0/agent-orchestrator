@@ -1,3 +1,4 @@
+import { createServer as createNetServer } from 'node:net';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PortPool } from '../../orchestrator/port-pool.js';
 import {
@@ -28,6 +29,23 @@ function makeHealthyFetch() {
 
 function createPortPool(start = 40000, end = 40050): PortPool {
   return new PortPool(start, end, false);
+}
+
+async function findAvailablePort(): Promise<number> {
+  const server = createNetServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+
+  const address = server.address();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+  if (!address || typeof address === 'string') {
+    throw new Error('Failed to allocate an ephemeral test port');
+  }
+  return address.port;
 }
 
 interface FakePods {
@@ -341,12 +359,13 @@ describe('KubernetesRuntime', () => {
   it('throws on Pod ready timeout and releases the port', async () => {
     const fake = createFakePods();
     fake.readImpl = async () => ({ phase: 'Pending', ready: false });
-    const pool = createPortPool(40000, 40000);
+    const port = await findAvailablePort();
+    const pool = createPortPool(port, port);
     const rt = new KubernetesRuntime(pool, { image: 'img', podReadyTimeoutMs: 50 }, fake.api);
     mockFetch.mockResolvedValue(makeHealthyFetch());
 
     await expect(rt.start('ct', '/tmp/ws', { username: 'u', password: 'p' }, HEALTH)).rejects.toThrow('not Ready in time');
-    expect(await pool.allocate()).toBe(40000);
+    expect(await pool.allocate()).toBe(port);
     expect(fake.createdPVCs).toHaveLength(0);
     expect(fake.deleted).toContain('pvc/ao-instances/conv-ct');
   });
