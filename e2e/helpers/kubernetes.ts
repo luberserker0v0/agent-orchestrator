@@ -144,10 +144,15 @@ export function assertKubernetesPrerequisites(): void {
     );
   }
   kubectl(['get', 'nodes'], 10_000);
-  const instancePhases = JSON.parse(kubectl([
-    'get', 'crd', 'opencodeinstances.agentorchestrator.io',
-    '-o', "jsonpath={.spec.versions[?(@.name=='v1alpha1')].schema.openAPIV3Schema.properties.status.properties.phase.enum}",
-  ], 10_000)) as string[];
+  const instanceCrd = kubectlJson<{
+    spec?: { versions?: Array<{
+      name?: string;
+      schema?: { openAPIV3Schema?: { properties?: { status?: { properties?: { phase?: { enum?: string[] } } } } } };
+    }> };
+  }>(['get', 'crd', 'opencodeinstances.agentorchestrator.io'], 10_000);
+  const instancePhases = instanceCrd.spec?.versions
+    ?.find(version => version.name === 'v1alpha1')
+    ?.schema?.openAPIV3Schema?.properties?.status?.properties?.phase?.enum ?? [];
   if (!instancePhases.includes('Stopped')) {
     throw new Error('Installed OpencodeInstance CRD is stale: status.phase must include Stopped');
   }

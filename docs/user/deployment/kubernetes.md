@@ -43,6 +43,25 @@ k8s/
 
 ## Install Order
 
+The recommended installation path is the packaged `aor` manager. Copy the
+Kubernetes example, replace its example API key, render for review, and apply:
+
+```bash
+cp config/agentorchestrator.k8s.example.json ao-k8s.json
+aor k8s render --config-file ao-k8s.json > rendered.yaml
+aor k8s install --config-file ao-k8s.json
+aor k8s status
+aor k8s doctor
+```
+
+The CLI applies only resources carrying its installation identity. It refuses
+foreign same-name resources and requires `aor k8s adopt --confirm` for compatible
+legacy manifests. Normal uninstall preserves Secrets, CRDs, custom resources,
+and PVCs; data deletion additionally requires `--purge-data --confirm` and fresh
+ownership/Pod checks. See the [`aor` command reference](../cli.md).
+
+The raw manifests remain available for GitOps and manual deployment:
+
 ```bash
 kubectl apply -f k8s/namespace.yaml -f k8s/crd/
 # Edit the shared Secret first (API keys and cleanup.ownerId), then:
@@ -245,7 +264,9 @@ host-path PVs backed by that volume let the suite verify that one RWO PVC retain
 the workspace and session data while its instance Pod moves between workers.
 The suite covers successful migration and session resume, route/history/event
 convergence with no duplicate migration, failed placement on a synthetic node,
-PVC retention and retry quarantine, and manual recovery on a healthy worker.
+PVC retention and retry quarantine, manual recovery on a healthy worker, CLI
+adoption/install/status/doctor/upgrade, foreign-resource rejection, normal
+uninstall/reinstall data preservation, and ownership-guarded purge.
 
 Resources are removed after the run. Set `K3D_E2E_REPEAT` to a positive integer
 for a repeated soak run, or set `K3D_E2E_KEEP=1` to keep the generated cluster,

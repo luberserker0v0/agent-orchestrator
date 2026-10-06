@@ -36,22 +36,7 @@ interface RunOptions {
   label?: string;
   timeoutMs?: number;
   tolerateFailure?: boolean;
-}
-
-interface DeploymentManifest {
-  spec: {
-    replicas?: number;
-    template: {
-      spec: {
-        containers: Array<{
-          name: string;
-          image: string;
-          imagePullPolicy?: string;
-          args?: string[];
-        }>;
-      };
-    };
-  };
+  expectFailure?: boolean;
 }
 
 interface NodeList {
@@ -113,6 +98,14 @@ async function run(command: string, args: string[], options: RunOptions = {}): P
     child.once('exit', (code, signal) => {
       clearTimeout(timeout);
       activeChildren.delete(child);
+      if (options.expectFailure) {
+        if (code === 0) {
+          reject(new Error(`${label} unexpectedly succeeded`));
+          return;
+        }
+        resolve((stderr || stdout).trim());
+        return;
+      }
       if (code === 0 || options.tolerateFailure) {
         resolvePromise(stdout.trim());
         return;
@@ -141,21 +134,32 @@ async function applyFile(relativePath: string): Promise<void> {
   });
 }
 
-async function applyObject(body: object, label: string): Promise<void> {
-  await kubectl(['apply', '-f', '-'], {
-    input: JSON.stringify(body),
-    label,
-  });
+async function aorK8s(args: string[], label: string): Promise<string> {
+  if (!kubeconfigPath) throw new Error('isolated kubeconfig has not been created');
+  return run(process.execPath, [
+    resolve(repoRoot, 'bin/aor.js'),
+    '--json',
+    'k8s',
+    '--kubeconfig', kubeconfigPath,
+    '--context', contextName,
+    '--namespace', namespace,
+    '--installation', 'k3d-e2e',
+    ...args,
+  ], { capture: true, label, timeoutMs: 300_000 });
 }
 
-async function deploymentFrom(relativePath: string): Promise<DeploymentManifest> {
-  const json = await kubectl([
-    'create', '--dry-run=client', '-f', resolve(repoRoot, relativePath), '-o', 'json',
-  ], {
-    capture: true,
-    label: `render ${relativePath}`,
-  });
-  return JSON.parse(json) as DeploymentManifest;
+async function aorK8sMustFail(args: string[], label: string): Promise<string> {
+  if (!kubeconfigPath) throw new Error('isolated kubeconfig has not been created');
+  return run(process.execPath, [
+    resolve(repoRoot, 'bin/aor.js'),
+    '--json',
+    'k8s',
+    '--kubeconfig', kubeconfigPath,
+    '--context', contextName,
+    '--namespace', namespace,
+    '--installation', 'k3d-e2e',
+    ...args,
+  ], { capture: true, expectFailure: true, label, timeoutMs: 300_000 });
 }
 
 async function verifySharedMount(nodeName: string): Promise<void> {
@@ -258,7 +262,7 @@ async function cleanup(): Promise<void> {
   return cleanupPromise;
 }
 
-async function prepareCluster(): Promise<{ sourceNode: string; targetNode: string; apiKey: string }> {
+async function prepareCluster(): Promise<{ sourceNode: string; targetNode: string; apiKey: string; configPath: string }> {
   tempDirectory = await mkdtemp(join(tmpdir(), 'ao-k3d-e2e-'));
   kubeconfigPath = join(tempDirectory, 'kubeconfig.yaml');
 
@@ -434,52 +438,90 @@ async function prepareCluster(): Promise<{ sourceNode: string; targetNode: strin
     label: 'wait for custom resource definitions',
   });
   await kubectl([
-    '-n', namespace, 'create', 'secret', 'generic', 'agent-orchestrator-config',
-    `--from-file=agentorchestrator.json=${configPath}`,
-  ], {
-    label: 'create generated orchestrator config Secret',
-  });
+    '-n', namespace, 'create', 'secret', 'generic', 'operator-api-key',
+    `--from-literal=key=${apiKey}`,
+  ], { label: 'create external operator API key Secret' });
 
-  const orchestratorDeployment = await deploymentFrom('k8s/orchestrator/deployment.yaml');
-  const orchestratorContainer = orchestratorDeployment.spec.template.spec.containers[0];
-  orchestratorContainer.image = orchestratorImage;
-  orchestratorContainer.imagePullPolicy = 'IfNotPresent';
-  await applyObject(orchestratorDeployment, 'apply generated orchestrator Deployment');
-
-  const operatorDeployment = await deploymentFrom('k8s/operator/deployment.yaml');
-  operatorDeployment.spec.replicas = 1;
-  const operatorContainer = operatorDeployment.spec.template.spec.containers[0];
-  operatorContainer.image = orchestratorImage;
-  operatorContainer.imagePullPolicy = 'IfNotPresent';
-  operatorContainer.args = [
-    '--config', '/app/config/agentorchestrator.json',
-    'operator',
-    '--namespace', namespace,
-    '--interval-ms', String(reconcileIntervalMs),
-    '--execute',
-    '--api-key', apiKey,
-    '--migrate-timeout-ms', '300000',
-    '--refill-window-ms', '86400000',
-    '--pvc-storage', '64Mi',
+  const installationOptions = [
+    '--config-file', configPath,
+    '--image', orchestratorImage,
+    '--workspace-size', '20Gi',
+    '--conversation-storage', '64Mi',
+    '--operator-execute',
+    '--operator-api-key-secret', 'operator-api-key:key',
   ];
-  await applyObject(operatorDeployment, 'apply generated execute-mode placement controller Deployment');
+  await aorK8s([...installationOptions, 'adopt', '--confirm'], 'adopt compatible legacy Kubernetes resources');
+  await aorK8s([...installationOptions, 'install', '--rollout-timeout', '210000'], 'install through aor Kubernetes manager');
+  await aorK8s(['status'], 'verify aor Kubernetes status');
+  await aorK8s(['doctor'], 'verify aor Kubernetes diagnostics');
+  await aorK8s(['upgrade', '--rollout-timeout', '210000'], 'upgrade from recorded installation inventory');
+  return { sourceNode, targetNode, apiKey, configPath };
+}
 
-  await kubectl(['-n', namespace, 'rollout', 'status', 'deployment/agent-orchestrator', '--timeout=180s'], {
-    label: 'wait for orchestrator rollout',
-    timeoutMs: 210_000,
+async function verifyManagementSafety(configPath: string): Promise<void> {
+  const installationOptions = [
+    '--config-file', configPath,
+    '--image', orchestratorImage,
+    '--workspace-size', '20Gi',
+    '--conversation-storage', '64Mi',
+    '--operator-execute',
+    '--operator-api-key-secret', 'operator-api-key:key',
+  ];
+  await aorK8s([...installationOptions, 'adopt', '--confirm'], 'restore ownership metadata changed by lifecycle fault injection');
+  await kubectl([
+    '-n', namespace, 'label', 'service', 'agent-orchestrator',
+    'app.kubernetes.io/managed-by-', 'agentorchestrator.io/installation-id-',
+  ], { label: 'make a managed Service foreign for conflict testing' });
+  const conflict = await aorK8sMustFail(['upgrade'], 'reject a same-name foreign resource');
+  if (!conflict.includes('Refusing to overwrite foreign resource')) {
+    throw new Error(`foreign resource rejection returned an unexpected error: ${conflict}`);
+  }
+  await kubectl([
+    '-n', namespace, 'label', 'service', 'agent-orchestrator', '--overwrite',
+    'app.kubernetes.io/managed-by=aor', 'agentorchestrator.io/installation-id=k3d-e2e',
+  ], { label: 'restore owned Service labels' });
+
+  const workspaceUid = await kubectl([
+    '-n', namespace, 'get', 'pvc', 'ao-workspace', '-o', 'jsonpath={.metadata.uid}',
+  ], { capture: true, label: 'record workspace PVC UID' });
+  await aorK8s(['uninstall', '--confirm'], 'normal uninstall preserves installation data');
+  await kubectl([
+    '-n', namespace, 'wait', '--for=delete', '--timeout=120s',
+    'deployment/agent-orchestrator', 'deployment/placement-controller',
+  ], { label: 'wait for normal uninstall workloads to terminate' });
+  await kubectl(['-n', namespace, 'get', 'pvc', 'ao-workspace'], { label: 'verify workspace PVC preservation' });
+  await kubectl(['-n', namespace, 'get', 'secret', 'agent-orchestrator-config'], { label: 'verify owned config preservation' });
+
+  await aorK8s([
+    ...installationOptions,
+    'install', '--rollout-timeout', '210000',
+  ], 'reinstall from preserved data');
+  const resumedUid = await kubectl([
+    '-n', namespace, 'get', 'pvc', 'ao-workspace', '-o', 'jsonpath={.metadata.uid}',
+  ], { capture: true, label: 'verify workspace PVC identity after reinstall' });
+  if (resumedUid !== workspaceUid) throw new Error('normal uninstall/reinstall replaced the workspace PVC');
+
+  await aorK8s(['uninstall', '--confirm'], 'stop workloads before confirmed purge');
+  await kubectl([
+    '-n', namespace, 'wait', '--for=delete', '--timeout=120s',
+    'deployment/agent-orchestrator', 'deployment/placement-controller',
+  ], { label: 'wait for workloads before purge' });
+  await aorK8s(['uninstall', '--purge-data', '--confirm'], 'purge owned Kubernetes installation data');
+  const ownedData = await kubectl([
+    '-n', namespace, 'get', 'pvc/ao-workspace', 'secret/agent-orchestrator-config', 'configmap/agent-orchestrator-installation',
+    '--ignore-not-found=true', '-o', 'name',
+  ], { capture: true, label: 'verify owned installation data was purged' });
+  if (ownedData !== '') throw new Error(`owned data remained after purge: ${ownedData}`);
+  await kubectl(['-n', namespace, 'get', 'secret', 'operator-api-key'], {
+    label: 'verify external operator Secret preservation',
   });
-  await kubectl(['-n', namespace, 'rollout', 'status', 'deployment/placement-controller', '--timeout=180s'], {
-    label: 'wait for placement controller rollout',
-    timeoutMs: 210_000,
-  });
-  return { sourceNode, targetNode, apiKey };
 }
 
 async function main(): Promise<void> {
   const repeat = parseRepeat();
   let failed = false;
   try {
-    const { sourceNode, targetNode, apiKey } = await prepareCluster();
+    const { sourceNode, targetNode, apiKey, configPath } = await prepareCluster();
     const testEnvironment: NodeJS.ProcessEnv = {
       ...clusterEnv(),
       K8S_E2E_CONTEXT: contextName,
@@ -503,6 +545,7 @@ async function main(): Promise<void> {
         timeoutMs: 1_500_000,
       });
     }
+    await verifyManagementSafety(configPath);
   } catch (err) {
     failed = true;
     process.stderr.write(`[k3d-e2e] ${(err as Error).stack ?? (err as Error).message}\n`);

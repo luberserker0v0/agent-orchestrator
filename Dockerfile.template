@@ -38,6 +38,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/bin ./bin
 COPY --from=builder /app/config ./config
 COPY --from=builder /app/dashboard ./dashboard
+COPY --from=builder /app/k8s ./k8s
 
 RUN mkdir -p /data/workspace /data/logs && chown -R nodejs:nodejs /data/workspace /data/logs
 ENV AGENTORCHESTRATOR_WORKSPACE_BASEPATH=/data/workspace

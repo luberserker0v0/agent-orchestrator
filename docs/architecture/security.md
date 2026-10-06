@@ -178,3 +178,17 @@ The HTTP server adds the following security headers:
 8. **WebSocket connection limits** — One connection per conversation; new connections replace existing ones
 9. **Owned cleanup only** — Orphan reaping requires a stable owner ID, two observations, a full grace period, and a final ownership/liveness check
 10. **Constrained file logging** — Files use restrictive permissions; filesystem roots, symlink destinations, and unrelated filenames are never pruned
+
+## CLI Credential and Kubernetes Safety
+
+- Operational CLI authentication uses `--api-key-file` or `AOR_API_KEY`; keys are
+  sent only as bearer headers and are redacted from errors and output.
+- `aor k8s` never records configuration contents, API keys, or Secret data in
+  installation inventory or command summaries.
+- External configuration Secrets are read only for validation and ownership
+  metadata; they are never adopted, changed, rendered, or deleted.
+- Kubernetes mutation requires the matching installation labels. Same-name
+  foreign resources fail closed, and legacy adoption requires `--confirm`.
+- Normal uninstall preserves all persistent state. Purge requires a separate
+  flag, confirmation, current ownership checks, Pod-reference checks, and UID
+  preconditions.
