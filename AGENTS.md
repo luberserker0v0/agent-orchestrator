@@ -410,7 +410,8 @@ docker run -p 8080:8080 agent-orchestrator
 ### GitHub Actions (`.github/workflows/ci.yml`)
 - Triggered on `push`/`PR` to `main`/`master`
 - **Node.js**: 24.x
-- **Steps**: `npm ci` → `npm run preflight` (lint + test + build) → `npm run test:coverage` → upload coverage artifact
+- **Main job**: `npm ci` → `npm run preflight` → dependency audit → coverage → upload coverage artifact
+- **Docker E2E job**: pull pinned OpenCode `1.17.8` image → `npm run test:e2e:docker`
 
 - **Dependabot**: Quarterly updates for npm (grouped dev dependencies, including `@vitest/*` scoped packages) and GitHub Actions (`.github/dependabot.yml`)
 

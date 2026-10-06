@@ -190,7 +190,7 @@ docker exec -it <container-name> sh
 
 ## CI Behavior
 
-- GitHub Actions currently runs unit/preflight and coverage, not E2E suites
+- GitHub Actions runs the Docker E2E suite with `ghcr.io/anomalyco/opencode:1.17.8`
 - Direct runtime tests are skipped unless `E2E_RUNTIME=direct` is set
 - Runtime-specific tests use `describe.skipIf` to skip when unavailable
 - Kubernetes tests are opt-in and never run from the Docker E2E config

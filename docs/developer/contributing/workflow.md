@@ -102,7 +102,9 @@ Brief description of what changed and why.
 GitHub Actions runs:
 - `npm ci`
 - `npm run preflight` (lint + test + build)
+- `npm run audit:dependencies`
 - `npm run test:coverage`
+- `npm run test:e2e:docker` in a separate job with a pinned OpenCode image
 
 All checks must pass before merging.
 
