@@ -8,13 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- test(ci): run a pinned, credential-free Docker lifecycle suite on every main push and pull request
 - feat(cli): add operational conversation, session, message, cleanup, status, metrics, and config commands
 - feat(kubernetes): add owned manifest rendering, install, upgrade, status, doctor, adoption, and guarded uninstall commands
 - docs(setup): add linked end-to-end Direct, Docker, and Kubernetes setup tutorials with a Mermaid architecture diagram
 
 ### Changed
+- refactor(core): decompose HTTP, WebSocket, startup, validation, cleanup, and placement responsibilities with a project-wide 100-line production-function limit
+- test(e2e): pin the default Docker OpenCode image so local and CI runs use the same runtime version
 - refactor(cli): replace permissive argument parsing with a strict nested Commander command tree while preserving `aor` server startup
 - build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package
+
+### Fixed
+- fix(docker): support an explicit container user and home so Linux bind-mounted workspaces remain deletable
+- test(ci): make the Docker lifecycle gate deterministic without external model credentials
+- test(kubernetes): allocate an isolated ephemeral port for runtime timeout coverage
+- test(kubernetes): complete expected-failure management checks and always clean up the isolated k3d environment
+- fix(kubernetes): allow adoption of compatible CRDs after Kubernetes adds defaulted discovery fields
+- chore(deps): update vulnerable transitive dependencies and enforce a moderate-or-higher audit gate in CI
+- fix(openapi): document every registered REST operation and enforce route coverage in tests
+- fix(skills): stage whole skill trees before replacement and preserve the prior version when upload or import fails
+- fix(metrics): keep the active-workspace gauge non-negative across idempotent creation and process restarts
+- fix(http): drain aborted requests during shutdown and remove completed request waiters without leaking polling timers
+- fix(storage): replace managed file and role-configuration writes atomically, preserving file permissions and rolling back failed role mutations
+- fix(storage): reject symlinked workspace paths and canonicalize approved copy sources before file, agent, or skill access
+- fix(orchestrator): serialize duplicate conversation creation and retain lifecycle state when runtime or workspace deletion is incomplete
+- fix(runtime): require observed process, container, or Pod termination before releasing instance state and ports
+- fix(workspace): charge only the replacement-size delta when updating agent files under a workspace quota
 
 ## [1.2.2] - 2026-10-05
 

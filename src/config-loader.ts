@@ -72,6 +72,10 @@ export interface DockerRuntimeConfig {
   instanceHost?: string;
   /** Docker network mode (e.g. `host`, `bridge`, or a custom network name). When `host`, port mapping is skipped. */
   networkMode?: string;
+  /** Optional container user or uid[:gid]. Use the host uid:gid for writable bind mounts on Linux. */
+  containerUser?: string;
+  /** HOME inside the container. Defaults to `/tmp/agentorchestrator-home` when containerUser is set. */
+  containerHome?: string;
   /** Per-conversation opencode data-dir (session persistence). Omit for ephemeral container storage. */
   sessionStorage?: SessionStorageConfig;
   /** Optional Docker-engine log rotation settings for the spawned container. */
@@ -334,9 +338,41 @@ function applyEnvOverrides(config: Record<string, unknown>, prefix = 'AGENTORCHE
 }
 
 export function validateConfig(config: AgentOrchestratorConfig): void {
-  const { orchestrator, server, websocket } = config;
+  validateServerConfig(config);
+  validateWebsocketConfig(config);
+  validateOrchestratorBasics(config);
+  validateRuntimeEntries(config);
+  validateHealthAndSse(config);
+  validateWorkspaceConfig(config);
+  validateClusterConfig(config);
+  validateMaintenanceConfig(config);
+}
 
-  // Server validation
+/** Validate optional Docker process identity settings. */
+export function validateDockerIdentityConfig(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return ['Docker runtime config must be an object'];
+  }
+  const config = value as Record<string, unknown>;
+  const errors: string[] = [];
+  if (config.containerUser !== undefined && (
+    typeof config.containerUser !== 'string' ||
+    !/^[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?$/.test(config.containerUser)
+  )) {
+    errors.push('"containerUser" must be a Docker user or uid[:gid]');
+  }
+  if (config.containerHome !== undefined && (
+    typeof config.containerHome !== 'string' ||
+    !config.containerHome.startsWith('/') ||
+    config.containerHome.includes('\0')
+  )) {
+    errors.push('"containerHome" must be an absolute container path');
+  }
+  return errors;
+}
+
+function validateServerConfig(config: AgentOrchestratorConfig): void {
+  const { server } = config;
   if (typeof server.port !== 'number' || server.port < 0 || !Number.isInteger(server.port)) {
     throw new Error(`Config validation failed: server.port must be a non-negative integer, got ${server.port}`);
   }
@@ -392,7 +428,6 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     }
   }
 
-  // RBAC validation
   if (server.rbac !== undefined) {
     if (typeof server.rbac !== 'object' || server.rbac === null) {
       throw new Error('Config validation failed: server.rbac must be an object');
@@ -412,16 +447,20 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       }
     }
   }
+}
 
-  // WebSocket validation
+function validateWebsocketConfig(config: AgentOrchestratorConfig): void {
+  const { websocket } = config;
   if (typeof websocket.heartbeatIntervalMs !== 'number' || websocket.heartbeatIntervalMs <= 0) {
     throw new Error(`Config validation failed: websocket.heartbeatIntervalMs must be positive, got ${websocket.heartbeatIntervalMs}`);
   }
   if (typeof websocket.idleTimeoutMs !== 'number' || websocket.idleTimeoutMs <= 0) {
     throw new Error(`Config validation failed: websocket.idleTimeoutMs must be positive, got ${websocket.idleTimeoutMs}`);
   }
+}
 
-  // Check for deprecated orchestrator fields
+function validateOrchestratorBasics(config: AgentOrchestratorConfig): void {
+  const { orchestrator } = config;
   const orchestratorRaw = orchestrator as unknown as Record<string, unknown>;
   if ('runtime' in orchestratorRaw) {
     throw new Error(
@@ -442,7 +481,6 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     );
   }
 
-  // Orchestrator validation
   if (typeof orchestrator.maxInstances !== 'number' || !Number.isInteger(orchestrator.maxInstances) || orchestrator.maxInstances <= 0) {
     throw new Error(`Config validation failed: orchestrator.maxInstances must be a positive integer, got ${orchestrator.maxInstances}`);
   }
@@ -474,8 +512,10 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       );
     }
   }
+}
 
-  // Runtime entries validation
+function validateRuntimeEntries(config: AgentOrchestratorConfig): void {
+  const { orchestrator } = config;
   if (!Array.isArray(orchestrator.runtimes) || orchestrator.runtimes.length === 0) {
     throw new Error('Config validation failed: orchestrator.runtimes must be a non-empty array');
   }
@@ -504,8 +544,10 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   if (!defaultFound) {
     throw new Error(`Config validation failed: defaultAgentType "${orchestrator.defaultAgentType}" not found in runtimes array`);
   }
+}
 
-  // Health check validation
+function validateHealthAndSse(config: AgentOrchestratorConfig): void {
+  const { orchestrator } = config;
   if (typeof orchestrator.healthCheck.retries !== 'number' || !Number.isInteger(orchestrator.healthCheck.retries) || orchestrator.healthCheck.retries <= 0) {
     throw new Error(`Config validation failed: healthCheck.retries must be a positive integer, got ${orchestrator.healthCheck.retries}`);
   }
@@ -516,7 +558,6 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
     throw new Error(`Config validation failed: healthCheck.clientTimeoutMs must be a positive integer, got ${orchestrator.healthCheck.clientTimeoutMs}`);
   }
 
-  // SSE validation
   if (orchestrator.sse) {
     if (typeof orchestrator.sse.enabled !== 'boolean') {
       throw new Error(`Config validation failed: sse.enabled must be a boolean, got ${typeof orchestrator.sse.enabled}`);
@@ -531,8 +572,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       throw new Error(`Config validation failed: sse.filterHeartbeat must be a boolean, got ${typeof orchestrator.sse.filterHeartbeat}`);
     }
   }
+}
 
-  // Workspace validation
+function validateWorkspaceConfig(config: AgentOrchestratorConfig): void {
   if (!config.workspace.basePath || typeof config.workspace.basePath !== 'string') {
     throw new Error('Config validation failed: workspace.basePath must be a non-empty string');
   }
@@ -549,7 +591,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       throw new Error(`Config validation failed: workspace.storage.type must be "local", got ${config.workspace.storage.type}`);
     }
   }
+}
 
+function validateClusterConfig(config: AgentOrchestratorConfig): void {
   if (config.cluster !== undefined) {
     if (config.cluster.enabled !== undefined && typeof config.cluster.enabled !== 'boolean') {
       throw new Error(`Config validation failed: cluster.enabled must be a boolean, got ${config.cluster.enabled}`);
@@ -567,7 +611,9 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
       throw new Error('Config validation failed: cluster.advertiseBaseUrl must be a non-empty string');
     }
   }
+}
 
+function validateMaintenanceConfig(config: AgentOrchestratorConfig): void {
   const fileLogging = config.logging?.file;
   if (!fileLogging || typeof fileLogging !== 'object') {
     throw new Error('Config validation failed: logging.file must be an object');

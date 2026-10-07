@@ -13,6 +13,7 @@ import type { SessionStorageConfig } from '../../../src/config-loader.js';
 const dockerAvailable =
   spawnSync('docker', ['info'], { stdio: 'ignore' }).status === 0 &&
   spawnSync('docker', ['inspect', TEST_DOCKER_IMAGE], { stdio: 'ignore' }).status === 0;
+const modelAvailable = process.env.AO_TEST_MODEL_AVAILABLE !== 'false';
 
 function dockerPs(filter: string): string[] {
   const result = spawnSync('docker', [
@@ -131,7 +132,7 @@ describe.skipIf(!dockerAvailable)('DockerRuntime — container lifecycle (E2E)',
     expect(initialSessionId).toBeTruthy();
   });
 
-  it('sends message through container', async () => {
+  it.skipIf(!modelAvailable)('sends message through container', async () => {
     const res = await fetch(`${server.baseUrl}/api/conversations/${convId}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

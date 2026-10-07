@@ -24,6 +24,15 @@ import { PortPool } from '../../src/orchestrator/port-pool.js';
 import { LocalStorage } from '../../src/storage/local.js';
 import { defaultOrchestratorConfig, dockerOrchestratorConfig, TEST_DOCKER_IMAGE } from '../../src/test-fixtures/ao-configs.js';
 
+const FETCH_BLOCKED_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69,
+  77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119,
+  123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515,
+  526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990,
+  993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000,
+  6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
+
 export interface E2EServer {
   port: number;
   baseUrl: string;
@@ -60,10 +69,11 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
   }
 
   const baseConfig = runtime === 'docker' ? dockerOrchestratorConfig : defaultOrchestratorConfig;
-  const orchestratorConfig: OrchestratorConfig = {
+  const configuredOrchestrator: OrchestratorConfig = {
     ...baseConfig,
     ...orchestratorOverrides,
   };
+  const orchestratorConfig = withDockerHostIdentity(configuredOrchestrator);
 
   const storage = new LocalStorage(workspaceConfig.basePath);
   const workspaceFactory = new WorkspaceFactory(workspaceConfig, storage);
@@ -146,19 +156,55 @@ export async function startServer(orchestratorOverrides?: Partial<OrchestratorCo
     await instanceManager.cleanupOrphanContainers().catch(() => {});
   };
 
-  return new Promise((resolve, reject) => {
-    httpServer.server.listen(0, host, () => {
-      const addr = httpServer.server.address();
-      if (!addr || typeof addr !== 'object') {
-        reject(new Error('Failed to get server address'));
-        return;
-      }
-      const port = addr.port;
+  return listenOnFetchSafePort(
+    httpServer,
+    host,
+    (port) => {
       serverConfig.port = port;
-      resolve({ port, baseUrl: `http://${host}:${port}`, workspaceDir, cleanup, orchestratorConfig, crashInstance });
-    });
-    httpServer.server.on('error', (err) => {
-      reject(err);
-    });
+      return { port, baseUrl: `http://${host}:${port}`, workspaceDir, cleanup, orchestratorConfig, crashInstance };
+    },
+  );
+}
+
+function withDockerHostIdentity(config: OrchestratorConfig): OrchestratorConfig {
+  if (process.platform === 'win32' || !process.getuid || !process.getgid) return config;
+  const containerUser = `${process.getuid()}:${process.getgid()}`;
+  return {
+    ...config,
+    runtimes: config.runtimes.map((entry) => entry.type === 'docker'
+      ? {
+        ...entry,
+        config: {
+          ...entry.config,
+          containerUser,
+          containerHome: '/tmp/agentorchestrator-home',
+        },
+      }
+      : entry),
+  };
+}
+
+function listenOnFetchSafePort(
+  httpServer: HttpServer,
+  host: string,
+  createResult: (port: number) => E2EServer,
+): Promise<E2EServer> {
+  return new Promise((resolve, reject) => {
+    httpServer.server.once('error', reject);
+    const listen = () => {
+      httpServer.server.listen(0, host, () => {
+        const address = httpServer.server.address();
+        if (!address || typeof address !== 'object') {
+          reject(new Error('Failed to get server address'));
+          return;
+        }
+        if (FETCH_BLOCKED_PORTS.has(address.port)) {
+          httpServer.server.close(listen);
+          return;
+        }
+        resolve(createResult(address.port));
+      });
+    };
+    listen();
   });
 }

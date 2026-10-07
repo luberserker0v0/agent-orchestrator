@@ -26,6 +26,9 @@ jobs:
       - name: Run preflight (lint + test + build)
         run: npm run preflight
 
+      - name: Audit dependencies
+        run: npm run audit:dependencies
+
       - name: Run tests with coverage
         run: npm run test:coverage
 
@@ -35,4 +38,29 @@ jobs:
         with:
           name: coverage
           path: coverage/
+
+  docker-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AO_TEST_DOCKER_IMAGE: ghcr.io/anomalyco/opencode:1.17.8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pull pinned OpenCode test image
+        run: docker pull "$AO_TEST_DOCKER_IMAGE"
+
+      - name: Run credential-free Docker lifecycle tests
+        run: npm run test:e2e:docker:ci
 

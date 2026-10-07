@@ -255,6 +255,48 @@ describe('DockerRuntime', () => {
       ]));
     });
 
+    it('runs with an explicit container identity and writable home', async () => {
+      const rt = new DockerRuntime(createPortPool(), {
+        image: 'img',
+        containerUser: '1000:1000',
+      });
+      (spawn as any).mockReturnValue(createMockProc({ exitCode: 0 }));
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.start(
+        'conv-user', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      const dockerArgs = (spawn as any).mock.calls[0][1] as string[];
+      expect(dockerArgs).toEqual(expect.arrayContaining([
+        '--user', '1000:1000',
+        '-e', 'HOME=/tmp/agentorchestrator-home',
+      ]));
+    });
+
+    it('honors an explicit container home without changing the user', async () => {
+      const rt = new DockerRuntime(createPortPool(), {
+        image: 'img',
+        containerHome: '/workspace/.home',
+      });
+      (spawn as any).mockReturnValue(createMockProc({ exitCode: 0 }));
+      mockFetch.mockResolvedValue(makeHealthyFetch());
+
+      await rt.start(
+        'conv-home', '/tmp/ws',
+        { username: 'u', password: 'p' },
+        { retries: 1, intervalMs: 1, clientTimeoutMs: 5000 },
+      );
+
+      const dockerArgs = (spawn as any).mock.calls[0][1] as string[];
+      expect(dockerArgs).toEqual(expect.arrayContaining([
+        '-e', 'HOME=/workspace/.home',
+      ]));
+      expect(dockerArgs).not.toContain('--user');
+    });
+
     it('releases port when health check fails', async () => {
       const pool = createPortPool(30000, 30000);
       const rt = new DockerRuntime(pool, { image: 'img' });

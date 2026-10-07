@@ -10,13 +10,15 @@ vi.mock('../utils/logger.js', () => ({
 
 function createMockHandle(overrides: Partial<InstanceHandle> & { exitCode?: number | null } = {}): InstanceHandle & { _fireExit: (code: number | null) => void } {
   const exitCallbacks: Array<(code: number | null) => void> = [];
+  let exited = overrides.exitCode !== undefined && overrides.exitCode !== null;
   return {
     pid: 12345,
     exitCode: overrides.exitCode ?? null,
-    kill: vi.fn().mockResolvedValue(undefined),
-    waitForExit: vi.fn().mockResolvedValue(undefined),
+    hasExited: overrides.hasExited ?? vi.fn(() => exited),
+    kill: overrides.kill ?? vi.fn(async () => { exited = true; }),
+    waitForExit: overrides.waitForExit ?? vi.fn().mockResolvedValue(undefined),
     onExit: vi.fn((cb: (code: number | null) => void) => { exitCallbacks.push(cb); }),
-    _fireExit: (code: number | null) => { exitCallbacks.forEach(cb => cb(code)); },
+    _fireExit: (code: number | null) => { exited = true; exitCallbacks.forEach(cb => cb(code)); },
   };
 }
 
@@ -139,6 +141,42 @@ describe('RuntimeManager', () => {
       await expect(runtimeManager.destroyInstance('conv-killfail')).rejects.toThrow('refusing destructive cleanup');
       expect(handle.kill).toHaveBeenCalledTimes(2);
       expect(runtimeManager.has('conv-killfail')).toBe(true);
+    });
+
+    it('retains the instance when signals succeed but exit is never observed', async () => {
+      const handle = createMockHandle({
+        hasExited: vi.fn().mockReturnValue(false),
+        kill: vi.fn().mockResolvedValue(undefined),
+        waitForExit: vi.fn().mockResolvedValue(undefined),
+      });
+      (mockRuntime.start as ReturnType<typeof vi.fn>).mockResolvedValue({ client: mockClient, port: 40012, handle });
+      await runtimeManager.start('conv-survived', '/workspace', { username: 'u', password: 'p' }, { retries: 1, intervalMs: 100, clientTimeoutMs: 500 });
+
+      await expect(runtimeManager.destroyInstance('conv-survived')).rejects.toThrow('refusing destructive cleanup');
+      expect(handle.kill).toHaveBeenCalledTimes(2);
+      expect(runtimeManager.has('conv-survived')).toBe(true);
+    });
+
+    it('shares one termination attempt across concurrent destroy calls', async () => {
+      let releaseExit!: () => void;
+      let exited = false;
+      const exitGate = new Promise<void>((resolve) => { releaseExit = resolve; });
+      const handle = createMockHandle({
+        hasExited: vi.fn(() => exited),
+        kill: vi.fn().mockResolvedValue(undefined),
+        waitForExit: vi.fn(async () => { await exitGate; exited = true; }),
+      });
+      (mockRuntime.start as ReturnType<typeof vi.fn>).mockResolvedValue({ client: mockClient, port: 40013, handle });
+      await runtimeManager.start('conv-concurrent-destroy', '/workspace', { username: 'u', password: 'p' }, { retries: 1, intervalMs: 100, clientTimeoutMs: 500 });
+
+      const first = runtimeManager.destroyInstance('conv-concurrent-destroy');
+      const second = runtimeManager.destroyInstance('conv-concurrent-destroy');
+      expect(handle.kill).toHaveBeenCalledTimes(1);
+      releaseExit();
+      await Promise.all([first, second]);
+
+      expect(handle.kill).toHaveBeenCalledTimes(1);
+      expect(runtimeManager.has('conv-concurrent-destroy')).toBe(false);
     });
   });
 

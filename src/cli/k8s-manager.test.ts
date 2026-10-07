@@ -126,6 +126,61 @@ describe('K8sInstallationManager', () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
+  it('adopts a compatible CRD with Kubernetes-defaulted name fields', async () => {
+    const desired = {
+      apiVersion: 'apiextensions.k8s.io/v1',
+      kind: 'CustomResourceDefinition',
+      metadata: { name: 'examples.test.io', labels },
+      spec: {
+        group: 'test.io',
+        scope: 'Namespaced',
+        names: { plural: 'examples', singular: 'example', kind: 'Example', shortNames: ['ex'] },
+        versions: [{ name: 'v1', served: true, storage: true }],
+      },
+    } as KubernetesObject;
+    const current = structuredClone(desired) as KubernetesObject & { spec: { names: Record<string, unknown> } };
+    current.metadata = { name: 'examples.test.io' };
+    current.spec.names.listKind = 'ExampleList';
+    current.spec.names.categories = ['all'];
+    const read = vi.fn().mockResolvedValue(current);
+    const patch = vi.fn().mockResolvedValue({});
+    const rendered: RenderedInstallation = {
+      resources: [desired], yaml: '', inventory: resource('ConfigMap', 'agent-orchestrator-installation', 'ao-test'),
+      configSecretName: 'agent-orchestrator-config',
+    };
+
+    await expect(manager({ read, patch }).adopt(rendered)).resolves.toMatchObject({
+      adopted: ['apiextensions.k8s.io/v1:CustomResourceDefinition:examples.test.io'],
+    });
+    expect(patch).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to adopt a CRD with a different resource kind', async () => {
+    const desired = {
+      apiVersion: 'apiextensions.k8s.io/v1',
+      kind: 'CustomResourceDefinition',
+      metadata: { name: 'examples.test.io', labels },
+      spec: {
+        group: 'test.io',
+        scope: 'Namespaced',
+        names: { plural: 'examples', singular: 'example', kind: 'Example' },
+        versions: [{ name: 'v1', served: true, storage: true }],
+      },
+    } as KubernetesObject;
+    const current = structuredClone(desired) as KubernetesObject & { spec: { names: Record<string, unknown> } };
+    current.metadata = { name: 'examples.test.io' };
+    current.spec.names.kind = 'ForeignExample';
+    const read = vi.fn().mockResolvedValue(current);
+    const patch = vi.fn();
+    const rendered: RenderedInstallation = {
+      resources: [desired], yaml: '', inventory: resource('ConfigMap', 'agent-orchestrator-installation', 'ao-test'),
+      configSecretName: 'agent-orchestrator-config',
+    };
+
+    await expect(manager({ read, patch }).adopt(rendered)).rejects.toThrow(/incompatible API identity/);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
   it('normal uninstall deletes control-plane resources and preserves data', async () => {
     const inventory = {
       ...resource('ConfigMap', 'agent-orchestrator-installation', 'ao-test'),

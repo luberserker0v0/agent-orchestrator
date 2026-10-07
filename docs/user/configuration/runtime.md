@@ -41,6 +41,8 @@ Spawns OpenCode in a Docker container.
     "image": "ghcr.io/anomalyco/opencode:1.17.8",
     "instanceHost": "127.0.0.1",
     "networkMode": "host",
+    "containerUser": "1000:1000",
+    "containerHome": "/tmp/agentorchestrator-home",
     "sessionStorage": { "sharedRoot": "./sessions", "mode": "xdg" },
     "logging": { "driver": "local", "maxSize": "10m", "maxFiles": 3 }
   }
@@ -52,6 +54,8 @@ Spawns OpenCode in a Docker container.
 | `image` | string | Yes | — | Docker image name (e.g., `ghcr.io/anomalyco/opencode:1.17.8`). |
 | `instanceHost` | string | No | `'127.0.0.1'` | Hostname for reaching the instance. |
 | `networkMode` | string | No | — | Docker network mode. |
+| `containerUser` | string | No | Image default | Docker user or `uid:gid`. On Linux, match the AO host user when bind-mounted workspaces must remain host-writable. |
+| `containerHome` | string | No | `/tmp/agentorchestrator-home` with `containerUser` | Absolute writable HOME inside the container. |
 | `sessionStorage` | object | No | — | Managed per-conversation storage mounted in the container. Required for Docker persistent-data cleanup. |
 | `logging.driver` | `local` or `json-file` | No | Docker default | Engine log driver for spawned OpenCode containers. |
 | `logging.maxSize` | string | No | — | Per-file Docker log size, such as `10m`. |
@@ -61,6 +65,12 @@ Spawns OpenCode in a Docker container.
 
 `logging` above limits container stdout/stderr and is independent from AO's own
 rotating JSONL file logs. See [Logging and Cleanup Policy](cleanup.md).
+
+When AO and Docker run on the same Linux host, set `containerUser` to the uid
+and gid of the AO process (for example, `1000:1000`). This prevents the OpenCode
+container from leaving root-owned files that AO cannot remove during explicit
+conversation deletion. The configured `containerHome` must be writable by that
+identity; the default under `/tmp` works with the bundled OpenCode image.
 
 ## Network Modes
 

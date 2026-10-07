@@ -62,7 +62,8 @@ Spawns OpenCode in a Docker container.
   "config": {
     "image": "ghcr.io/anomalyco/opencode:1.17.8",
     "instanceHost": "127.0.0.1",
-    "networkMode": "host"
+    "networkMode": "host",
+    "containerUser": "1000:1000"
   }
 }
 ```
@@ -72,6 +73,8 @@ Spawns OpenCode in a Docker container.
 | `image` | string | Yes | Docker image name. |
 | `instanceHost` | string | No | Hostname for reaching the instance. Default: `127.0.0.1`. |
 | `networkMode` | string | No | Docker network mode (`host`, `bridge`, or custom). When `host`, port mapping is skipped. |
+| `containerUser` | string | No | Docker user or `uid:gid`; matching the AO uid:gid keeps Linux bind mounts host-writable. |
+| `containerHome` | string | No | Absolute writable HOME in the container; defaults under `/tmp` when `containerUser` is set. |
 
 ### Default Runtimes
 

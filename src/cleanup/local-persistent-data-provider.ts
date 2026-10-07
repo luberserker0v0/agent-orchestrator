@@ -55,6 +55,13 @@ interface ScannedArtifact {
   errorMessage?: string;
 }
 
+interface RecordScan {
+  artifacts: ScannedArtifact[];
+  recordedIds: Set<string>;
+  recordedArtifactIds: Set<string>;
+  controlsSafe: boolean;
+}
+
 /** Periodic cleanup provider for Direct/Docker per-conversation session roots. */
 export class LocalPersistentDataProvider implements CleanupProvider {
   readonly target = 'persistentData' as const;
@@ -124,6 +131,23 @@ export class LocalPersistentDataProvider implements CleanupProvider {
       return [opaqueArtifact(root, 'unsafe-storage-root', 'error')];
     }
 
+    const records = await this.scanOwnershipRecords(root, layout, now);
+    if (!this.orphanCleanupEnabled) return records.artifacts;
+    const directories = await this.scanUntrackedDirectories(
+      root,
+      layout,
+      records.recordedIds,
+      records.controlsSafe,
+    );
+    const quarantine = this.scanQuarantine(root, layout, records.recordedArtifactIds);
+    return [...records.artifacts, ...directories, ...quarantine];
+  }
+
+  private async scanOwnershipRecords(
+    root: RootContext,
+    layout: ReturnType<typeof resolveSessionStorageLayout>,
+    now: number,
+  ): Promise<RecordScan> {
     const artifacts: ScannedArtifact[] = [];
     const recordedIds = new Set<string>();
     const recordedArtifactIds = new Set<string>();
@@ -169,12 +193,16 @@ export class LocalPersistentDataProvider implements CleanupProvider {
       if (!this.orphanCleanupEnabled && record.state !== 'delete-pending') continue;
       artifacts.push(await this.classifyRecord(root, record, now));
     }
+    return { artifacts, recordedIds, recordedArtifactIds, controlsSafe };
+  }
 
-    // With orphan discovery disabled, only durable explicit-delete records
-    // participate. Ordinary/unmarked directories remain completely outside
-    // the periodic policy.
-    if (!this.orphanCleanupEnabled) return artifacts;
-
+  private async scanUntrackedDirectories(
+    root: RootContext,
+    layout: ReturnType<typeof resolveSessionStorageLayout>,
+    recordedIds: Set<string>,
+    controlsSafe: boolean,
+  ): Promise<ScannedArtifact[]> {
+    const artifacts: ScannedArtifact[] = [];
     let entries: Dirent<string>[];
     try {
       entries = readdirSync(layout.root, { withFileTypes: true, encoding: 'utf8' });
@@ -229,21 +257,28 @@ export class LocalPersistentDataProvider implements CleanupProvider {
         lastModifiedAt: safeModifiedAt(sessionDir),
       }, protectedId || !this.orphanCleanupEnabled ? 'none' : 'enroll'));
     }
+    return artifacts;
+  }
 
-    if (existsSync(layout.quarantineDir)) {
-      if (!isPlainDirectory(layout.quarantineDir)) {
-        artifacts.push(opaqueArtifact(root, 'unsafe-quarantine-directory', 'error'));
-      } else {
-        for (const entry of readdirSync(layout.quarantineDir, { withFileTypes: true })) {
-          if (recordedArtifactIds.has(entry.name)) continue;
-          artifacts.push(opaqueArtifact(
-            root,
-            entry.isSymbolicLink() ? 'unsafe-quarantine-entry' : 'unowned-quarantine-entry',
-            'none',
-            entry.name,
-          ));
-        }
-      }
+  private scanQuarantine(
+    root: RootContext,
+    layout: ReturnType<typeof resolveSessionStorageLayout>,
+    recordedArtifactIds: Set<string>,
+  ): ScannedArtifact[] {
+    if (!existsSync(layout.quarantineDir)) return [];
+    if (!isPlainDirectory(layout.quarantineDir)) {
+      return [opaqueArtifact(root, 'unsafe-quarantine-directory', 'error')];
+    }
+
+    const artifacts: ScannedArtifact[] = [];
+    for (const entry of readdirSync(layout.quarantineDir, { withFileTypes: true })) {
+      if (recordedArtifactIds.has(entry.name)) continue;
+      artifacts.push(opaqueArtifact(
+        root,
+        entry.isSymbolicLink() ? 'unsafe-quarantine-entry' : 'unowned-quarantine-entry',
+        'none',
+        entry.name,
+      ));
     }
     return artifacts;
   }

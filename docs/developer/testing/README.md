@@ -92,9 +92,9 @@ describe('Conversation Lifecycle', () => {
 
 Tests run automatically in GitHub Actions:
 
-1. `npm ci` — Install dependencies
-2. `npm run preflight` — Lint + test + build
-3. `npm run test:coverage` — Coverage report
-4. Upload coverage artifact
+1. The main verification job runs `npm ci`, preflight, the dependency audit, and coverage.
+2. A separate Docker job pulls the pinned OpenCode image and runs the
+   credential-free `npm run test:e2e:docker:ci` lifecycle gate.
+3. The main job uploads the coverage artifact even when an earlier verification step fails.
 
 See [Writing Tests](writing-tests.md) for patterns and examples.

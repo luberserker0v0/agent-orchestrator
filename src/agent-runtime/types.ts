@@ -127,6 +127,7 @@ export interface InstanceHandle {
   kill(signal?: string): Promise<void>;
   waitForExit(timeoutMs: number): Promise<void>;
   onExit(callback: (code: number | null) => void): void;
+  hasExited(): boolean;
   readonly pid?: number;
   readonly exitCode: number | null;
 }

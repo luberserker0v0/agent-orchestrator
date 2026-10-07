@@ -7,6 +7,15 @@ export const openapiSpec: Record<string, unknown> = {
   },
   servers: [{ url: 'http://127.0.0.1:{port}', variables: { port: { default: '0', description: 'Server port (0 = auto-assigned)' } } }],
   paths: {
+    '/api-docs.json': {
+      get: {
+        tags: ['System'],
+        summary: 'Download the OpenAPI document',
+        responses: {
+          '200': { description: 'OpenAPI 3 document', content: { 'application/json': { schema: { type: 'object' } } } },
+        },
+      },
+    },
     '/health': {
       get: {
         tags: ['System'],
@@ -25,6 +34,83 @@ export const openapiSpec: Record<string, unknown> = {
         summary: 'Prometheus metrics',
         responses: {
           '200': { description: 'Prometheus exposition format metrics', content: { 'text/plain': { schema: { type: 'string' } } } },
+        },
+      },
+    },
+    '/api/runtimes': {
+      get: {
+        tags: ['Runtimes'],
+        summary: 'List configured runtimes and registration status',
+        responses: {
+          '200': { description: 'Configured runtime list', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/RuntimeInfo' } } } } },
+        },
+      },
+    },
+    '/api/auth/role': {
+      get: {
+        tags: ['Authentication'],
+        summary: 'Get the role associated with the current API key',
+        responses: {
+          '200': { description: 'Resolved caller identity', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthRole' } } } },
+          '401': { description: 'Authentication required', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/roles': {
+      get: {
+        tags: ['Roles'],
+        summary: 'List built-in and custom roles',
+        responses: {
+          '200': { description: 'Role list', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/RoleDefinition' } } } } },
+          '401': { description: 'Authentication required', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '403': { description: 'Insufficient permission', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      post: {
+        tags: ['Roles'],
+        summary: 'Create a custom role',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name', 'permissions'], properties: { name: { type: 'string' }, permissions: { type: 'array', items: { type: 'string' } } } } } } },
+        responses: {
+          '201': { description: 'Role created', content: { 'application/json': { schema: { $ref: '#/components/schemas/RoleDefinition' } } } },
+          '400': { description: 'Invalid role definition', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '403': { description: 'Insufficient permission', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Role already exists', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Role persistence failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/roles/{name}': {
+      get: {
+        tags: ['Roles'],
+        summary: 'Get a role',
+        parameters: [{ name: 'name', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Role definition', content: { 'application/json': { schema: { $ref: '#/components/schemas/RoleDefinition' } } } },
+          '404': { description: 'Role not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      put: {
+        tags: ['Roles'],
+        summary: 'Replace a custom role permission set',
+        parameters: [{ name: 'name', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['permissions'], properties: { permissions: { type: 'array', items: { type: 'string' } } } } } } },
+        responses: {
+          '200': { description: 'Role updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/RoleDefinition' } } } },
+          '400': { description: 'Invalid permission list', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '403': { description: 'Built-in roles cannot be modified', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Role not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Role persistence failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      delete: {
+        tags: ['Roles'],
+        summary: 'Delete a custom role',
+        parameters: [{ name: 'name', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Role deleted', content: { 'application/json': { schema: { type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean', enum: [true] } } } } } },
+          '403': { description: 'Built-in roles cannot be deleted', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Role not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Role persistence failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -72,7 +158,7 @@ export const openapiSpec: Record<string, unknown> = {
       post: {
         tags: ['Conversations'],
         summary: 'Create a conversation (prepare workspace, do not start OpenCode)',
-        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string', pattern: '^[a-z0-9](?:[a-z0-9-]{0,50}[a-z0-9])?$', maxLength: 52, description: 'Conversation ID (auto-generated if omitted)' } } } } } },
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string', pattern: '^[a-z0-9](?:[a-z0-9-]{0,50}[a-z0-9])?$', maxLength: 52, description: 'Conversation ID (auto-generated if omitted)' }, agentType: { type: 'string', description: 'Configured runtime ID; uses the configured default when omitted' } } } } } },
         responses: {
           '201': { description: 'Conversation created', content: { 'application/json': { schema: { $ref: '#/components/schemas/ConversationCreated' } } } },
           '409': { description: 'Conversation already exists', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
@@ -143,6 +229,21 @@ export const openapiSpec: Record<string, unknown> = {
           '404': { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           '409': { description: 'Invalid state', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           '500': { description: 'Restart failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/conversations/{id}/migrate': {
+      post: {
+        tags: ['Conversations'],
+        summary: 'Migrate a running conversation to a Kubernetes node',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['nodeName'], properties: { nodeName: { type: 'string', minLength: 1 } } } } } },
+        responses: {
+          '200': { description: 'Migration completed', content: { 'application/json': { schema: { $ref: '#/components/schemas/MigrationResult' } } } },
+          '400': { description: 'Missing node name', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Conversation not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Conversation cannot be migrated in its current state', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '500': { description: 'Migration failed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -472,6 +573,19 @@ export const openapiSpec: Record<string, unknown> = {
         },
       },
     },
+    '/api/conversations/{id}/sessions/abort': {
+      post: {
+        tags: ['Sessions'],
+        summary: 'Abort the active session request for a conversation',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Abort result', content: { 'application/json': { schema: { type: 'object', required: ['aborted'], properties: { aborted: { type: 'boolean' } } } } } },
+          '404': { description: 'Conversation not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Conversation is not running or ready', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '503': { description: 'No active session is available', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
     '/api/conversations/{id}/skills/upload': {
       post: {
         tags: ['Skills'],
@@ -680,6 +794,37 @@ export const openapiSpec: Record<string, unknown> = {
           },
         },
       },
+      RuntimeInfo: {
+        type: 'object',
+        required: ['id', 'type', 'config', 'registered', 'isValid', 'capabilities'],
+        properties: {
+          id: { type: 'string' },
+          type: { type: 'string', enum: ['direct', 'docker', 'kubernetes'] },
+          version: { type: 'string' },
+          config: { type: 'object', additionalProperties: true },
+          registered: { type: 'boolean' },
+          isValid: { type: 'boolean' },
+          error: { type: 'string' },
+          capabilities: { type: 'object', nullable: true, additionalProperties: { type: 'boolean' } },
+        },
+      },
+      AuthRole: {
+        type: 'object',
+        required: ['role', 'name'],
+        properties: {
+          role: { type: 'string' },
+          name: { type: 'string' },
+        },
+      },
+      RoleDefinition: {
+        type: 'object',
+        required: ['name', 'permissions', 'builtin'],
+        properties: {
+          name: { type: 'string' },
+          permissions: { type: 'array', items: { type: 'string' } },
+          builtin: { type: 'boolean' },
+        },
+      },
       CleanupTarget: { type: 'string', enum: ['logs', 'persistentData'] },
       CleanupPreviewRequest: {
         type: 'object',
@@ -791,6 +936,18 @@ export const openapiSpec: Record<string, unknown> = {
           port: { type: 'integer' },
           sessionId: { type: 'string' },
         },
+      },
+      MigrationResult: {
+        allOf: [
+          { $ref: '#/components/schemas/ConversationStarted' },
+          {
+            type: 'object',
+            properties: {
+              nodeName: { type: 'string' },
+              resumed: { type: 'boolean' },
+            },
+          },
+        ],
       },
       Event: {
         type: 'object',

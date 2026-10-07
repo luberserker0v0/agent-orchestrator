@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import type { WorkspaceConfig } from '../config-loader.js';
@@ -7,6 +7,7 @@ import type { OpencodeConfig } from '../opencode-http/types.js';
 import type { StorageBackend } from '../storage/index.js';
 import type { RuntimeAccess } from '../storage/types.js';
 import { workspacesActive, workspaceQuotaExceededTotal } from '../metrics/registry.js';
+import { resolveAllowedSource, resolvePathWithoutSymlinks } from '../storage/path-safety.js';
 
 export interface WorkspaceInfo {
   id: string;
@@ -67,7 +68,7 @@ export function getDirSize(dirPath: string): number {
       const fullPath = join(dirPath, entry.name);
       if (entry.isDirectory()) {
         total += getDirSize(fullPath);
-      } else {
+      } else if (!entry.isSymbolicLink()) {
         total += statSync(fullPath).size;
       }
     }
@@ -84,6 +85,7 @@ export class WorkspaceFactory {
   private enforceCanonicalConfig: boolean;
   private maxSizeBytes: number;
   private allowedCopySources: string[];
+  private metricWorkspaceIds = new Set<string>();
 
   constructor(config: WorkspaceConfig, storage: StorageBackend, canonicalConfig?: Record<string, unknown>) {
     this.basePath = resolve(process.cwd(), config.basePath);
@@ -107,7 +109,7 @@ export class WorkspaceFactory {
     await this.storage.ensureDir(wsId, '.opencode');
 
     logger.info(`Workspace created: ${wsPath}${agentType ? ` (agent: ${agentType})` : ''}`);
-    workspacesActive.inc();
+    this.trackWorkspace(wsId);
     return {
       id: wsId,
       path: wsPath,
@@ -123,8 +125,8 @@ export class WorkspaceFactory {
     if (!await this.storage.hasWorkspace(wsId)) {
       await this.storage.createWorkspaceDir(wsId);
       await this.storage.ensureDir(wsId, '.opencode');
-      workspacesActive.inc();
     }
+    this.trackWorkspace(wsId);
     return {
       id: wsId,
       path: wsPath,
@@ -137,20 +139,28 @@ export class WorkspaceFactory {
     const wsId = sanitizeId(id);
     const wsPath = join(this.basePath, wsId);
     if (await this.storage.hasWorkspace(wsId)) {
-      try {
-        await this.storage.destroyWorkspace(wsId);
-        workspacesActive.dec();
-        logger.info(`Workspace destroyed: ${wsPath}`);
-      } catch (err) {
-        logger.warn(`Failed to destroy workspace: ${wsPath}`, err);
-      }
+      await this.storage.destroyWorkspace(wsId);
+      this.untrackWorkspace(wsId);
+      logger.info(`Workspace destroyed: ${wsPath}`);
     } else {
+      this.untrackWorkspace(wsId);
       logger.warn(`Workspace not found for destruction: ${wsPath}`);
     }
   }
 
   async cleanupOrphans(): Promise<void> {
     await this.storage.cleanupOrphans();
+  }
+
+  private trackWorkspace(id: string): void {
+    if (this.metricWorkspaceIds.has(id)) return;
+    this.metricWorkspaceIds.add(id);
+    workspacesActive.inc();
+  }
+
+  private untrackWorkspace(id: string): void {
+    if (!this.metricWorkspaceIds.delete(id)) return;
+    workspacesActive.dec();
   }
 
   // ─── Config ──────────────────────────────────────────────
@@ -224,12 +234,10 @@ export class WorkspaceFactory {
     const sanitizedDest = sanitizeRelativePath(dest);
 
     // Validate source is within allowed directories
-    const resolvedSource = resolve(process.cwd(), source);
-    const isAllowed = this.allowedCopySources.some((allowed) => {
-      const resolvedAllowed = resolve(allowed);
-      return resolvedSource === resolvedAllowed || resolvedSource.startsWith(resolvedAllowed + sep);
-    });
-    if (!isAllowed) {
+    let resolvedSource: string;
+    try {
+      resolvedSource = resolveAllowedSource(resolve(process.cwd(), source), this.allowedCopySources);
+    } catch {
       throw new Error(
         `Source path not allowed. Must be under one of: ${this.allowedCopySources.join(', ')}`
       );
@@ -266,7 +274,12 @@ export class WorkspaceFactory {
   }
 
   resolveWorkspacePath(id: string): string {
-    return join(this.basePath, sanitizeId(id));
+    return resolvePathWithoutSymlinks(this.basePath, sanitizeId(id));
+  }
+
+  resolveWorkspaceEntryPath(id: string, relativePath: string): string {
+    const sanitized = sanitizeRelativePath(relativePath);
+    return resolvePathWithoutSymlinks(this.basePath, sanitizeId(id), sanitized);
   }
 
   async assertQuota(wsId: string, additionalBytes: number): Promise<void> {
@@ -291,6 +304,9 @@ export function hashDirectory(dirPath: string): { files: string[]; totalSize: nu
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       const relativePath = relativePrefix ? `${relativePrefix}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink()) {
+        throw new Error('Unsafe path: symbolic links are not allowed in managed workspace paths');
+      }
       if (entry.isDirectory()) {
         walk(join(dir, entry.name), relativePath);
       } else {

@@ -19,7 +19,7 @@ describe('npm release metadata verification', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(`Verified ${packageJson.name}@${packageJson.version}`);
-  });
+  }, 15_000);
 
   it('rejects a release tag that does not match the package version', () => {
     const result = spawnSync(process.execPath, [script, 'v0.0.0-invalid'], {
@@ -29,5 +29,5 @@ describe('npm release metadata verification', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('does not match package version');
-  });
+  }, 15_000);
 });

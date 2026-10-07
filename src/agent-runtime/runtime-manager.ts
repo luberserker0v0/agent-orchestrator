@@ -30,6 +30,7 @@ export class RuntimeManager {
   // so stale closures from old handles are safely ignored.
   private instanceGen = new Map<string, number>();
   private nextGen = 0;
+  private cleanupPromises = new Map<string, Promise<void>>();
 
   constructor(portPool: PortPool, runtimes: RuntimeRegistry, defaultAgentType: string) {
     this.portPool = portPool;
@@ -69,7 +70,9 @@ export class RuntimeManager {
       handle.onExit((_code: number | null) => {
         if (this.instanceGen.get(id) !== gen) return;
         logger.warn(`[${id}] process exited`);
-        this.cleanupInstance(id);
+        void this.destroyInstance(id).catch((err: unknown) => {
+          logger.error(`[${id}] failed to finalize exited instance`, err);
+        });
       });
     }
 
@@ -95,7 +98,13 @@ export class RuntimeManager {
   }
 
   destroyInstance(id: string): Promise<void> {
-    return this.cleanupInstance(id);
+    const pending = this.cleanupPromises.get(id);
+    if (pending) return pending;
+    const cleanup = this.cleanupInstance(id).finally(() => {
+      if (this.cleanupPromises.get(id) === cleanup) this.cleanupPromises.delete(id);
+    });
+    this.cleanupPromises.set(id, cleanup);
+    return cleanup;
   }
 
   async restartInstance(id: string, agentType?: string, healthCheckConfig?: HealthCheckConfig): Promise<void> {
@@ -133,7 +142,9 @@ export class RuntimeManager {
         result.handle.onExit((_code: number | null) => {
           if (this.instanceGen.get(id) !== newGen) return;
           logger.warn(`[${id}] process exited`);
-          this.cleanupInstance(id);
+          void this.destroyInstance(id).catch((err: unknown) => {
+            logger.error(`[${id}] failed to finalize exited instance`, err);
+          });
         });
       }
       this.instances.set(id, updated);
@@ -247,28 +258,24 @@ export class RuntimeManager {
       return;
     }
 
-    this.instances.delete(id);
-
     if (inst.handle) {
       const pid = inst.handle.pid;
       if (pid !== undefined) {
         logger.info(`[${id}] killing process PID ${pid}...`);
       }
-      const gracefulSignalSent = await this.safeKill(inst.handle, 'SIGTERM');
-      let exited = inst.handle.exitCode !== null;
+      if (!inst.handle.hasExited()) await this.safeKill(inst.handle, 'SIGTERM');
+      let exited = inst.handle.hasExited();
       if (!exited) {
         await inst.handle.waitForExit(5000);
-        exited = inst.handle.exitCode !== null;
+        exited = inst.handle.hasExited();
       }
-      let forceSignalSent = true;
       if (!exited) {
         logger.debug(`[${id}] sending SIGKILL`);
-        forceSignalSent = await this.safeKill(inst.handle, 'SIGKILL');
+        await this.safeKill(inst.handle, 'SIGKILL');
         await inst.handle.waitForExit(5000);
-        exited = inst.handle.exitCode !== null;
+        exited = inst.handle.hasExited();
       }
-      if (!exited && !gracefulSignalSent && !forceSignalSent) {
-        this.instances.set(id, inst);
+      if (!exited) {
         throw new Error(`Unable to stop instance ${id}; refusing destructive cleanup`);
       }
       if (pid !== undefined) {
@@ -288,6 +295,7 @@ export class RuntimeManager {
       }
     }
 
+    this.instances.delete(id);
     if (inst.port !== undefined) {
       this.portPool.release(inst.port);
     }
