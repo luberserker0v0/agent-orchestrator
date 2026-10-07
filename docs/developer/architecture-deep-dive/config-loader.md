@@ -22,7 +22,8 @@ This document explains the internal workings of the configuration loading system
    ├── AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES → orchestrator.maxInstances
    ├── AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS → orchestrator.idleTimeoutMs
    ├── AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS → orchestrator.idleSweepIntervalMs
-   └── AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES → workspace.maxSizeBytes
+   ├── AGENTORCHESTRATOR_WORKSPACE_MAX_SIZE_BYTES → workspace.maxSizeBytes
+   └── AGENTORCHESTRATOR_CLEANUP_SWEEP_INTERVAL_MS → cleanup.sweepIntervalMs
          │
 5. Deep merge with defaults (defaultConfig())
          │
@@ -69,6 +70,16 @@ function defaultConfig(): AgentOrchestratorConfig;
 | `workspace.enforceCanonicalConfig` | `true` |
 | `workspace.maxSizeBytes` | `52428800` (50MB) |
 | `workspace.storage` | `{ type: 'local' }` |
+| `cluster.enabled` | `false` |
+| `logging.file.enabled` | `false` |
+| `logging.file.directory` | `'./logs'` |
+| `logging.file.maxFileSizeBytes` | `10485760` (10 MiB) |
+| `logging.file.maxRotatedFiles` | `10` |
+| `logging.file.retentionMs` | `604800000` (7 days) |
+| `cleanup.ownerId` | `null` |
+| `cleanup.sweepIntervalMs` | `3600000` (1 hour) |
+| `cleanup.orphanedData.enabled` | `false` |
+| `cleanup.orphanedData.gracePeriodMs` | `2592000000` (30 days) |
 
 ### `normalizeApiKeys(serverConfig)`
 
@@ -81,7 +92,8 @@ function normalizeApiKeys(serverConfig: ServerConfig): ApiKeyEntry[] | undefined
 **Behavior:**
 - If `apiKeys` is defined and non-empty, returns it as-is
 - If `apiKey` is defined (legacy), converts to `[{ key, role: 'admin' }]`
-- If neither is defined, returns `undefined` (no auth required)
+- If neither is defined, returns `undefined`; whether auth is disabled is then
+  determined by `server.rbac.enabled`
 
 ### `validateConfig(config)`
 
@@ -90,11 +102,15 @@ Validates all configuration fields. Throws `AppError` on invalid values.
 **Validation rules:**
 - `server.port`: 0-65535
 - `server.host`: non-empty string
-- `server.apiKeys[].role`: must be `'admin'`, `'user'`, or `'observer'`
+- `server.apiKeys[].role`: must name a built-in or configured custom role
 - `server.apiKeys[].key`: minimum 8 characters
-- `orchestrator.maxInstances`: must be <= port range size
-- `orchestrator.portRange.start`: must be < `end`
+- built-in roles cannot be overridden and custom role names/permissions are validated
+- `orchestrator.maxInstances`: must fit the port range when dynamic fallback is disabled
+- `orchestrator.portRange.start`: must be less than `end`
 - `workspace.maxSizeBytes`: must be >= 0
+- `logging.file.directory`: must be non-empty and cannot resolve to a filesystem root
+- `cleanup.ownerId`: required when orphan cleanup is enabled
+- cleanup intervals, grace periods, and file-rotation limits must be positive safe integers
 
 ### `readJSON(path)`
 
@@ -115,7 +131,10 @@ applyEnvOverrides(config);
 validateConfig(config);
 ```
 
-**Important:** Arrays (like `runtimes`) are **not** overridable via env vars. They are treated as opaque by the merge logic.
+Environment names resolve underscore-separated words to camelCase fields, so
+both the documented `MAX_SIZE_BYTES` form and the legacy concatenated
+`MAXSIZEBYTES` form work. Arrays such as `runtimes` are opaque and cannot be
+overridden through scalar environment variables.
 
 ## Type Definitions
 
@@ -127,6 +146,10 @@ interface AgentOrchestratorConfig {
   websocket: WebSocketConfig;
   orchestrator: OrchestratorConfig;
   workspace: WorkspaceConfig;
+  roles?: RolesConfig;
+  cluster?: ClusterConfig;
+  logging: LoggingConfig;
+  cleanup: CleanupConfig;
 }
 ```
 
@@ -139,11 +162,12 @@ interface ServerConfig {
   shutdownTimeoutMs: number;
   apiKey?: string;           // @deprecated
   apiKeys?: ApiKeyEntry[];
+  rbac?: { enabled?: boolean };
 }
 
 interface ApiKeyEntry {
   key: string;
-  role: 'admin' | 'user' | 'observer';
+  role: string;              // built-in or configured custom role
   name?: string;
 }
 ```

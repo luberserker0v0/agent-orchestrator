@@ -1,273 +1,171 @@
 # Data Flows
 
-This document describes the step-by-step request/response sequences for the most common operations.
+These flows describe current behavior across REST and WebSocket transports. Both
+transports call the same services, so lifecycle locking, storage policy, and
+runtime behavior remain consistent.
 
-## 1. Prepare Conversation
+## 1. Prepare and Start a Conversation
 
-Creates a workspace and conversation record without starting an OpenCode instance.
+`POST /api/conversations` prepares durable workspace state only. Starting is a
+separate operation unless the CLI was invoked with `conversation create --start`.
 
-```
-Client                          AgentOrchestrator
-  │                                    │
-  │  POST /api/conversations           │
-  │  { "agentType": "opencode-direct" }│
-  │  ─────────────────────────────────►│
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ Validate agentType  │
-  │                          │ against configured  │
-  │                          │ runtimes            │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ WorkspaceFactory   │
-  │                          │ .createWorkspace() │
-  │                          │ - Create directory  │
-  │                          │ - Copy config       │
-  │                          │ - Apply quota       │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ ConversationState  │
-  │                          │ .register(id)      │
-  │                          │ Status: prepared   │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │  200 OK                            │
-  │  { id, status: "prepared", ... }  │
-  │  ◄─────────────────────────────────│
-```
+```mermaid
+sequenceDiagram
+    participant C as Client / aor
+    participant H as HTTP route
+    participant S as ConversationService
+    participant W as WorkspaceFactory
+    participant I as InstanceManager
+    participant R as RuntimeManager
+    participant A as Runtime adapter
+    participant O as OpenCode
 
-**Key state transitions:** None (conversation stays in `prepared` status)
+    C->>H: POST /api/conversations {id, agentType}
+    H->>S: create(id, agentType)
+    S->>S: acquire per-conversation lifecycle lock
+    S->>W: create(id, agentType)
+    S-->>C: 201 prepared
 
-## 2. Start Conversation
-
-Spawns an OpenCode instance and connects to it.
-
-```
-Client                          AgentOrchestrator
-  │                                    │
-  │  POST /api/conversations/:id/start │
-  │  ─────────────────────────────────►│
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ ConversationState  │
-  │                          │ .transition(       │
-  │                          │   'starting')      │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ InstanceManager    │
-  │                          │ .startInstance()   │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ PortPool.allocate()│
-  │                          │ Get available port  │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ WorkspaceFactory   │
-  │                          │ .prepareWorkspace()│
-  │                          │ - Write config     │
-  │                          │ - Write agents     │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ RuntimeManager     │
-  │                          │ .start()           │
-  │                          │ - Runtime.spawn()  │
-  │                          │ - Health check     │
-  │                          │ - Connect SSE      │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ SSEBridge.connect()│
-  │                          │ Subscribe to       │
-  │                          │ OpenCode /events   │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │  200 OK                            │
-  │  { id, status: "running", port }  │
-  │  ◄─────────────────────────────────│
-  │                                    │
-  │  WS: conversation.running event    │
-  │  ◄─────────────────────────────────│
+    C->>H: POST /api/conversations/:id/start
+    H->>S: start(id)
+    S->>S: prepared/stopped/error → starting
+    S->>I: createInstance(id, agentType)
+    I->>I: reserve capacity; evict LRU if required
+    I->>W: ensure existing workspace
+    I->>R: start(id, workspace, auth, health config)
+    R->>A: start(...)
+    A->>O: spawn process/container/Pod
+    A->>O: authenticated health polling
+    O-->>A: healthy
+    A-->>R: AgentEndpoint
+    R-->>S: active InstanceInfo
+    S->>S: starting → running; start readiness and SSE
+    S-->>C: 200 running, ready=false
 ```
 
-**Key state transitions:** `prepared` → `starting` → `running`
+`running` means the runtime passed its health check. `ready` becomes true after
+AO has a usable OpenCode session; clients that need session/message operations
+should wait for it.
 
-## 3. Send Message (WebSocket)
+## 2. Send a Message
 
-Sends a message to the running OpenCode instance via WebSocket.
+```mermaid
+sequenceDiagram
+    participant C as REST or WebSocket client
+    participant T as Authenticated transport
+    participant M as MessageService
+    participant R as RuntimeManager
+    participant O as OpenCode
+    participant E as SSEBridge
 
-```
-Client (WS)                  AgentOrchestrator                    OpenCode
-  │                                    │                            │
-  │  JSON-RPC: message.send            │                            │
-  │  { text: "Hello", model: "..." }   │                            │
-  │  ─────────────────────────────────►│                            │
-  │                                    │                            │
-  │                          ┌─────────┴─────────┐                  │
-  │                          │ Validate auth      │                  │
-  │                          │ (admin required)   │                  │
-  │                          └─────────┬─────────┘                  │
-  │                                    │                            │
-  │                          ┌─────────┴─────────┐                  │
-  │                          │ MessageService     │                  │
-  │                          │ .send()            │                  │
-  │                          │ - Get OpenCode     │                  │
-  │                          │   client           │                  │
-  │                          │ - Create session   │                  │
-  │                          │   if needed        │                  │
-  │                          └─────────┬─────────┘                  │
-  │                                    │                            │
-  │                                    │  POST /session/:id/message │
-  │                                    │  { text, model, agent }    │
-  │                                    │  ─────────────────────────►│
-  │                                    │                            │
-  │                                    │  200 OK                    │
-  │                                    │  { messageId, text, parts }│
-  │                                    │  ◄─────────────────────────│
-  │                                    │                            │
-  │  JSON-RPC Result                   │                            │
-  │  { messageId, text, parts }        │                            │
-  │  ◄─────────────────────────────────│                            │
-  │                                    │                            │
-  │  WS: message.part events           │  (streamed via SSE)        │
-  │  ◄─────────────────────────────────│◄───────────────────────────│
+    C->>T: message.send / POST .../message
+    T->>T: require message:send
+    T->>M: send(conversation, text, model, agent)
+    M->>R: get active ready instance
+    M->>O: sendPrompt(sessionId, parts, model, agent)
+    O-->>M: message info and parts
+    M->>R: update last-used timestamp
+    M-->>C: normalized message result
+    O-->>E: streamed OpenCode events
+    E-->>C: conversation WebSocket events
 ```
 
-**Key state transitions:** None (conversation stays in `running` status)
+Quota and rate-limit errors are normalized, counted, and optionally reported to
+the Kubernetes status resource for placement decisions.
 
-## 4. Delete Conversation
+## 3. Stop, Restart, and Idle Eviction
 
-Destroys the OpenCode instance and removes the workspace.
+Stop and idle eviction terminate only the active runtime. They preserve the
+conversation record, workspace, and managed session data.
 
-```
-Client                          AgentOrchestrator
-  │                                    │
-  │  DELETE /api/conversations/:id     │
-  │  ─────────────────────────────────►│
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ ConversationState  │
-  │                          │ .transition(       │
-  │                          │   'destroying')    │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ SSEBridge          │
-  │                          │ .disconnect()      │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ RuntimeManager     │
-  │                          │ .destroy()         │
-  │                          │ - Runtime.kill()   │
-  │                          │ - PortPool.release()│
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ WorkspaceFactory   │
-  │                          │ .deleteWorkspace() │
-  │                          │ - Remove directory  │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │                          ┌─────────┴─────────┐
-  │                          │ ConversationState  │
-  │                          │ .unregister(id)    │
-  │                          └─────────┬─────────┘
-  │                                    │
-  │  204 No Content                    │
-  │  ◄─────────────────────────────────│
-  │                                    │
-  │  WS: conversation.destroyed event  │
-  │  ◄─────────────────────────────────│
+```mermaid
+stateDiagram-v2
+    [*] --> prepared
+    prepared --> starting: start
+    starting --> running: runtime healthy
+    starting --> error: start failure
+    running --> stopped: stop / idle / process exit
+    running --> restarting: restart / migrate
+    stopped --> starting: start
+    stopped --> restarting: restart
+    restarting --> running: runtime healthy
+    restarting --> error: restart failure
+    error --> starting: start
+    error --> restarting: restart
+    prepared --> destroyed: delete
+    running --> destroyed: delete
+    stopped --> destroyed: delete
+    error --> destroyed: delete
+    destroyed --> [*]
 ```
 
-**Key state transitions:** `running` → `destroying` → (removed)
+Restart reuses the workspace and attempts to resume the previous session ID.
+Kubernetes migration recreates the runtime on the target node against the same
+conversation PVC and reports whether session resumption succeeded.
 
-## 5. Idle Timeout
+## 4. Explicit Conversation Deletion
 
-The orchestrator automatically destroys idle instances.
+Explicit deletion is the only normal lifecycle operation that owns immediate
+workspace and managed-session removal.
 
-```
-Orchestrator (Background)       ConversationState
-  │                                    │
-  │  Every idleSweepIntervalMs:        │
-  │  ┌─────────────────────────┐       │
-  │  │ Check each instance:    │       │
-  │  │ - Is status 'running'?  │       │
-  │  │ - Last activity >       │       │
-  │  │   idleTimeoutMs?        │       │
-  │  └────────────┬────────────┘       │
-  │               │                    │
-  │               │ (if idle)          │
-  │               │                    │
-  │  ┌────────────▼────────────┐       │
-  │  │ InstanceManager         │       │
-  │  │ .destroy(id)            │──────►│
-  │  └────────────┬────────────┘  emit│
-  │               │           'idle.  │
-  │               │            timeout'│
-  │               │                    │
-  │  ┌────────────▼────────────┐       │
-  │  │ SSEBridge.disconnect()  │       │
-  │  └────────────┬────────────┘       │
-  │               │                    │
-  │  ┌────────────▼────────────┐       │
-  │  │ RuntimeManager.destroy()│       │
-  │  └────────────┬────────────┘       │
-  │               │                    │
-  │  ┌────────────▼────────────┐       │
-  │  │ WorkspaceFactory        │       │
-  │  │ .deleteWorkspace()      │       │
-  │  └────────────┬────────────┘       │
-  │               │                    │
-  │  ┌────────────▼────────────┐       │
-  │  │ ConversationState       │       │
-  │  │ .unregister(id)         │       │
-  │  └─────────────────────────┘       │
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as ConversationService
+    participant R as Runtime adapter
+    participant P as Managed persistent data
+    participant W as Workspace storage
+    participant K as Cluster reporter
+
+    C->>S: DELETE /api/conversations/:id
+    S->>S: acquire lifecycle lock
+    S->>R: preparePersistentDataDeletion(id)
+    R->>P: persist delete-pending generation
+    S->>R: stop runtime and observe exit
+    S->>R: deletePersistentData(id)
+    R->>P: quarantine matching generation, then purge
+    S->>W: destroy workspace
+    S->>K: remove instance/route status
+    S->>S: transition destroyed; remove in-memory record
+    S-->>C: 204 No Content
 ```
 
-## Error Paths
+If deletion intent cannot be recorded or the runtime cannot be stopped, AO
+returns `PERSISTENT_DATA_CLEANUP_PENDING`. Generation checks prevent a stale
+retry from deleting newly recreated data with the same conversation ID.
 
-### Health Check Failure
+## 5. Scheduled Orphan Cleanup
 
-When `RuntimeManager.start()` is called, it performs a health check loop:
+```mermaid
+flowchart TD
+    Timer[Startup or scheduled sweep] --> Gate{Cleanup already running?}
+    Gate -->|yes| Skip[Record skipped schedule run]
+    Gate -->|no| Scan[Scan enabled owned providers]
+    Scan --> Authority{Owner, canonical ID, and authority valid?}
+    Authority -->|no| Report[Report only; never mutate]
+    Authority -->|yes| Live{Conversation, workspace, runtime, route, or Pod live?}
+    Live -->|yes| Clear[Clear orphan observation if applicable]
+    Live -->|no| Observed{Observed before and grace elapsed?}
+    Observed -->|no| Mark[Record first orphan observation]
+    Observed -->|yes| Lock[Acquire conversation lifecycle lock]
+    Lock --> Recheck[Fresh ownership, UID, authority, and liveness check]
+    Recheck -->|changed| Keep[Skip or clear candidate]
+    Recheck -->|still orphaned| Delete[Delete owned directory or whole PVC]
+```
 
-1. Spawn the OpenCode instance (DirectRuntime or DockerRuntime)
-2. Wait `healthCheck.intervalMs` (default 500ms)
-3. Send `GET /health` to the OpenCode HTTP API
-4. If response is 200 OK, mark as `running`
-5. If not, retry up to `healthCheck.retries` times (default 10)
-6. If all retries fail, transition to `stopped` with `lastError` set
-7. Release port back to pool
+Preview uses the same discovery rules but never marks, clears, quarantines, or
+deletes. Manual runs cannot override configured retention or grace periods.
 
-### Workspace Quota Exceeded
+## Failure Boundaries
 
-When `WorkspaceFactory.write()` is called:
-
-1. Calculate current workspace size
-2. If `maxSizeBytes > 0` and current size + new content > `maxSizeBytes`:
-   - Throw `AppError(413, 'WORKSPACE_QUOTA_EXCEEDED')`
-3. If `maxSizeBytes === 0`, skip quota check entirely (unlimited)
-
-### Runtime Spawn Failure
-
-When `DirectRuntime.spawn()` or `DockerRuntime.spawn()` fails:
-
-1. Catch the error
-2. Transition conversation to `stopped` with `lastError: error.message`
-3. Release port back to pool
-4. Emit `conversation.stopped` event
-5. The conversation can be restarted via `POST /api/conversations/:id/restart`
-
-### Session Creation Failure
-
-When `SessionService.create()` cannot reach the OpenCode instance:
-
-1. Return error to the client
-2. The conversation remains in `running` status
-3. The client can retry or check connection via `GET /api/conversations/:id`
+- Runtime start failures transition the conversation to `error`; capacity and
+  port cleanup remains the runtime manager's responsibility.
+- Workspace writes charge only the replacement-size delta and fail before
+  mutation when the quota would be exceeded.
+- REST and WebSocket routes require an explicit permission when RBAC is enabled;
+  unmapped authenticated operations fail closed.
+- Cleanup provider failures are isolated into sanitized `partial` or `failed`
+  reports so successful artifacts remain visible without exposing paths or data.
+- Graceful shutdown stops scheduling, closes WebSockets, drains HTTP work,
+  destroys active runtimes, stops cluster reporting, and flushes file logging
+  within `server.shutdownTimeoutMs`.

@@ -197,12 +197,16 @@ For readability, the commands below keep the same full CLI prefix:
 
 ```bash
 docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key conversation create docker-smoke --agent-type opencode-direct --start
+docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key conversation get docker-smoke
 docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key session create docker-smoke --title "Persistence check"
 docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key conversation stop docker-smoke
 docker compose exec -T agent-orchestrator test -d /data/workspace/.ao-sessions/docker-smoke
 docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key conversation start docker-smoke
 docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key session list docker-smoke
 ```
+
+Repeat the `conversation get` command until it reports `ready: true` before
+creating the session.
 
 The `test -d` command exits successfully when the managed session directory
 survives the stop. Explicit deletion should remove it:
@@ -221,11 +225,13 @@ a prompt. Environment credentials are inherited by the child process:
 ```bash
 docker compose up -d --force-recreate
 docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key conversation create docker-llm --agent-type opencode-direct --start
+docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key conversation get docker-llm
 docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key message send docker-llm --text "Reply with exactly: AO is ready"
 docker compose exec -T agent-orchestrator node /app/bin/aor.js --server http://127.0.0.1:8080 --api-key-file /run/secrets/ao_admin_key conversation delete docker-llm --confirm
 ```
 
-This check can consume provider credits.
+Wait for `ready: true` before sending the message. This check can consume
+provider credits.
 
 ## 6. Upgrade, stop, and remove
 

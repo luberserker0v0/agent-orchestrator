@@ -1,221 +1,113 @@
-# WebSocket Protocol
+# WebSocket Protocol Internals
 
-This document describes the WebSocket implementation details.
+The WebSocket transport exposes conversation-scoped operations through JSON-RPC
+2.0 while reusing the same application services and RBAC permissions as REST.
 
-## Connection Setup
+## Upgrade and connection lifecycle
 
-### URL Format
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server as HTTP upgrade
+    participant Router as WSRouter
+    participant State as ConversationState
+    participant RPC as WSMethodDispatcher
 
-```
-ws://localhost:8080/ws/{conversationId}?apiKey={key}
-```
-
-### Upgrade Flow
-
-1. Client sends HTTP upgrade request
-2. Server extracts `conversationId` from URL path
-3. Server validates `conversationId` (alphanumeric + hyphens only)
-4. Server checks `?apiKey=` query param or `x-api-key` header
-5. Server looks up role from `resolvedApiKeys`
-6. Server checks if existing connection exists for this conversation
-7. If exists: send `connection.replaced` event to old connection, close it
-8. Create new `WebSocketConnection`
-9. Subscribe to `ConversationState` events for this conversation
-10. Send initial events (if any)
-
-### Authentication
-
-```typescript
-// In HTTP upgrade handler
-const apiKey = url.searchParams.get('apiKey') || headers['x-api-key'];
-const role = resolvedApiKeys?.find(entry => entry.key === apiKey)?.role;
-connectionRoles.set(connectionId, role);
+    Client->>Server: Upgrade /ws/{conversationId}
+    Server->>Router: socket + request
+    Router->>State: verify conversation exists
+    Router->>Router: resolve API-key role
+    Router->>Router: replace older socket for same ID
+    Router->>State: replay retained events and subscribe
+    Client->>Router: JSON-RPC request
+    Router->>Router: check method permission
+    Router->>RPC: dispatch(method, params)
+    RPC-->>Client: JSON-RPC response
+    State-->>Client: JSON-RPC event notification
 ```
 
-If `resolvedApiKeys` is empty, no auth is required (all connections are allowed).
+`WSRouter` owns authentication, permission checks, connection replacement, event
+subscriptions, and shutdown. `WSConnection` owns framing, responses, ping/pong,
+idle timeout, and socket disposal. `WSMethodDispatcher` validates method-specific
+parameters and calls the service layer.
 
-## JSON-RPC 2.0
+## Authentication and authorization
 
-### Request Format
+The upgrade accepts an API key from `?apiKey=` or `x-api-key`. Authentication
+behavior follows `server.rbac.enabled`:
+
+- `true`: a configured key and its built-in or custom role are required.
+- `false`: authorization is disabled and the connection uses administrative
+  authority internally.
+- omitted: RBAC is enabled when API keys are configured and disabled otherwise.
+
+Each method maps to one permission in `WS_METHOD_PERMISSIONS`. The router asks
+`RoleService` whether the resolved role grants that permission. Unknown methods
+and insufficient permissions are rejected before dispatch. The public method and
+permission table is maintained in the [WebSocket API](../../user/api/websocket.md).
+
+## Framing
+
+Request:
 
 ```json
 {
   "jsonrpc": "2.0",
   "id": 1,
-  "method": "message.send",
-  "params": { "text": "Hello" }
+  "method": "session.get",
+  "params": { "sessionId": "ses_123" }
 }
 ```
 
-### Response Format
+Response:
 
 ```json
 {
   "jsonrpc": "2.0",
   "id": 1,
-  "result": { "messageId": "msg-123", "text": "Response" }
+  "result": { "id": "ses_123" }
 }
 ```
 
-### Error Format
+Event notification:
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 1,
-  "error": {
-    "code": -32600,
-    "message": "Write operations require admin role"
-  }
+  "method": "conversation.ready",
+  "params": { "agentType": "opencode-direct" }
 }
 ```
 
-### Standard Error Codes
+The transport emits `-32700` for invalid JSON and `-32600` for an invalid
+JSON-RPC envelope. Errors raised while authorizing or dispatching a valid request
+use `-32000`; an `AppError` also contributes its stable application code in
+`error.data.code`. Requests without an `id` are treated as notifications and do
+not receive success or error responses.
 
-| Code | Meaning |
-|------|---------|
-| `-32700` | Parse error |
-| `-32600` | Invalid request |
-| `-32601` | Method not found |
-| `-32602` | Invalid params |
-| `-32603` | Internal error |
+## Event replay and replacement
 
-## Method Routing
+After establishing a connection, the router sends the conversation's retained
+events in order and then subscribes to live events. Event types become JSON-RPC
+`method` values and event payloads become `params`.
 
-### Connection Lifecycle
+Only one active socket is stored for each conversation. A new connection sends
+`connection.replaced` to the old socket, closes it, and removes the old event
+subscription without allowing the old socket's close callback to unregister the
+new socket. A `conversation.destroyed` event is delivered before the connection
+closes after a short grace period.
 
-```
-1. Connection established
-   │
-2. Register in connections Map
-   │
-3. Subscribe to ConversationState events
-   │
-4. Handle incoming messages:
-   ├── Parse JSON-RPC request
-   ├── Validate method exists
-   ├── Check role permissions
-   ├── Route to handler
-   └── Send response
-   │
-5. Handle events:
-   ├── Receive event from ConversationState
-   └── Push to client as JSON-RPC notification
-```
+## Liveness and shutdown
 
-### Permission Check
+- The server sends ping frames every `websocket.heartbeatIntervalMs`.
+- Pong or message activity resets the idle timer.
+- More than two consecutive missed heartbeat cycles terminates the socket.
+- Idle sockets close normally after `websocket.idleTimeoutMs`.
+- Graceful server shutdown closes all sockets with code `1001` and removes all
+  subscriptions.
 
-```typescript
-const WRITE_METHODS = new Set([
-  'message.send',
-  'config.update', 'config.patch',
-  'agent.register', 'agent.delete',
-  'agent.config.write', 'agent.config.delete',
-  'file.write', 'file.delete', 'file.copy',
-  'session.create', 'session.delete', 'session.fork', 'session.abort',
-  'skills.import', 'skills.delete',
-  'conversation.start', 'conversation.stop', 'conversation.restart', 'conversation.delete',
-]);
+Relevant implementation files:
 
-// In handleMessage:
-if (WRITE_METHODS.has(method) && role === 'observer') {
-  throw new AppError(403, FORBIDDEN, 'Write operations require admin role');
-}
-```
-
-### Method Dispatch
-
-```typescript
-const handlers: Record<string, Handler> = {
-  'message.send': handleMessageSend,
-  'message.history': handleMessageHistory,
-  'config.get': handleConfigGet,
-  'config.update': handleConfigUpdate,
-  'agent.list': handleAgentList,
-  // ... 20+ methods
-};
-```
-
-## Event Pushing
-
-### Subscriber Registration
-
-```typescript
-conversationState.subscribe(conversationId, (event) => {
-  connection.sendEvent(event);
-});
-```
-
-### Event Format
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "event",
-  "params": {
-    "type": "message.part",
-    "data": { "text": "Hello" },
-    "timestamp": "2026-01-01T00:00:00.000Z"
-  }
-}
-```
-
-### Connection Cleanup
-
-When a conversation is destroyed:
-
-```typescript
-conversationState.subscribe(conversationId, (event) => {
-  if (event.type === 'conversation.destroyed') {
-    // Wait 2000ms for client to process event
-    setTimeout(() => {
-      connection.close(1001, 'Conversation destroyed');
-    }, 2000);
-  }
-});
-```
-
-## Connection Management
-
-### One Connection Per Conversation
-
-```typescript
-// If new connection for same conversationId:
-const existing = this.connections.get(conversationId);
-if (existing) {
-  existing.sendEvent({ type: 'connection.replaced' });
-  existing.close(1000, 'Replaced by new connection');
-}
-this.connections.set(conversationId, newConnection);
-```
-
-### Heartbeat
-
-Server sends periodic heartbeats to keep connections alive:
-
-```typescript
-// Every heartbeatIntervalMs (default: 30000ms)
-connection.ping();
-```
-
-### Idle Timeout
-
-Connections idle for `idleTimeoutMs` (default: 600000ms) are closed:
-
-```typescript
-// Check every heartbeatIntervalMs
-if (Date.now() - lastActivity > idleTimeoutMs) {
-  connection.close(1000, 'Idle timeout');
-}
-```
-
-## Close Codes
-
-| Code | Meaning |
-|------|---------|
-| `1000` | Normal closure |
-| `1001` | Server shutting down |
-| `1002` | Protocol error |
-| `1003` | Unsupported data |
-| `1008` | Policy violation |
-| `1011` | Internal error |
+- `src/websocket/router.ts`
+- `src/websocket/connection.ts`
+- `src/websocket/method-dispatcher.ts`

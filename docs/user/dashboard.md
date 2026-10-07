@@ -19,7 +19,7 @@ The dashboard HTML is served without authentication. API calls from the dashboar
 - **Message Display** — View messages with tool call collapsing
 - **Agent Management** — View and edit agent definitions
 - **File Browser** — Browse conversation workspace files
-- **Role-aware UI** — Adapts to admin/observer permissions
+- **Role indicator** — Displays the authenticated role and hides write controls for the built-in observer role
 
 ## Authentication
 
@@ -28,7 +28,9 @@ The dashboard HTML is served without authentication. API calls from the dashboar
 3. The key is stored in `sessionStorage` (not persisted to disk)
 4. All subsequent API calls and WebSocket connections use this key
 
-**Observer mode:** The dashboard hides write controls when an observer key is used.
+**Authorization:** The dashboard hides write controls when an observer key is
+used. The server still checks the exact permission for every request, including
+requests made with `user` or custom-role keys.
 
 ## Architecture
 
@@ -37,7 +39,7 @@ The dashboard is a single-file SPA (Single Page Application) served as inline HT
 ```
 GET /dashboard  →  index.html (SPA)
   ├── Login screen (if no key in sessionStorage)
-  ├── Conversation list (admin: full controls, observer: read-only)
+  ├── Conversation list (role displayed; observer controls hidden)
   └── Conversation detail
        ├── Event timeline (real-time WebSocket)
        ├── Message display
@@ -62,7 +64,6 @@ Events are displayed in a timeline with:
 
 - Single-file architecture limits UI complexity
 - No message editing or retry
+- No message-composer control; use the CLI or API to send prompts
 - No multi-conversation view (one conversation at a time)
 - No data persistence (refresh resets the view)
-
-**Future:** Phase 2 will add message sending from the dashboard UI.

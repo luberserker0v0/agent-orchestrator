@@ -24,7 +24,7 @@ Any config field can be overridden via environment variables:
 | `orchestrator.maxInstances` | `AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES` |
 | `orchestrator.idleTimeoutMs` | `AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS` |
 | `orchestrator.idleSweepIntervalMs` | `AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS` |
-| `workspace.maxSizeBytes` | `AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES` |
+| `workspace.maxSizeBytes` | `AGENTORCHESTRATOR_WORKSPACE_MAX_SIZE_BYTES` |
 | `logging.file.maxFileSizeBytes` | `AGENTORCHESTRATOR_LOGGING_FILE_MAX_FILE_SIZE_BYTES` |
 | `cleanup.sweepIntervalMs` | `AGENTORCHESTRATOR_CLEANUP_SWEEP_INTERVAL_MS` |
 | `cleanup.orphanedData.gracePeriodMs` | `AGENTORCHESTRATOR_CLEANUP_ORPHANED_DATA_GRACE_PERIOD_MS` |

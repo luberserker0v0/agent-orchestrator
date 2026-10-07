@@ -16,13 +16,17 @@ Operational commands accept these global options:
 | Option | Environment fallback | Default |
 |--------|----------------------|---------|
 | `--server <url>` | `AOR_SERVER_URL` | `http://127.0.0.1:8080` |
-| `--api-key-file <path>` | `AOR_API_KEY` | unauthenticated |
+| `--api-key-file <path>` | `AOR_API_KEY` supplies the key value when no file is selected | unauthenticated |
 | `--timeout <ms>` | — | `30000` |
 | `--json` | — | human-readable tables |
 
 The key file takes precedence over `AOR_API_KEY`. Prefer either mechanism over
 putting a key directly in command arguments. JSON output is written alone to
 stdout; diagnostics are written to stderr.
+
+Global options can appear before or after nested subcommands. Server-only
+`--config`, `--host`, and `--port` options are also accepted by `aor serve`;
+`runtime` and `config validate` honor the selected local `--config` file.
 
 ## Operational Commands
 
@@ -131,6 +135,8 @@ Common Kubernetes options include `--kubeconfig`, `--context`, `--namespace`,
 placement controller. Execute mode requires both `--operator-execute` and
 `--operator-api-key-secret <name:key>`. Ingress (`--ingress-host`,
 `--ingress-class`, `--tls-secret`) and `--service-monitor` remain opt-in.
+`--cleanup-owner-id` is available when rendering an externally managed config
+whose stable cleanup owner must be supplied independently of `--config-file`.
 
 `aor operator --api-key` remains supported for compatibility. For a Deployment,
 prefer `AOR_OPERATOR_API_KEY` populated from a Kubernetes Secret; the renderer

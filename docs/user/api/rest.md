@@ -1,17 +1,19 @@
 # REST API
 
-All endpoints are prefixed with `/api`. Authentication is required if `server.apiKeys` is configured.
+Application endpoints are prefixed with `/api`. When RBAC is enabled, every
+non-public operation requires the explicit permission shown below. Built-in
+roles and custom-role assignment are documented in the [RBAC guide](../rbac/).
 
 ## Health & Info
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/health` | No | Health check |
-| `GET` | `/metrics` | No | Prometheus metrics |
-| `GET` | `/api-docs` | No | Swagger UI |
-| `GET` | `/api-docs.json` | No | OpenAPI spec |
-| `GET` | `/api/runtimes` | Yes | List configured runtimes |
-| `GET` | `/api/auth/role` | Yes | Get current API key role |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/health` | Public | Health check |
+| `GET` | `/metrics` | Public | Prometheus metrics |
+| `GET` | `/api-docs` | Public | Swagger UI |
+| `GET` | `/api-docs.json` | Public | OpenAPI spec |
+| `GET` | `/api/runtimes` | `runtime:list` | List configured runtimes |
+| `GET` | `/api/auth/role` | Authenticated | Get current API key role |
 
 ## Cleanup
 
@@ -28,13 +30,13 @@ status. Candidate records never include absolute filesystem paths.
 
 ## Conversations
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `POST` | `/api/conversations` | Admin | Create conversation |
-| `GET` | `/api/conversations` | Yes | List conversations |
-| `GET` | `/api/conversations/:id` | Yes | Get conversation |
-| `DELETE` | `/api/conversations/:id` | Admin | Delete conversation |
-| `GET` | `/api/conversations/:id/events` | Yes | Get events (query: `limit`, max 100) |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `POST` | `/api/conversations` | `conversation:start` | Prepare conversation and workspace |
+| `GET` | `/api/conversations` | `conversation:list` | List conversations |
+| `GET` | `/api/conversations/:id` | `conversation:get` | Get conversation |
+| `DELETE` | `/api/conversations/:id` | `conversation:delete` | Delete conversation and managed data |
+| `GET` | `/api/conversations/:id/events` | `conversation:events` | Get events (query: `limit`, max 100) |
 
 Client-supplied conversation IDs must contain 1-52 lowercase letters, digits,
 or hyphens and must start and end with a letter or digit. Invalid IDs return
@@ -42,65 +44,66 @@ or hyphens and must start and end with a letter or digit. Invalid IDs return
 
 ### Conversation Lifecycle
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `POST` | `/api/conversations/:id/start` | Admin | Start OpenCode instance |
-| `POST` | `/api/conversations/:id/stop` | Admin | Stop instance |
-| `POST` | `/api/conversations/:id/restart` | Admin | Restart instance |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `POST` | `/api/conversations/:id/start` | `conversation:start` | Start OpenCode instance |
+| `POST` | `/api/conversations/:id/stop` | `conversation:stop` | Stop instance and preserve data |
+| `POST` | `/api/conversations/:id/restart` | `conversation:restart` | Restart instance and resume session when possible |
+| `POST` | `/api/conversations/:id/migrate` | `conversation:migrate` | Move a Kubernetes conversation to body `nodeName` |
 
 ## Configuration
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/conversations/:id/config` | Yes | Read OpenCode config |
-| `POST` | `/api/conversations/:id/config` | Admin | Write config |
-| `PATCH` | `/api/conversations/:id/config` | Admin | Patch config (deep merge) |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/conversations/:id/config` | `config:get` | Read OpenCode config (may contain credentials) |
+| `POST` | `/api/conversations/:id/config` | `config:write` | Replace config atomically |
+| `PATCH` | `/api/conversations/:id/config` | `config:write` | Patch config (deep merge) |
 
 ## Agents
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/conversations/:id/agents` | Yes | List agents |
-| `GET` | `/api/conversations/:id/agents/:name` | Yes | Read agent content |
-| `PUT` | `/api/conversations/:id/agents` | Admin | Write agent (body: `{ name, content }`) |
-| `DELETE` | `/api/conversations/:id/agents/:name` | Admin | Delete agent |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/conversations/:id/agents` | `agent:list` | List agents |
+| `GET` | `/api/conversations/:id/agents/:name` | `agent:get` | Read agent content |
+| `PUT` | `/api/conversations/:id/agents` | `agent:write` | Write agent (body: `{ name, content }`) |
+| `DELETE` | `/api/conversations/:id/agents/:name` | `agent:delete` | Delete agent |
 
 ### AGENTS.md
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/conversations/:id/agent/config` | Yes | Read AGENTS.md |
-| `PUT` | `/api/conversations/:id/agent/config` | Admin | Write AGENTS.md |
-| `DELETE` | `/api/conversations/:id/agent/config` | Admin | Delete AGENTS.md |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/conversations/:id/agent/config` | `agent:get` | Read AGENTS.md |
+| `PUT` | `/api/conversations/:id/agent/config` | `agent:write` | Write AGENTS.md |
+| `DELETE` | `/api/conversations/:id/agent/config` | `agent:delete` | Delete AGENTS.md |
 
 ## Files
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `POST` | `/api/conversations/:id/files/list` | Yes | List files (body: `{ path? }`) |
-| `POST` | `/api/conversations/:id/files/read` | Yes | Read file (body: `{ path }`) |
-| `PUT` | `/api/conversations/:id/files` | Admin | Write file (body: `{ path, content }`) |
-| `POST` | `/api/conversations/:id/files/delete` | Admin | Delete file (body: `{ path }`) |
-| `POST` | `/api/conversations/:id/files/copy` | Admin | Copy file (body: `{ source, dest }`) |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `POST` | `/api/conversations/:id/files/list` | `file:list` | List files (body: `{ path? }`) |
+| `POST` | `/api/conversations/:id/files/read` | `file:read` | Read file (body: `{ path }`) |
+| `PUT` | `/api/conversations/:id/files` | `file:write` | Write file (body: `{ path, content }`) |
+| `POST` | `/api/conversations/:id/files/delete` | `file:delete` | Delete file (body: `{ path }`) |
+| `POST` | `/api/conversations/:id/files/copy` | `file:copy` | Copy approved local source (body: `{ source, dest }`) |
 
 ## Sessions
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/conversations/:id/sessions` | Yes | List sessions |
-| `GET` | `/api/conversations/:id/sessions/:sid` | Yes | Get session |
-| `GET` | `/api/conversations/:id/sessions/:sid/children` | Yes | Get session children |
-| `GET` | `/api/conversations/:id/sessions/:sid/messages` | Yes | Get session messages |
-| `POST` | `/api/conversations/:id/sessions` | Admin | Create session |
-| `POST` | `/api/conversations/:id/sessions/:sid/fork` | Admin | Fork session |
-| `DELETE` | `/api/conversations/:id/sessions/:sid` | Admin | Delete session |
-| `POST` | `/api/conversations/:id/sessions/abort` | Admin | Abort current session |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/conversations/:id/sessions` | `session:list` | List sessions |
+| `GET` | `/api/conversations/:id/sessions/:sid` | `session:get` | Get session |
+| `GET` | `/api/conversations/:id/sessions/:sid/children` | `session:children` | Get session children |
+| `GET` | `/api/conversations/:id/sessions/:sid/messages` | `message:history` | Get session messages |
+| `POST` | `/api/conversations/:id/sessions` | `session:create` | Create session |
+| `POST` | `/api/conversations/:id/sessions/:sid/fork` | `session:fork` | Fork session |
+| `DELETE` | `/api/conversations/:id/sessions/:sid` | `session:delete` | Delete session |
+| `POST` | `/api/conversations/:id/sessions/abort` | `session:abort` | Abort current session |
 
 ## Messages
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `POST` | `/api/conversations/:id/message` | Admin | Send message |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `POST` | `/api/conversations/:id/message` | `message:send` | Send message |
 
 ### Request Body
 
@@ -130,33 +133,47 @@ or hyphens and must start and end with a letter or digit. Invalid IDs return
 
 ## Providers
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/conversations/:id/providers` | Yes | List available providers |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/conversations/:id/providers` | `provider:list` | List available providers |
 
 ## Skills
 
 ### Global Skills
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/conversations/:id/skills` | Yes | List skills |
-| `GET` | `/api/conversations/:id/skills/:name` | Yes | Read skill SKILL.md |
-| `GET` | `/api/conversations/:id/skills/:name/info` | Yes | Get skill info (files, size, sha256) |
-| `POST` | `/api/conversations/:id/skills/upload` | Admin | Upload skill (multipart, query: `name`) |
-| `POST` | `/api/conversations/:id/skills/import` | Admin | Import skill (body: `{ source, name }`) |
-| `DELETE` | `/api/conversations/:id/skills/:name` | Admin | Delete skill |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/conversations/:id/skills` | `skill:list` | List skills |
+| `GET` | `/api/conversations/:id/skills/:name` | `skill:get` | Read skill SKILL.md |
+| `GET` | `/api/conversations/:id/skills/:name/info` | `skill:info` | Get skill info (files, size, sha256) |
+| `POST` | `/api/conversations/:id/skills/upload` | `skill:import` | Upload skill ZIP (raw body, query: `name`) |
+| `POST` | `/api/conversations/:id/skills/import` | `skill:import` | Import approved local skill (body: `{ source, name }`) |
+| `DELETE` | `/api/conversations/:id/skills/:name` | `skill:delete` | Delete skill |
 
 ### Agent-Scoped Skills
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/api/conversations/:id/agents/:agent/skills` | Yes | List agent skills |
-| `GET` | `/api/conversations/:id/agents/:agent/skills/:name` | Yes | Read agent skill |
-| `GET` | `/api/conversations/:id/agents/:agent/skills/:name/info` | Yes | Get agent skill info |
-| `POST` | `/api/conversations/:id/agents/:agent/skills/upload` | Admin | Upload agent skill |
-| `POST` | `/api/conversations/:id/agents/:agent/skills/import` | Admin | Import agent skill |
-| `DELETE` | `/api/conversations/:id/agents/:agent/skills/:name` | Admin | Delete agent skill |
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/conversations/:id/agents/:agent/skills` | `skill:list` | List agent skills |
+| `GET` | `/api/conversations/:id/agents/:agent/skills/:name` | `skill:get` | Read agent skill |
+| `GET` | `/api/conversations/:id/agents/:agent/skills/:name/info` | `skill:info` | Get agent skill info |
+| `POST` | `/api/conversations/:id/agents/:agent/skills/upload` | `skill:import` | Upload agent skill ZIP |
+| `POST` | `/api/conversations/:id/agents/:agent/skills/import` | `skill:import` | Import approved local agent skill |
+| `DELETE` | `/api/conversations/:id/agents/:agent/skills/:name` | `skill:delete` | Delete agent skill |
+
+## Roles
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| `GET` | `/api/roles` | `role:read` | List built-in and custom roles |
+| `GET` | `/api/roles/:name` | `role:read` | Get one role |
+| `POST` | `/api/roles` | `role:write` | Create a custom role |
+| `PUT` | `/api/roles/:name` | `role:write` | Replace custom-role permissions |
+| `DELETE` | `/api/roles/:name` | `role:write` | Delete a custom role |
+
+Built-in roles are immutable. Role mutations are persisted atomically to the
+AO configuration file; a failed write leaves the previous in-memory and on-disk
+configuration intact.
 
 ## Example: Full Workflow
 

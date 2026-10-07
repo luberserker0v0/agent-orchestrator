@@ -1,270 +1,130 @@
 # Runtime Abstraction
 
-This document describes the runtime abstraction layer that supports multiple ways to spawn OpenCode instances.
+Runtime IDs are user-facing configuration identities (for example,
+`opencode-docker`). Runtime types select an implementation (`direct`, `docker`,
+or `kubernetes`). Multiple IDs can use the same type with different settings.
 
-## Architecture
+## Layers
 
-```
-┌─────────────────────────────────────────────┐
-│              RuntimeManager                  │
-│  - Manages instance map                     │
-│  - Handles lifecycle (start/stop/restart)   │
-│  - Policy queries (idle detection)          │
-└──────────────────────┬──────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────┐
-│              RuntimeRegistry                 │
-│  - Maps type IDs to Runtime implementations │
-│  - Validates runtime entries                │
-└──────────────────────┬──────────────────────┘
-                       │
-         ┌─────────────┴─────────────┐
-         │                           │
-┌────────▼────────┐       ┌─────────▼────────┐
-│  DirectRuntime   │       │  DockerRuntime   │
-│  - child_process │       │  - docker CLI    │
-│  - treeKill      │       │  - docker rm -f  │
-└─────────────────┘       └──────────────────┘
+```mermaid
+flowchart LR
+    IM[InstanceManager<br/>capacity and idle policy] --> RM[RuntimeManager<br/>active instance ownership]
+    RM --> RR[RuntimeRegistry<br/>configured IDs]
+    RR --> D[DirectRuntime]
+    RR --> C[DockerRuntime]
+    RR --> K[KubernetesRuntime]
+    RF[RuntimeFactory<br/>type constructors and validators] --> RR
 ```
 
-## Runtime Interface
+- `InstanceManager` reserves capacity, applies LRU/idle policy, and resolves the
+  workspace.
+- `RuntimeManager` owns active endpoints, handles, ports, activity timestamps,
+  exit generations, and persistent-data hooks.
+- `RuntimeRegistry` retains valid adapters and invalid configured entries so
+  `/api/runtimes` can explain why one is unavailable.
+- `RuntimeFactory` maps runtime types to constructors and validators during
+  bootstrap.
+
+## Contracts
 
 ```typescript
-interface Runtime {
-  spawn(config: SpawnConfig): Promise<RuntimeHandle>;
-  kill(handle: RuntimeHandle): Promise<void>;
-  healthCheck(port: number, password: string): Promise<boolean>;
-}
+interface AgentRuntime {
+  readonly type: string;
+  readonly capabilities: AgentCapabilities;
 
-interface RuntimeHandle {
-  pid?: number;           // DirectRuntime: process ID
-  containerName?: string; // DockerRuntime: container name
-  port: number;           // Instance port
-}
+  start(
+    id: string,
+    workspacePath: string,
+    auth: { username: string; password: string },
+    healthCheck: HealthCheckConfig,
+    runtimeAccess?: RuntimeAccess,
+  ): Promise<AgentEndpoint>;
 
-interface SpawnConfig {
-  id: string;
-  port: number;
-  password: string;
-  workspacePath: string;
-  config: RuntimeEntry;
-}
-```
-
-## DirectRuntime
-
-Spawns OpenCode as a child process using `cross-spawn`.
-
-### Spawn Flow
-
-1. Resolve binary path (from `config.binary`)
-2. Set environment variables:
-   - `OPENCODE_SERVER_PORT` — Allocated port
-   - `OPENCODE_SERVER_PASSWORD` — Ephemeral password
-   - `OPENCODE_WORKSPACE_PATH` — Workspace directory
-3. Spawn process with `cross-spawn`
-4. Store PID in handle
-5. Return handle
-
-### Kill Flow
-
-1. Use `tree-kill` to kill process tree
-2. Wait for process to exit
-3. Clean up handle
-
-### Health Check
-
-```typescript
-async healthCheck(port: number, password: string): Promise<boolean> {
-  const res = await fetch(`http://127.0.0.1:${port}/health`, {
-    headers: { 'Authorization': `Bearer ${password}` },
-    signal: AbortSignal.timeout(5000),
-  });
-  return res.ok;
+  stop(handle?: InstanceHandle, signal?: string): Promise<void>;
+  restart(id: string, healthCheck: HealthCheckConfig): Promise<AgentEndpoint>;
+  cleanupOrphans?(): Promise<void>;
+  preparePersistentDataDeletion?(id: string): Promise<void>;
+  deletePersistentData?(id: string): Promise<void>;
 }
 ```
 
-### Configuration
+`AgentEndpoint` contains the typed OpenCode client and optional process handle,
+port, base URL, Kubernetes node name, and persistent-data ownership annotations.
+`InstanceHandle` provides `kill()`, bounded `waitForExit()`, `onExit()`,
+`hasExited()`, and exit metadata.
 
-```jsonc
-{
-  "id": "opencode-direct",
-  "type": "direct",
-  "config": {
-    "binary": "opencode",      // Command or absolute path
-    "version": "1.17.8",       // Optional version hint
-    "instanceHost": "127.0.0.1" // Optional hostname
-  }
-}
+The optional persistent-data methods are invoked only for explicit conversation
+deletion. Stop, restart, migration, idle eviction, and AO shutdown preserve
+managed session data.
+
+## Direct Runtime
+
+`DirectRuntime` starts:
+
+```text
+opencode serve --port <allocated> --hostname 0.0.0.0
 ```
 
-## DockerRuntime
+It sets per-instance server credentials, uses the workspace as `cwd`, optionally
+maps managed `sessionStorage` through XDG/SQLite environment variables, and
+terminates the process tree with `tree-kill`. A handle is not considered gone
+until exit is observed or termination times out.
 
-Spawns OpenCode in a Docker container using the Docker CLI.
+## Docker Runtime
 
-### Spawn Flow
+`DockerRuntime` uses a deterministic container name
+`agentorchestrator-<conversationId>`, mounts the workspace, maps the allocated
+port unless host networking is selected, injects OpenCode server credentials,
+and waits for authenticated health.
 
-1. Generate container name: `ao-{conversationId}-{timestamp}`
-2. Set environment variables:
-   - `OPENCODE_SERVER_PORT` — Container port
-   - `OPENCODE_SERVER_PASSWORD` — Ephemeral password
-   - `OPENCODE_WORKSPACE_PATH` — Mounted workspace path
-3. Run `docker run` with:
-   - Port mapping (unless `networkMode: host`)
-   - Volume mounts (workspace)
-   - Network mode configuration
-   - Environment variables
-4. Store container name in handle
-5. Return handle
+Supported runtime-specific controls include:
 
-### Kill Flow
+- `networkMode` and `instanceHost`;
+- managed `sessionStorage` mounted at `/opencode-data`;
+- Docker `local`/`json-file` log limits;
+- `containerUser` plus a writable `containerHome` for Linux bind-mount
+  ownership.
 
-1. Run `docker rm -f {containerName}`
-2. Wait for container to exit
-3. Clean up handle
+The runtime uses `docker rm -f` for stop and observes `docker wait` for exit.
 
-### Health Check
+## Kubernetes Runtime
 
-Same as DirectRuntime — HTTP GET to `/health` endpoint.
+`KubernetesRuntime` creates one PVC (when absent), Pod, and ClusterIP Service per
+conversation. It:
 
-### Configuration
+- applies owner/artifact/state annotations;
+- mounts the whole conversation PVC for workspace and session paths;
+- optionally pins the Pod to a migration target node;
+- waits for Pod Ready, then verifies OpenCode health;
+- deletes Pods/Services with UID-aware safety and delegates retained-PVC policy
+  to explicit deletion or the cleanup coordinator.
 
-```jsonc
-{
-  "id": "opencode-docker",
-  "type": "docker",
-  "config": {
-    "image": "ghcr.io/anomalyco/opencode:1.17.8",
-    "instanceHost": "127.0.0.1",
-    "networkMode": "host"  // Optional: host, bridge, or custom
-  }
-}
-```
+When AO runs outside the cluster, `instanceHost` can point at a matching
+port-forward. Normal in-cluster operation uses Service DNS.
 
-### Network Modes
+## Start and Exit Safety
 
-| Mode | Port Mapping | Use Case |
-|------|-------------|----------|
-| `host` | Skipped | Best performance, no isolation |
-| `bridge` | Required | Default Docker networking |
-| Custom | Required | Multi-container setups |
+1. `InstanceManager` adds the ID to `pendingStarts` before awaiting, so concurrent
+   starts cannot overcommit `maxInstances`.
+2. `RuntimeManager` calls the selected adapter and registers a monotonically
+   increasing generation on the returned handle.
+3. A stale exit callback from a replaced handle is ignored when its generation
+   no longer matches.
+4. Instance state and ports are released only after termination is observed.
+5. The registered destroy callback transitions a still-active conversation to
+   `stopped` without deleting its workspace or session data.
 
-## RuntimeRegistry
+## Adding a Runtime Type
 
-Maps runtime type IDs to implementations.
+1. Implement `AgentRuntime` and its handle/client integration.
+2. Add a typed config entry to `src/config-loader.ts`.
+3. Register the constructor and validator in
+   `src/bootstrap/runtime-environment.ts`.
+4. Define persistent-data behavior explicitly. If the runtime cannot safely own
+   deletion, omit the optional hooks.
+5. Add unit coverage for arguments, health, failure cleanup, exit observation,
+   restart, and generation safety.
+6. Add an isolated E2E scenario and update configuration/runtime documentation.
 
-```typescript
-class RuntimeRegistry {
-  register(id: string, runtime: Runtime): void;
-  get(id: string): Runtime;
-  has(id: string): boolean;
-  list(): string[];
-}
-```
-
-**Registration at startup:**
-
-```typescript
-const registry = new RuntimeRegistry();
-registry.register('direct', new DirectRuntime());
-registry.register('docker', new DockerRuntime());
-```
-
-## RuntimeManager
-
-Manages the instance map and lifecycle.
-
-```typescript
-class RuntimeManager {
-  async start(id: string, config: SpawnConfig): Promise<RuntimeHandle>;
-  async destroy(id: string): Promise<void>;
-  getHandle(id: string): RuntimeHandle | undefined;
-  setOnDestroyed(callback: OnDestroyedCallback): void;
-}
-```
-
-### Instance Map
-
-```typescript
-private instances: Map<string, {
-  handle: RuntimeHandle;
-  runtime: Runtime;
-  conversationId: string;
-}>;
-```
-
-### Destroy Callback
-
-When an instance is destroyed (by idle timeout or error), the manager calls the registered callback:
-
-```typescript
-runtimeManager.setOnDestroyed((id, reason) => {
-  // 1. Stop SSE bridge
-  // 2. Cancel health check
-  // 3. Transition conversation to 'stopped'
-  // 4. Emit 'conversation.stopped' event
-});
-```
-
-## Adding a New Runtime
-
-To add a new runtime (e.g., see `src/agent-runtime/runtimes/kubernetes.ts` for a
-complete example: Pod + Service lifecycle against the Kubernetes API):
-
-1. Implement the `AgentRuntime` interface (`src/agent-runtime/types.ts`):
-
-```typescript
-class KubernetesRuntime implements AgentRuntime {
-  readonly type = 'kubernetes';
-  readonly capabilities: AgentCapabilities = { /* ... */ };
-
-  async start(id, workspacePath, auth, healthCheckConfig, runtimeAccess?): Promise<AgentEndpoint> {
-    // Provision the instance, wait for ready + healthy, return { client, port, handle, baseUrl }
-  }
-
-  async stop(handle?: InstanceHandle): Promise<void> {
-    // Tear the instance down (404-tolerant)
-  }
-
-  async restart(id, healthCheckConfig): Promise<AgentEndpoint> {
-    // Recreate the instance, preserving resumable state (sessions, volumes)
-  }
-
-  async cleanupOrphans(): Promise<void> {
-    // Remove instances no longer tracked (best effort)
-  }
-}
-```
-
-2. Register in `src/index.ts` with a config validator:
-
-```typescript
-runtimeFactory.register('kubernetes', KubernetesRuntime, (config) => {
-  const errs: string[] = [];
-  // ...validate required fields, return error strings (empty = valid)
-  return errs;
-});
-```
-
-3. Add config types in `config-loader.ts`:
-
-```typescript
-interface KubernetesRuntimeConfig {
-  image: string;
-  namespace?: string;
-  instanceHost?: string;
-  // ...runtime-specific knobs with defaults documented in AGENTS.md
-}
-```
-
-4. Use in config:
-
-```jsonc
-{
-  "orchestrator": {
-    "runtimes": [
-      { "id": "oc-k8s", "type": "kubernetes", "config": { "namespace": "ao-instances", "image": "..." } }
-    ]
-  }
-}
-```
+Do not register concrete runtimes directly in `src/index.ts`; bootstrap owns
+construction so server startup, config validation, and tests use one path.

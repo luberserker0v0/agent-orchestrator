@@ -12,12 +12,15 @@ The port is configurable via `server.port` or the `--port` CLI flag.
 
 ## Authentication
 
-If `server.apiKeys` is configured, all requests must include a valid API key:
+When RBAC is enabled, non-public requests must include a valid API key and the
+key's role must grant the operation's explicit permission:
 
 - **HTTP:** `Authorization: Bearer <key>` header
 - **WebSocket:** `?apiKey=<key>` query parameter
 
-See [RBAC Guide](../rbac/) for details.
+RBAC can be explicitly enabled or disabled with `server.rbac.enabled`; when it
+is omitted, configured `apiKeys` enable RBAC automatically. See the
+[RBAC Guide](../rbac/) for details.
 
 ## Response Format
 
@@ -48,10 +51,11 @@ See [RBAC Guide](../rbac/) for details.
 |------|-------------|-------------|
 | `UNAUTHORIZED` | 401 | Missing or invalid API key |
 | `FORBIDDEN` | 403 | Insufficient permissions (observer trying to write) |
-| `NOT_FOUND` | 404 | Resource not found |
-| `VALIDATION_ERROR` | 400 | Invalid request body |
+| `CONVERSATION_NOT_FOUND` and resource-specific codes | 404 | Resource not found |
+| `INVALID_REQUEST_BODY`, `MISSING_FIELD` | 400 | Invalid request body |
 | `WORKSPACE_QUOTA_EXCEEDED` | 413 | Workspace size limit exceeded |
-| `INSTANCE_ERROR` | 500 | OpenCode instance error |
+| `CLEANUP_IN_PROGRESS` | 409 | Another cleanup operation owns the single-flight gate |
+| `PERSISTENT_DATA_CLEANUP_PENDING` | 500 | Safe deletion could not complete and requires retry |
 
 ## API Sections
 

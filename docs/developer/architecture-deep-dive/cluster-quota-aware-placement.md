@@ -1,8 +1,11 @@
-# Cluster Plan: Quota-Aware Placement with Per-Conversation Volumes
+# Historical Cluster Plan: Quota-Aware Placement with Per-Conversation Volumes
 
-> **Status:** Design (locked). Target platform: Kubernetes. Goals: scale-out + HA.
-> Shared infra: Redis (leases, event streams) + per-conversation RWO volumes + sticky ingress.
-> This document is the single source of truth for the cluster build. Keep it updated as phases land.
+> **Status:** Historical design record. This document preserves the reasoning
+> that preceded the current Kubernetes runtime and placement operator; line
+> references and proposed Redis/HA phases below are not a description of the
+> current implementation. Use the [module reference](../../architecture/modules.md),
+> [Kubernetes setup](../../user/setup/kubernetes.md), and
+> [CLI reference](../../user/cli.md) for supported behavior.
 
 ## 1. Problem
 

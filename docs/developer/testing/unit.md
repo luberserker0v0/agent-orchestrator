@@ -67,13 +67,24 @@ vi.mock('./config-loader.js', () => ({
 }));
 ```
 
-### Mock Classes
+### Mock Interfaces
 
 ```typescript
-class MockRuntime implements Runtime {
-  spawn = vi.fn().mockResolvedValue({ pid: 123, port: 30000 });
-  kill = vi.fn().mockResolvedValue(undefined);
-  healthCheck = vi.fn().mockResolvedValue(true);
+class MockRuntime implements AgentRuntime {
+  readonly type = 'mock';
+  readonly capabilities = {
+    sessions: true,
+    streaming: true,
+    files: true,
+    tools: true,
+    config: true,
+    agents: true,
+    skills: true,
+  };
+
+  start = vi.fn();
+  stop = vi.fn().mockResolvedValue(undefined);
+  restart = vi.fn();
 }
 ```
 

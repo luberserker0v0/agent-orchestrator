@@ -10,7 +10,7 @@ The `server` section controls the HTTP server, authentication, and API access.
 | `host` | string | `'127.0.0.1'` | Bind address. Use `0.0.0.0` to listen on all interfaces. |
 | `shutdownTimeoutMs` | integer | `15000` | Maximum time (ms) for graceful shutdown before force exit. |
 | `apiKey` | string | (none) | **Deprecated.** Single API key for admin access. Min 8 characters. |
-| `apiKeys` | array | (none) | Role-based API keys. Each entry: `{ key, role, name? }` where `role` is `admin`, `user`, or `observer`. See below. |
+| `apiKeys` | array | (none) | Role-based API keys. Each entry is `{ key, role, name? }`; `role` names a built-in or configured custom role. See below. |
 | `rbac.enabled` | boolean | (undefined) | `true` = enforce RBAC (startup fails if no API keys configured). `false` = disable auth. Omitted = backward-compatible (enabled when `apiKeys` is present). |
 
 ## API Keys
@@ -20,7 +20,7 @@ The `apiKeys` array defines role-based access control. Each entry has:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `key` | string | Yes | The API key string. Min 8 characters. |
-| `role` | string | Yes | One of: `"admin"`, `"user"`, `"observer"` |
+| `role` | string | Yes | `"admin"`, `"user"`, `"observer"`, or a role declared in the top-level `roles` object. |
 | `name` | string | No | Human-readable name for this key. |
 
 ### Example
