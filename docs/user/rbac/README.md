@@ -4,7 +4,9 @@ AgentOrchestrator implements role-based access control to restrict API access ba
 
 ## Overview
 
-RBAC is **optional**. If no `apiKeys` are configured, all requests are allowed without authentication.
+RBAC is configurable. Set `server.rbac.enabled` explicitly to enable or disable
+it. When omitted, configured `apiKeys` enable RBAC automatically; with no keys,
+authentication remains disabled for backward compatibility.
 
 When `apiKeys` is configured, every request must include a valid API key. The key's role determines what operations are permitted.
 

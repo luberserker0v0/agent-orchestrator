@@ -20,7 +20,9 @@ The `maxSizeBytes` field limits the total size of files in a conversation worksp
 | `0` | Unlimited — no size checks performed |
 | `> 0` | Enforced — writes that would exceed the quota are rejected with `WORKSPACE_QUOTA_EXCEEDED` |
 
-**Environment variable:** `AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES=0` sets unlimited.
+**Environment variable:** `AGENTORCHESTRATOR_WORKSPACE_MAX_SIZE_BYTES=0` sets
+unlimited. The earlier concatenated form
+`AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES` remains supported.
 
 ### Common Sizes
 

@@ -160,6 +160,10 @@ aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation ge
 aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key session create direct-smoke --title "Persistence check"
 ```
 
+Repeat `conversation get direct-smoke` until it reports `ready: true` before
+creating the session. Starting a runtime is asynchronous from the CLI caller's
+point of view on slower hosts.
+
 Stopping a conversation destroys the process but must preserve the managed
 session directory. Restart it and confirm the session still exists:
 
@@ -185,11 +189,13 @@ conversation and send a low-cost prompt, optionally selecting a provider/model:
 
 ```bash
 aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation create direct-llm --agent-type opencode-direct --start
+aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation get direct-llm
 aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key message send direct-llm --text "Reply with exactly: AO is ready"
 aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation delete direct-llm --confirm
 ```
 
-This call can consume provider credits. If no default model is configured, add
+Wait for `ready: true` before sending the message. This call can consume
+provider credits. If no default model is configured, add
 `--model provider/model` using a model available to your OpenCode installation.
 
 ## 7. Shutdown and diagnose

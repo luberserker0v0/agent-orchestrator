@@ -18,6 +18,8 @@ curl http://localhost:8080/metrics
 | `agentorchestrator_instances_total_created` | Counter | Total instances created since startup |
 | `agentorchestrator_instances_errors_total` | Counter | Total instance errors (labels: type) |
 | `agentorchestrator_instance_spawn_duration_seconds` | Histogram | Time to spawn an instance |
+| `agentorchestrator_instance_evictions_total` | Counter | LRU capacity evictions |
+| `agentorchestrator_instance_idle_timeouts_total` | Counter | Instances stopped by idle timeout |
 
 ### Port Pool Metrics
 
@@ -43,6 +45,26 @@ curl http://localhost:8080/metrics
 | Metric | Type | Description |
 |--------|------|-------------|
 | `agentorchestrator_conversation_state_changes_total` | Counter | State transitions (labels: status) |
+
+### OpenCode, Messaging, and Placement Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `agentorchestrator_opencode_http_requests_total` | Counter | OpenCode proxy requests (labels: method, path, status) |
+| `agentorchestrator_opencode_http_request_duration_seconds` | Histogram | OpenCode proxy request latency (labels: method, path) |
+| `agentorchestrator_sse_connections_active` | Gauge | Active OpenCode SSE streams |
+| `agentorchestrator_sse_reconnect_total` | Counter | SSE reconnect attempts (label: status) |
+| `agentorchestrator_messages_sent_total` | Counter | Message sends (label: status) |
+| `agentorchestrator_message_send_duration_seconds` | Histogram | Message-send latency |
+| `agentorchestrator_llm_quota_exhaustions_total` | Counter | Detected LLM quota or rate-limit responses (labels: code, model) |
+| `agentorchestrator_migrations_total` | Counter | Placement migrations (label: result) |
+
+### Workspace Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `agentorchestrator_workspaces_active` | Gauge | Workspaces known to this AO process |
+| `agentorchestrator_workspace_quota_exceeded_total` | Counter | Rejected writes that exceeded a workspace quota |
 
 ### Cleanup and File Logging Metrics
 
@@ -143,3 +165,8 @@ Key panels to create:
 | WebSocket Connections | `agentorchestrator_websocket_connections_active` | Gauge |
 | Heap Memory | `nodejs_heap_size_bytes` | Graph |
 | Event Loop Lag | `nodejs_event_loop_lag_seconds` | Graph |
+
+The registry currently exposes 26 AgentOrchestrator metrics in addition to the
+default `nodejs_*` and `process_*` series from `prom-client`. Keep dashboard
+labels bounded to the dimensions documented above; conversation IDs are not
+used as metric labels.

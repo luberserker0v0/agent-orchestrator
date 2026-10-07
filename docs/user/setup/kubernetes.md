@@ -182,6 +182,10 @@ kubectl get pod,service,pvc -n ao-instances -l agentorchestrator.io/conversation
 kubectl get opencodeinstance,conversationroute -n ao-instances
 ```
 
+Repeat `conversation get k8s-smoke` until it reports `ready: true` before
+creating the session. The first image pull and PVC attachment can take longer
+than later starts.
+
 Create a session, stop the runtime, and verify the PVC remains while the Pod is
 gone:
 

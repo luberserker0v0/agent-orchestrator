@@ -98,7 +98,7 @@ flowchart TB
 |----------|-------------|
 | [Data Flows](data-flows.md) | Step-by-step request/response sequences |
 | [Security](security.md) | Authentication, authorization, and RBAC model |
-| [Modules Reference](modules.md) | Core modules and method tables |
+| [Modules Reference](modules.md) | Current module boundaries and ownership |
 | [Setup Tutorials](../user/setup/) | Direct, Docker, and Kubernetes end-to-end procedures |
 | [API Reference](../user/api/) | REST, WebSocket, and SSE API documentation |
 | [Configuration](../user/configuration/) | Configuration fields and overrides |

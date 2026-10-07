@@ -17,8 +17,9 @@ Controls access to the AO REST and WebSocket APIs.
 | Legacy token | HTTP `Authorization: Bearer <key>` header | `server.apiKey` (deprecated) |
 
 **Behavior:**
-- If `server.apiKeys` is empty or not configured, **all requests are allowed** (backward compatibility)
-- If `server.apiKeys` is configured, every request must include a valid key
+- `server.rbac.enabled: true` requires configured API keys and enforces authentication and permissions.
+- `server.rbac.enabled: false` disables API authentication explicitly.
+- If `server.rbac.enabled` is omitted, RBAC is enabled when `server.apiKeys` is present and disabled otherwise for backward compatibility.
 - WebSocket connections authenticate during the HTTP upgrade via query param or header
 
 ### Layer 2: OpenCode Instance Authentication
@@ -44,22 +45,26 @@ Protects communication between OpenCode and AI providers.
 | Provider API key | `apiKey` field in `opencode.json` per provider |
 
 **Behavior:**
-- Each provider (Anthropic, OpenAI, etc.) requires its own API key
-- Keys are stored in the conversation-specific `opencode.json`
-- AO copies this config to the workspace at conversation start
-- Keys are never logged or exposed via API
+- Provider credentials may be supplied through the conversation-specific
+  OpenCode configuration or provider-supported environment mechanisms.
+- Configuration is stored in the managed workspace and can be read only by a
+  caller with `config:get`; treat that permission as secret-bearing access.
+- Configuration contents and credentials are excluded from logs, cleanup
+  reports, CLI installation inventories, and Kubernetes command summaries.
 
 ## Authorization (RBAC)
 
-AgentOrchestrator implements role-based access control with three built-in roles. RBAC is **optional** — if no `apiKeys` are configured, all requests are allowed without authentication.
+AgentOrchestrator implements role-based access control with three immutable
+built-in roles and configurable custom roles. RBAC behavior follows
+`server.rbac.enabled` and the backward-compatible auto-enable rule above.
 
 ### Roles
 
 | Role | Permissions | Description |
 |------|-------------|-------------|
 | `admin` | `["*"]` | Full access to all endpoints, including role management |
-| `user` | 16 write permissions | Can start conversations, send messages, manage files and sessions |
-| `observer` | 13 read permissions | Can view conversations, agents, files, sessions; cannot modify |
+| `user` | Operational read/write permissions | Can operate conversations, send messages, and manage files, sessions, agents, and skills; cannot migrate, manage roles, or run cleanup |
+| `observer` | Read permissions | Can inspect explicitly permitted runtime, role, conversation, message, config, agent, file, session, provider, and skill data |
 
 Custom roles can be created via the REST API or config file. See [RBAC Guide](../user/rbac/) for details.
 
@@ -71,7 +76,6 @@ Permissions use the format `resource:action` (e.g. `conversation:start`, `messag
 
 | Endpoint | Permission | Admin | User | Observer |
 |----------|-----------|-------|------|----------|
-| `GET *` | (none) | Yes | Yes | Yes |
 | `POST /api/conversations` | `conversation:start` | Yes | Yes | No |
 | `POST /api/conversations/:id/start` | `conversation:start` | Yes | Yes | No |
 | `POST /api/conversations/:id/stop` | `conversation:stop` | Yes | Yes | No |
@@ -97,6 +101,11 @@ Permissions use the format `resource:action` (e.g. `conversation:start`, `messag
 | `POST /api/cleanup/preview` | `cleanup:read` | Yes | No | No |
 | `POST /api/cleanup/run` | `cleanup:run` | Yes | No | No |
 
+The table emphasizes mutations and privileged operations. Read endpoints are
+not implicitly allowed: each maps to its corresponding permission such as
+`conversation:get`, `file:read`, `session:list`, or `role:read`. See the
+[REST reference](../user/api/rest.md) for the complete route mapping.
+
 ### WebSocket Permission Matrix
 
 | Method | Permission | Admin | User | Observer |
@@ -121,21 +130,21 @@ Permissions use the format `resource:action` (e.g. `conversation:start`, `messag
 | `conversation.stop` | `conversation:stop` | Yes | Yes | No |
 | `conversation.restart` | `conversation:restart` | Yes | Yes | No |
 | `conversation.delete` | `conversation:delete` | Yes | Yes | No |
-| `message.history` | (none) | Yes | Yes | Yes |
-| `config.get` | (none) | Yes | Yes | Yes |
-| `agent.list` | (none) | Yes | Yes | Yes |
-| `agent.get` | (none) | Yes | Yes | Yes |
-| `agent.config.get` | (none) | Yes | Yes | Yes |
-| `file.read` | (none) | Yes | Yes | Yes |
-| `file.list` | (none) | Yes | Yes | Yes |
-| `session.list` | (none) | Yes | Yes | Yes |
-| `session.get` | (none) | Yes | Yes | Yes |
-| `session.children` | (none) | Yes | Yes | Yes |
-| `providers.list` | (none) | Yes | Yes | Yes |
-| `skills.list` | (none) | Yes | Yes | Yes |
-| `skills.get` | (none) | Yes | Yes | Yes |
-| `skills.info` | (none) | Yes | Yes | Yes |
-| `conversation.status` | (none) | Yes | Yes | Yes |
+| `message.history` | `message:history` | Yes | Yes | Yes |
+| `config.get` | `config:get` | Yes | Yes | Yes |
+| `agent.list` | `agent:list` | Yes | Yes | Yes |
+| `agent.get` | `agent:get` | Yes | Yes | Yes |
+| `agent.config.get` | `agent:get` | Yes | Yes | Yes |
+| `file.read` | `file:read` | Yes | Yes | Yes |
+| `file.list` | `file:list` | Yes | Yes | Yes |
+| `session.list` | `session:list` | Yes | Yes | Yes |
+| `session.get` | `session:get` | Yes | Yes | Yes |
+| `session.children` | `session:children` | Yes | Yes | Yes |
+| `providers.list` | `provider:list` | Yes | Yes | Yes |
+| `skills.list` | `skill:list` | Yes | Yes | Yes |
+| `skills.get` | `skill:get` | Yes | Yes | Yes |
+| `skills.info` | `skill:info` | Yes | Yes | Yes |
+| `conversation.status` | `conversation:get` | Yes | Yes | Yes |
 
 ### Public Paths
 

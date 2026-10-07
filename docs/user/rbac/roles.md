@@ -14,7 +14,9 @@ Full access to all operations, including role management.
 
 ### User
 
-Can perform most operations but cannot manage roles. Suitable for regular users who need to interact with conversations.
+Can perform most conversation operations but cannot migrate conversations,
+manage roles, or access cleanup. Suitable for regular users who need to interact
+with conversations.
 
 **Permissions:**
 
@@ -34,18 +36,21 @@ Can perform most operations but cannot manage roles. Suitable for regular users 
 
 ### Observer
 
-Read-only access. Can view everything but cannot modify anything.
+Read-only access to the explicitly listed resources. It cannot read arbitrary
+unmapped endpoints and cannot modify anything.
 
 **Permissions:**
 
 | Resource | Permissions |
 |----------|-------------|
+| Runtime/Role | `runtime:list`, `role:read` |
 | Conversation | `conversation:list`, `conversation:get`, `conversation:events` |
 | Message | `message:history` |
 | Config | `config:get` |
 | Agent | `agent:list`, `agent:get` |
 | File | `file:read`, `file:list` |
 | Session | `session:list`, `session:get`, `session:children` |
+| Provider | `provider:list` |
 | Skill | `skill:list`, `skill:get`, `skill:info` |
 
 **Use for:** Monitoring dashboards, audit logs, read-only integrations.

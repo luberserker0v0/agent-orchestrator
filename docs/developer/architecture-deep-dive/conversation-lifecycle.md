@@ -1,183 +1,147 @@
 # Conversation Lifecycle
 
-This document describes the conversation state machine and event system.
+`ConversationState` is the in-process source of truth. `ConversationService`
+serializes mutations per conversation ID so create/start/stop/restart/migrate,
+explicit delete, and cleanup final checks cannot race one another.
 
 ## State Machine
 
-```
-                    ┌─────────────┐
-                    │  (created)  │
-                    └──────┬──────┘
-                           │ register()
-                           ▼
-                    ┌─────────────┐
-                    │  prepared   │
-                    └──────┬──────┘
-                           │ start()
-                           ▼
-                    ┌─────────────┐
-               ┌───►│  starting   │
-               │    └──────┬──────┘
-               │           │ health check passed
-               │           ▼
-               │    ┌─────────────┐
-               │    │  running    │◄──────────────┐
-               │    └──────┬──────┘               │
-               │           │                       │ restart()
-               │           │ stop()                │
-               │           ▼                       │
-               │    ┌─────────────┐               │
-               │    │  stopping   │───────────────┘
-               │    └──────┬──────┘
-               │           │
-               │           ▼
-               │    ┌─────────────┐
-               │    │  stopped    │
-               │    └──────┬──────┘
-               │           │ restart()
-               └───────────┘
-                           │ delete()
-                           ▼
-                    ┌─────────────┐
-                    │ destroying  │
-                    └──────┬──────┘
-                           │
-                           ▼
-                    ┌─────────────┐
-                    │ (unregistered)
-                    └─────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> prepared: create workspace and state
+    prepared --> starting: start
+    starting --> running: runtime health passed
+    starting --> stopped: explicit stop or runtime exit
+    starting --> error: start failure
+    running --> restarting: restart or migrate
+    restarting --> running: replacement healthy
+    restarting --> stopped: explicit stop or runtime exit
+    restarting --> error: replacement failure
+    running --> stopped: stop, idle eviction, runtime exit
+    running --> error: lifecycle failure
+    stopped --> starting: start
+    stopped --> restarting: restart
+    error --> starting: retry start
+    error --> restarting: retry restart
+    prepared --> destroyed: delete
+    starting --> destroyed: delete
+    running --> destroyed: delete
+    restarting --> destroyed: delete
+    stopped --> destroyed: delete
+    error --> destroyed: delete
+    destroyed --> [*]: remove state
 ```
 
-## State Transitions
+The stored statuses are `prepared`, `starting`, `running`, `restarting`,
+`stopped`, `destroyed`, and `error`. There are no stored `stopping` or
+`destroying` states.
 
-| From | To | Trigger | Description |
-|------|-----|---------|-------------|
-| (none) | `prepared` | `register()` | Conversation created |
-| `prepared` | `starting` | `start()` | Instance spawn initiated |
-| `starting` | `running` | Health check passed | Instance ready |
-| `starting` | `stopped` | Health check failed | Spawn failed |
-| `running` | `stopping` | `stop()` | Stop initiated |
-| `stopping` | `stopped` | Stop complete | Instance stopped |
-| `stopped` | `starting` | `restart()` | Restart initiated |
-| `running` | `starting` | `restart()` | Restart initiated |
-| `running` | `stopped` | Idle timeout | Auto-destroyed |
-| Any | `destroying` | `delete()` | Delete initiated |
-| `destroying` | (unregistered) | Cleanup complete | Removed |
+## State and Readiness
 
-## Event System
+`running` and `ready` answer different questions:
 
-### ConversationState
+- `running` means the selected runtime created an endpoint and passed its
+  authenticated health check.
+- `ready` means AO can access or create the conversation's OpenCode session.
+- A readiness keepalive can emit `conversation.readyLost` without immediately
+  discarding the runtime.
 
-The `ConversationState` class is the single source of truth. All state changes emit events.
+Session and message services reject requests until a running instance is ready.
+Start and restart return before asynchronous session adoption completes, so
+clients should poll `conversation get` or observe `conversation.ready`.
 
-```typescript
-class ConversationState {
-  register(id: string, agentType?: string): void;
-  unregister(id: string): void;
-  transition(id: string, status: ConversationStatus, meta?: object): void;
-  subscribe(id: string, callback: EventCallback): () => void;
-  emitEvent(id: string, event: ConversationEvent): void;
-}
-```
+## Lifecycle Ownership
 
-### Event Types
+### Create
 
-| Event | Emitted When |
-|-------|-------------|
-| `conversation.running` | Instance started |
-| `conversation.stopped` | Instance stopped |
-| `conversation.error` | Instance error |
-| `conversation.destroyed` | Conversation deleted |
-| `conversation.configChanged` | Config/agent/file modified |
-| `message.part` | Message part received |
-| `message.complete` | Message fully received |
-| `session.created` | Session created |
-| `idle.timeout` | Idle timeout triggered |
+1. Validate the canonical conversation ID and configured runtime ID.
+2. Acquire the per-conversation lifecycle lock.
+3. Create the workspace through `WorkspaceFactory` and the storage backend.
+4. Create `ConversationState` in `prepared` status.
 
-### Subscriber Flow
+Duplicate concurrent creation is serialized and returns a conflict without
+overwriting the existing workspace.
 
-```
-1. WSRouter subscribes to ConversationState
-   │
-2. SSEBridge receives event from OpenCode
-   │
-3. SSEBridge calls conversationState.emitEvent()
-   │
-4. ConversationState notifies all subscribers
-   │
-5. WSRouter pushes event to WebSocket client
-   │
-6. Dashboard displays event in timeline
-```
+### Start
 
-### Event Replay
+1. Transition to `starting`.
+2. Reserve instance capacity before the first asynchronous operation.
+3. Reuse or create the workspace and obtain its `RuntimeAccess` descriptor.
+4. Call `RuntimeManager.start()`, which delegates to `AgentRuntime.start()`.
+5. Register generation-safe exit handling and transition to `running`.
+6. Start readiness checks, SSE forwarding, and optional Kubernetes status
+   reporting.
 
-Events are **not** persisted. When a WebSocket client connects, it only receives events from that point forward. Historical events are available via the REST API:
+Runtime validation failures remain attached to their configured runtime ID and
+are returned before workspace/runtime mutation.
 
-```bash
-GET /api/conversations/:id/events?limit=50
-```
+### Stop and Idle Eviction
 
-## Instance Lifecycle
+Stop disconnects SSE, waits for observed process/container/Pod termination,
+releases active runtime state, and transitions to `stopped`. Idle eviction and
+unexpected runtime exit converge on the same stopped state.
 
-### Start Sequence
+These operations preserve:
 
-1. Validate conversation exists and is in `prepared` or `stopped` state
-2. Transition to `starting`
-3. Allocate port from PortPool
-4. Prepare workspace (write config, agents, files)
-5. Spawn OpenCode instance (DirectRuntime or DockerRuntime)
-6. Health check loop (up to `retries` attempts)
-7. On success: transition to `running`, connect SSE bridge
-8. On failure: transition to `stopped`, set `lastError`, release port
+- the conversation record and event buffer;
+- the workspace and OpenCode configuration;
+- managed Direct/Docker session storage;
+- the Kubernetes conversation PVC.
 
-### Stop Sequence
+### Restart and Migration
 
-1. Validate conversation exists and is in `running` state
-2. Transition to `stopping`
-3. Disconnect SSE bridge
-4. Kill OpenCode instance (Runtime.kill())
-5. Release port back to PortPool
-6. Transition to `stopped`
+Restart transitions through `restarting`, reuses persistent data, and tries to
+adopt the previous session ID. If the runtime-specific restart fails, AO removes
+the stale instance and starts a replacement.
 
-### Delete Sequence
+Kubernetes migration temporarily applies a node override, recreates the runtime
+against the same PVC, verifies session adoption, emits
+`conversation.migrated`, reports the new endpoint/node, and clears the override
+in a `finally` block.
 
-1. If running, stop instance first
-2. Transition to `destroying`
-3. Disconnect SSE bridge
-4. Kill OpenCode instance
-5. Release port
-6. Delete workspace directory
-7. Unregister from ConversationState
+### Explicit Delete
 
-### Idle Timeout
+Delete first persists generation-specific delete intent, then stops the runtime,
+quarantines and purges managed session data, destroys the workspace, removes
+cluster status, emits `conversation.destroyed`, and removes the state record.
 
-Background sweep runs every `idleSweepIntervalMs`:
+If intent cannot be recorded or termination is not observed, the operation
+fails with `PERSISTENT_DATA_CLEANUP_PENDING`. A stale retry cannot delete a new
+generation created later with the same conversation ID.
 
-1. Check each running instance
-2. If last activity > `idleTimeoutMs`, destroy it
-3. Emit `idle.timeout` event
-4. Clean up resources
+## Event Model
 
-## Error Handling
+`ConversationState` retains at most 100 events per conversation in memory.
+`GET /api/conversations/:id/events?limit=N` returns the newest bounded history,
+and a new WebSocket connection receives the retained events before live fan-out.
+Events are not persisted across an AO restart.
 
-### Spawn Failure
+Core AO-generated events include:
 
-- Catch error from Runtime.spawn()
-- Transition to `stopped` with `lastError`
-- Release port
-- Client can retry via `restart()`
+| Event | Meaning |
+|-------|---------|
+| `conversation.prepared` | Workspace and state were created. |
+| `conversation.starting`, `.running`, `.restarting`, `.stopped`, `.error`, `.destroyed` | Lifecycle transition. |
+| `conversation.ready`, `.readyLost` | OpenCode session availability changed. |
+| `conversation.needsRestart` | Configuration changed while a runtime was active. |
+| `conversation.configChanged` | Config, agents, or skills changed. |
+| `conversation.thinking`, `.message` | Message request/response lifecycle. |
+| `conversation.quotaExhausted` | OpenCode reported a normalized quota error. |
+| `conversation.migrated` | Kubernetes replacement completed on the target node. |
 
-### Health Check Failure
+The SSE bridge also maps supported OpenCode events into the same conversation
+event stream. Heartbeats can be filtered through configuration.
 
-- After `retries` attempts, give up
-- Transition to `stopped` with `lastError`
-- Release port
+## Failure Guarantees
 
-### SSE Disconnection
-
-- SSEBridge attempts reconnection with exponential backoff
-- Up to `reconnectMaxAttempts` attempts
-- If all attempts fail, SSE connection is closed
-- Conversation remains in `running` status
-- SSE will reconnect on next health check cycle
+- Lifecycle locks are per conversation; unrelated conversations proceed in
+  parallel.
+- Instance start reserves capacity synchronously, preventing concurrent starts
+  from exceeding `maxInstances`.
+- Exit callbacks carry a generation number, so a replaced process cannot remove
+  the new instance or release its port.
+- Runtime termination must be observed before instance state and ports are
+  released.
+- Workspace removal failures retain conversation state in `error` so deletion
+  can be retried instead of falsely reporting success.
+- Stop/restart/migration/idle eviction never invoke persistent-data deletion.

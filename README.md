@@ -8,10 +8,12 @@ A Node.js orchestrator that manages [OpenCode](https://opencode.ai) AI coding ag
 - **Dynamic port allocation** — Instances auto-assign ports from a configurable range
 - **LRU eviction** — Automatically reclaims idle instances when at capacity
 - **WebSocket real-time** — JSON-RPC 2.0 with event streaming
-- **Role-based access control** — Admin and observer roles via API keys
-- **Prometheus metrics** — 9 custom metrics for monitoring
+- **Role-based access control** — Admin, user, observer, and custom roles via API keys
+- **Prometheus metrics** — 26 bounded custom metrics plus Node.js process metrics
 - **Multi-runtime** — Direct process, Docker container, or Kubernetes Pod execution
 - **Built-in dashboard** — Web UI for managing conversations
+- **Operational CLI** — Manage conversations, sessions, cleanup, runtimes, and Kubernetes installs
+- **Retention controls** — Rotating JSONL logs and ownership-safe persistent-data cleanup
 
 ## Choose a Setup
 
@@ -66,10 +68,15 @@ After completing one setup tutorial, use its API-key file and server URL:
 ```bash
 aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key status
 aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation create readme-smoke --start
+aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation get readme-smoke
 aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key session create readme-smoke --title "First session"
 aor --server http://127.0.0.1:8080 --api-key-file ./ao-admin.key conversation delete readme-smoke --confirm
 aor dashboard --server http://127.0.0.1:8080
 ```
+
+After `create --start`, repeat `conversation get` until `ready` is `true`
+before creating sessions or sending messages. Runtime health and OpenCode
+session readiness are intentionally reported separately.
 
 The `aor` CLI also manages conversation/session lifecycle, cleanup, status, and
 AgentOrchestrator-owned Kubernetes components. See the [CLI command reference](docs/user/cli.md).
@@ -90,7 +97,7 @@ AgentOrchestrator-owned Kubernetes components. See the [CLI command reference](d
 - **Language:** TypeScript 6.x (strict mode)
 - **Framework:** Express 5.x
 - **WebSocket:** ws 8.x
-- **Testing:** Vitest 4.x
+- **Testing:** Vitest 5.x
 - **Linting:** ESLint 10.x
 
 ## License

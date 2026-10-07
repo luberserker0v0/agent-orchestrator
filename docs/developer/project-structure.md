@@ -1,141 +1,118 @@
 # Project Structure
 
-```
+The repository is organized around transport, application services, lifecycle,
+runtime adapters, and infrastructure. Production functions are kept below the
+project's configured 100-line limit; composition belongs in `bootstrap/` and
+thin transport modules delegate to services.
+
+```text
 agent-orchestrator/
-├── src/                          # Source code
-│   ├── index.ts                  # Entry point
-│   ├── cli.ts                    # CLI argument parsing
-│   ├── config-loader.ts          # Configuration loading
-│   │
-│   ├── bootstrap/                # Server composition by responsibility
-│   │   ├── application-services.ts
-│   │   ├── runtime-environment.ts
-│   │   └── cleanup.ts
-│   │
-│   ├── http-api/                 # HTTP layer
-│   │   ├── server.ts             # Thin HTTP/WebSocket composition root
-│   │   ├── auth.ts               # HTTP authentication and authorization
-│   │   ├── middleware.ts         # CORS, security headers, error handling
-│   │   ├── request-tracker.ts     # In-flight request draining
-│   │   ├── websocket-server.ts    # WebSocket upgrade lifecycle
-│   │   ├── route-helpers.ts       # Shared HTTP response adapters
-│   │   ├── routes/               # Cohesive REST route modules by resource
-│   │   └── dashboard.ts          # Dashboard static file serving
-│   │
-│   ├── websocket/                # WebSocket layer
-│   │   ├── connection.ts         # JSON-RPC 2.0 handler
-│   │   ├── router.ts             # Connection lifecycle and authorization
-│   │   └── method-dispatcher.ts  # Cohesive RPC-to-service dispatch
-│   │
-│   ├── services/                 # Business logic
+├── src/
+│   ├── index.ts                       # Server/operator startup and shutdown
+│   ├── cli.ts                         # Commander root and command registration
+│   ├── config-loader.ts               # JSONC loading, env overrides, validation
+│   ├── bootstrap/
+│   │   ├── application-services.ts    # Storage/domain/service composition
+│   │   ├── runtime-environment.ts     # Runtime factory, validation, registry
+│   │   └── cleanup.ts                 # Cleanup-provider composition
+│   ├── cli/
+│   │   ├── api-client.ts              # Authenticated AO HTTP client
+│   │   ├── operational.ts             # Status/conversation/session commands
+│   │   ├── output.ts                  # Human and stable JSON output
+│   │   ├── k8s-command.ts             # Kubernetes command registration
+│   │   ├── k8s-renderer.ts            # Deterministic manifest transformation
+│   │   └── k8s-manager.ts             # Apply, inspect, adopt, and uninstall
+│   ├── http-api/
+│   │   ├── server.ts                  # Thin Express/WebSocket composition root
+│   │   ├── auth.ts                    # Authentication and route permissions
+│   │   ├── middleware.ts              # Headers, CORS, metrics, error handling
+│   │   ├── request-tracker.ts         # In-flight request draining
+│   │   ├── websocket-server.ts        # Upgrade and socket lifecycle
+│   │   ├── route-helpers.ts           # Shared response/error adapters
+│   │   ├── openapi.ts                 # OpenAPI 3.0 document
+│   │   ├── dashboard.ts               # Built-in SPA mounting
+│   │   └── routes/                    # Resource-focused REST controllers
+│   ├── websocket/
+│   │   ├── connection.ts              # JSON-RPC framing and heartbeat
+│   │   ├── router.ts                  # Connection ownership and RBAC
+│   │   └── method-dispatcher.ts       # RPC-to-service dispatch
+│   ├── services/                      # Application use cases
 │   │   ├── conversation-service.ts
+│   │   ├── session-service.ts
+│   │   ├── message-service.ts
 │   │   ├── config-service.ts
 │   │   ├── agent-service.ts
-│   │   ├── message-service.ts
 │   │   ├── file-service.ts
-│   │   ├── session-service.ts
 │   │   ├── skill-service.ts
-│   │   └── role-service.ts       # (planned)
-│   │
-│   ├── orchestrator/             # Domain layer
-│   │   ├── conversation-state.ts # State machine, events
-│   │   ├── instance-manager.ts   # Instance lifecycle
-│   │   ├── port-pool.ts          # Port allocation
-│   │   ├── workspace-factory.ts  # Workspace management
-│   │   └── sse-bridge.ts         # SSE event forwarding
-│   │
-│   ├── agent-runtime/            # Runtime abstraction
-│   │   ├── types.ts              # Runtime interface
-│   │   ├── registry.ts           # Runtime lookup
-│   │   ├── runtime-manager.ts    # Instance management
-│   │   └── runtimes/
-│   │       ├── direct.ts         # Direct process spawn
-│   │       └── docker.ts         # Docker container spawn
-│   │
-│   ├── opencode-cli/             # OpenCode CLI interaction
-│   │   └── models.ts             # Model listing
-│   │
-│   ├── opencode-http/            # OpenCode HTTP client
-│   │   ├── client.ts             # API client
-│   │   └── types.ts              # API types
-│   │
-│   ├── metrics/                  # Prometheus metrics
-│   │   └── registry.ts           # Metric definitions
-│   │
-│   └── utils/                    # Utilities
-│       ├── logger.ts             # Structured logging
-│       └── errors.ts             # Error codes, AppError
-│
-├── dashboard/                    # Built-in dashboard
-│   └── index.html                # Single-file SPA
-│
-├── e2e/                          # End-to-end tests
-│   ├── vitest.config.e2e.ts      # E2E config
-│   ├── vitest.config.docker-ci.ts # Credential-free Docker CI lifecycle config
-│   ├── vitest.config.runtime.ts  # Runtime-specific config
-│   └── scenarios/
-│       ├── lifecycle/            # Conversation lifecycle
-│       ├── orchestrator/         # Instance management
-│       ├── workspace/            # File operations
-│       └── runtime/              # Runtime-specific
-│
-├── config/                       # Configuration files
-│   ├── agentorchestrator.json    # Main config
-│   ├── agentorchestrator.example.json
-│   └── canonical-opencode.json   # Canonical OpenCode config
-│
-├── scripts/                      # Build/setup scripts
-│   ├── setup-hooks.js            # Git hooks installer
-│   └── clean.js                  # Clean dist/
-│
-├── k8s/                          # Kubernetes (planned)
-├── docs/                         # Documentation
-├── .github/                      # GitHub Actions, templates
-│
-├── package.json
-├── tsconfig.json
-├── vitest.config.ts
-├── eslint.config.mjs
-├── .nvmrc                        # Node.js version (24)
-├── Dockerfile.template           # Docker build template
-├── AGENTS.md                     # Development guide for AI agents
-├── CHANGELOG.md
-└── README.md
+│   │   └── role-service.ts
+│   ├── orchestrator/                  # Conversation/runtime lifecycle domain
+│   ├── agent-runtime/
+│   │   ├── types.ts                   # AgentRuntime and AgentClient contracts
+│   │   ├── registry.ts                # Configured runtime identities
+│   │   ├── runtime-factory.ts         # Adapter construction and validation
+│   │   ├── runtime-manager.ts         # Active instance ownership
+│   │   ├── session-storage.ts         # Durable ownership metadata/quarantine
+│   │   └── runtimes/                  # Direct, Docker, Kubernetes adapters
+│   ├── cleanup/                       # Coordinator and cleanup providers
+│   ├── cluster/
+│   │   ├── status-reporter.ts         # OpencodeInstance status/ownership
+│   │   └── operator/                  # Placement controller and executor
+│   ├── storage/                       # Backend contract and safe local storage
+│   ├── opencode-http/                 # Typed HTTP/SSE OpenCode client
+│   ├── metrics/registry.ts            # Prometheus metric registry
+│   ├── utils/                         # Logging, errors, IDs, model parsing
+│   └── test-fixtures/                 # Shared unit/E2E fixtures
+├── dashboard/index.html               # Built-in dashboard
+├── config/                            # Example AO/OpenCode configurations
+├── k8s/
+│   ├── crd/                           # OpencodeInstance/ConversationRoute CRDs
+│   ├── orchestrator/                  # AO workload, RBAC, service, storage
+│   ├── operator/                      # Placement operator workload and RBAC
+│   └── volume/                        # Per-conversation templates
+├── e2e/
+│   ├── helpers/                       # Server, process, WebSocket, k8s helpers
+│   ├── scenarios/                     # CLI, lifecycle, runtime, logging, k8s
+│   ├── kubernetes/run-k3d.ts          # Isolated k3d lifecycle runner
+│   └── vitest.config.*.ts             # Runtime-specific E2E configurations
+├── scripts/                           # Hooks, cleanup, package verification
+├── docs/                              # User, developer, and architecture docs
+└── .github/                           # CI, release workflows, PR template
 ```
 
-## File Naming Conventions
+## Dependency Direction
 
-| Pattern | Example | Purpose |
-|---------|---------|---------|
-| `kebab-case.ts` | `conversation-state.ts` | Source files |
-| `*.test.ts` | `conversation-state.test.ts` | Unit tests |
-| `*.e2e.test.ts` | `lifecycle.e2e.test.ts` | E2E tests |
-| `*.d.ts` | `types.d.ts` | Type declarations |
+```mermaid
+flowchart LR
+    CLI[CLI commands] --> APIClient[AO API client]
+    HTTP[HTTP routes] --> Services[Application services]
+    WS[WebSocket dispatcher] --> Services
+    Services --> Domain[Conversation and workspace domain]
+    Domain --> Runtime[Runtime contracts]
+    Runtime --> Adapters[Direct / Docker / Kubernetes]
+    Services --> Storage[Storage backend]
+    Bootstrap[Bootstrap composition] --> HTTP
+    Bootstrap --> Services
+    Bootstrap --> Runtime
+    Bootstrap --> Cleanup[Cleanup providers]
+```
 
-## Module Organization
+- Transport code validates protocol input and translates errors; it does not
+  implement lifecycle or storage policy.
+- Services coordinate use cases and are shared by REST and WebSocket paths.
+- Runtime adapters own process/container/Pod mechanics behind `AgentRuntime`.
+- Storage and cleanup modules enforce path, ownership, generation, and retention
+  safety without depending on HTTP or CLI presentation.
+- Bootstrap modules are the only place where concrete implementations are wired
+  together for the long-running server.
 
-### Service Layer (`src/services/`)
-- One file per resource type
-- Handles business logic
-- Coordinates between domain objects and external APIs
-- All mutating methods emit events
+## File Naming
 
-### Domain Layer (`src/orchestrator/`)
-- Core state management
-- Resource lifecycle
-- Event emission
-- No external API calls (except through injected clients)
+| Pattern | Purpose |
+|---------|---------|
+| `kebab-case.ts` | Production source |
+| `*.test.ts` | Unit or integration tests colocated with source |
+| `e2e/scenarios/**/*.test.ts` | End-to-end scenarios |
+| `*.d.ts` | Ambient type declarations |
 
-### Runtime Abstraction (`src/agent-runtime/`)
-- Pluggable runtime system
-- Common `Runtime` interface
-- Registry for runtime lookup
-- Manager for instance lifecycle
-
-### Transport Layer (`src/http-api/`, `src/websocket/`)
-- HTTP and WebSocket handling
-- Auth middleware
-- Request/response transformation
-- No business logic (delegates to services)
-- REST routes are grouped by resource under `src/http-api/routes/`; `server.ts`
-  only composes middleware, routes, request tracking, and WebSocket lifecycle
+See [Modules Reference](../architecture/modules.md) for ownership details and
+[Coding Standards](coding-standards.md) for cohesion and function-length rules.

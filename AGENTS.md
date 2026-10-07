@@ -166,21 +166,40 @@ Example:
 
 ```
 src/
-  cli.ts                      # CLI entry, arg parsing, subcommands
+  cli.ts                      # Commander root, strict parsing, subcommands
   config-loader.ts            # Configuration loading with env overrides, validation
-  index.ts                    # Application entry point
+  index.ts                    # Server/operator startup and graceful shutdown
+  bootstrap/
+    application-services.ts   # Storage, domain, and service composition
+    runtime-environment.ts    # Runtime factory, validation, registry
+    cleanup.ts                # Cleanup-provider composition
+  cli/
+    api-client.ts             # Authenticated AO HTTP client
+    operational.ts            # Operational command handlers
+    output.ts                 # Human and JSON formatting
+    k8s-command.ts            # Kubernetes command registration
+    k8s-renderer.ts           # Deterministic manifest rendering
+    k8s-manager.ts            # Apply, status, doctor, adopt, uninstall
   agent-runtime/
     types.ts                  # AgentRuntime interface, AgentEndpoint type, HealthInfo, SessionInfo, etc.
     registry.ts               # RuntimeRegistry — runtime lookup by id
     runtime-manager.ts        # RuntimeManager — manages instance map, lifecycle, policy queries (LRU candidate, idle detection)
     runtime-factory.ts        # RuntimeFactory — registers and creates runtime instances by type
     health.ts                 # waitForHealthy() — health check polling
+    session-storage.ts        # Ownership records, quarantine, generation safety
     versions.ts               # getRuntimeVersion(), getDefaultDirectVersion()
     runtimes/
       direct.ts               # DirectRuntime — spawns opencode binary as child process, ChildProcessHandle wraps treeKill
       docker.ts               # DockerRuntime — spawns Docker container, DockerHandle wraps docker rm -f
+      kubernetes.ts           # KubernetesRuntime — manages PVC/Pod/Service instances
   http-api/
-    server.ts                 # Express HTTP server with conversation lifecycle, config, agents, files, sessions, events, roles, skills, metrics endpoints
+    server.ts                 # Thin Express/WebSocket composition root
+    auth.ts                   # Authentication and explicit route permissions
+    middleware.ts             # Headers, CORS, metrics, error handling
+    request-tracker.ts        # In-flight request draining
+    websocket-server.ts       # WebSocket upgrade lifecycle
+    route-helpers.ts          # Shared response/error adapters
+    routes/                   # REST controllers grouped by resource
     dashboard.ts              # mountDashboard() — serves built-in SPA
     openapi.ts                # OpenAPI 3.0 spec
   orchestrator/
@@ -201,14 +220,25 @@ src/
   storage/
     types.ts                  # StorageBackend, RuntimeAccess interfaces
     local.ts                  # LocalStorage — file system storage backend
+    path-safety.ts            # Containment and symlink checks
+    atomic-file.ts            # Atomic permission-preserving file replacement
+    atomic-directory.ts       # Transactional directory replacement
     index.ts                  # Storage exports
+  cleanup/
+    cleanup-manager.ts        # Single-flight preview/run/scheduled coordination
+    file-log-provider.ts      # Rotated-log retention provider
+    local-persistent-data-provider.ts
+    kubernetes-persistent-data-provider.ts
+  cluster/
+    status-reporter.ts        # OpencodeInstance status and ownership
+    operator/                 # Placement controller, executor, metrics
   opencode-http/
     client.ts                 # OpenCode HTTP API client
     types.ts                  # TypeScript types for OpenCode API
     sse-client.ts             # OpenCodeSSEClient — SSE event stream parser
     sse-types.ts              # SSE event types and map
   metrics/
-    registry.ts               # Prometheus metrics (16 custom metrics + Node.js defaults)
+    registry.ts               # Prometheus metrics (26 custom metrics + Node.js defaults)
   utils/
     errors.ts                 # AppError, ErrorCodes
     logger.ts                 # Structured logging with level/format control
@@ -216,7 +246,8 @@ src/
     model-parser.ts           # parseModelString() — model string parsing
   websocket/
     connection.ts             # JSON-RPC 2.0 WebSocket handler
-    router.ts                 # WebSocket routing with 20+ JSON-RPC methods, event pushing, permission checks
+    router.ts                 # Connection lifecycle, event fan-out, permission checks
+    method-dispatcher.ts      # Cohesive RPC-to-service dispatch
 ```
 
 ## Technology Stack
@@ -225,7 +256,7 @@ src/
 - **Language**: TypeScript 6.x (strict mode)
 - **Framework**: Express 5.x
 - **WebSocket**: ws 8.x
-- **Testing**: Vitest 4.x
+- **Testing**: Vitest 5.x
 - **Linting**: ESLint 10.x with typescript-eslint
 - **Process Management**: cross-spawn, tree-kill
 
@@ -240,7 +271,7 @@ AGENTORCHESTRATOR_SERVER_RBAC_ENABLED=true
 AGENTORCHESTRATOR_ORCHESTRATOR_MAX_INSTANCES=20
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_TIMEOUT_MS=600000
 AGENTORCHESTRATOR_ORCHESTRATOR_IDLE_SWEEP_INTERVAL_MS=60000
-AGENTORCHESTRATOR_WORKSPACE_MAXSIZEBYTES=104857600  # 0 = unlimited
+AGENTORCHESTRATOR_WORKSPACE_MAX_SIZE_BYTES=104857600  # 0 = unlimited
 
 # Note: The `runtimes` array (list of runtime entries) is NOT overridable via env vars.
 # Arrays are treated as opaque by mergeDefaults. Multi-runtime setups use the JSON config file.
@@ -351,6 +382,13 @@ curl http://localhost:8080/metrics
 | `agentorchestrator_message_send_duration_seconds` | Histogram | Duration of message send operations |
 | `agentorchestrator_workspaces_active` | Gauge | Currently active workspaces |
 | `agentorchestrator_workspace_quota_exceeded_total` | Counter | Total workspace quota exceeded errors |
+| `agentorchestrator_llm_quota_exhaustions_total` | Counter | LLM quota and rate-limit errors (labels: code, model) |
+| `agentorchestrator_migrations_total` | Counter | Placement migrations (label: result) |
+| `agentorchestrator_cleanup_runs_total` | Counter | Cleanup runs (labels: trigger, result) |
+| `agentorchestrator_cleanup_artifacts_total` | Counter | Cleanup artifact actions (labels: target, action, result) |
+| `agentorchestrator_cleanup_reclaimed_bytes_total` | Counter | Known bytes reclaimed (label: target) |
+| `agentorchestrator_cleanup_last_success_timestamp_seconds` | Gauge | Last successful cleanup timestamp (label: target) |
+| `agentorchestrator_log_file_errors_total` | Counter | File log sink failures (label: operation) |
 | `nodejs_*` | Various | Node.js process metrics (memory, CPU, GC, event loop) |
 
 ### Configuration for Prometheus

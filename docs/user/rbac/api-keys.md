@@ -23,7 +23,7 @@ Add API keys to your config file under `server.apiKeys`:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `key` | string | Yes | The API key string. Minimum 8 characters. |
-| `role` | string | Yes | Role: `"admin"`, `"user"`, or `"observer"`. |
+| `role` | string | Yes | Built-in (`admin`, `user`, `observer`) or configured custom role name. |
 | `name` | string | No | Human-readable label for this key. |
 
 ## Authentication Methods

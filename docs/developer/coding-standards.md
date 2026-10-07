@@ -158,5 +158,5 @@ describe('PortPool', () => {
 | Functions | camelCase | `loadConfig()` |
 | Constants | camelCase | `DEFAULT_PORT` |
 | Types | PascalCase | `ApiKeyEntry` |
-| Interfaces | PascalCase | `Runtime` |
+| Interfaces | PascalCase | `AgentRuntime` |
 | Enums | PascalCase | (avoid; use string unions) |

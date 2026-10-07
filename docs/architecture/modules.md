@@ -1,288 +1,161 @@
 # Modules Reference
 
-This document describes all core modules in the AgentOrchestrator codebase.
+This page records current ownership boundaries. It intentionally focuses on
+stable responsibilities and contracts instead of duplicating every private
+method, which remains discoverable in the colocated TypeScript tests.
 
-## Service Layer
+## Composition and Entry Points
 
-Services handle business logic and orchestrate between domain objects and external APIs.
+| Module | Responsibility |
+|--------|----------------|
+| `src/index.ts` | Starts server or operator mode, initializes logging, composes dependencies, and coordinates bounded shutdown. |
+| `src/cli.ts` | Defines the Commander command tree, strict parsing, legacy no-command server startup, and exit-code mapping. |
+| `src/bootstrap/runtime-environment.ts` | Registers Direct, Docker, and Kubernetes constructors; validates runtime-specific config; creates the shared registry and manager. |
+| `src/bootstrap/application-services.ts` | Creates storage, conversation state, lifecycle services, SSE bridge, role service, and cluster reporter. |
+| `src/bootstrap/cleanup.ts` | Selects file-log, local persistent-data, and Kubernetes PVC cleanup providers. |
 
-### ConversationService
+Short-lived client commands do not initialize the server's rotating file sink.
+The server and standalone operator initialize it before operational logging and
+flush it during graceful or fatal shutdown.
 
-**File:** `src/services/conversation-service.ts`
+## CLI Modules
 
-Manages the full lifecycle of conversations: creation, startup, shutdown, and deletion.
+| Module | Responsibility |
+|--------|----------------|
+| `src/cli/api-client.ts` | Bearer authentication, URL encoding, timeouts, JSON decoding, and structured AO API errors. |
+| `src/cli/operational.ts` | Status, metrics, conversation, session, message, cleanup, config, and runtime commands. |
+| `src/cli/output.ts` | Concise human output and uncontaminated stable JSON output. |
+| `src/cli/k8s-command.ts` | Kubernetes option and command registration. |
+| `src/cli/k8s-renderer.ts` | Loads packaged YAML, applies typed installation options, labels ownership, and emits deterministic documents. |
+| `src/cli/k8s-manager.ts` | Ownership checks, server-side apply, rollout waits, status, doctor, adoption, uninstall, and guarded purge. |
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `create` | `(id?, agentType?): Promise<ConversationData>` | Create conversation + workspace |
-| `get` | `(id): ConversationData` | Get single conversation |
-| `list` | `(): ConversationData[]` | List all conversations |
-| `getEvents` | `(id, limit?): ConversationEvent[]` | Get recent events |
-| `start` | `(id): Promise<StartResult>` | Start OpenCode instance |
-| `stop` | `(id): Promise<void>` | Stop instance |
-| `restart` | `(id): Promise<StartResult>` | Restart instance |
-| `delete` | `(id): Promise<void>` | Destroy instance + remove workspace |
+The Kubernetes manager owns AO resources only. It does not manage clusters,
+nodes, storage classes, ingress controllers, cert-manager, or monitoring
+operators.
 
-### ConfigService
+## HTTP and WebSocket Transport
 
-**File:** `src/services/config-service.ts`
+| Module | Responsibility |
+|--------|----------------|
+| `src/http-api/server.ts` | Thin Express composition root for middleware, resource routes, dashboard, and WebSocket upgrade handling. |
+| `src/http-api/auth.ts` | API-key normalization, authentication, and explicit method/path-to-permission mapping. |
+| `src/http-api/middleware.ts` | Body parsing, security headers, CORS, metrics, request tracking, and final error handling. |
+| `src/http-api/request-tracker.ts` | Tracks in-flight HTTP work so shutdown can drain or abort it within the configured timeout. |
+| `src/http-api/routes/*.ts` | Resource-focused controllers that validate protocol input and delegate to services. |
+| `src/http-api/openapi.ts` | OpenAPI 3.0.3 contract; tests require every registered REST operation to be documented. |
+| `src/http-api/websocket-server.ts` | Creates the WebSocket server and binds upgrade lifecycle. |
+| `src/websocket/connection.ts` | JSON-RPC framing, heartbeat, idle timeout, responses, and event delivery. |
+| `src/websocket/router.ts` | One active connection per conversation, replacement safety, authentication, permission checks, and event subscriptions. |
+| `src/websocket/method-dispatcher.ts` | Dispatches authorized RPC methods to the same application services used by REST. |
 
-Reads, writes, and patches the OpenCode configuration (`opencode.json`).
+Transport modules do not implement lifecycle, persistence, or cleanup policy.
+Unknown or unmapped authenticated routes fail closed under RBAC.
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `readConfig` | `(id): Promise<OpencodeConfig>` | Read opencode.json |
-| `writeConfig` | `(id, config): Promise<void>` | Write opencode.json |
-| `patchConfig` | `(id, patch): Promise<void>` | Deep-merge patch into config |
+## Application Services
 
-### AgentService
+| Service | Responsibility |
+|---------|----------------|
+| `ConversationService` | Serializes lifecycle mutations per conversation; create, start, stop, restart, migrate, delete, session adoption, and status reporting. |
+| `SessionService` | Proxies OpenCode session operations after enforcing a ready running instance. |
+| `MessageService` | Sends prompts, parses provider/model identifiers, retrieves history, updates activity, and reports quota errors. |
+| `ConfigService` | Reads, atomically replaces, and deep-patches conversation OpenCode configuration. |
+| `AgentService` | Manages agent Markdown and `AGENTS.md`, including restart requirements and runtime views. |
+| `FileService` | Workspace file read/write/list/copy/delete operations through the storage boundary. |
+| `SkillService` | Transactional skill-tree upload/import/read/delete for conversation or agent scope. |
+| `RoleService` | Built-in and custom role lookup, permission resolution, immutable built-ins, and atomic custom-role persistence. |
 
-**File:** `src/services/agent-service.ts`
+`ConversationService.withLifecycleLock()` is also used by retention cleanup so a
+final orphan check and deletion cannot race a new conversation generation.
 
-Manages agent definition files (markdown files with agent instructions).
+## Lifecycle and Workspace Domain
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `writeAgent` | `(id, name, content): void` | Write agent markdown file |
-| `readAgent` | `(id, name): string` | Read agent content |
-| `deleteAgent` | `(id, name): void` | Delete agent file |
-| `listAgents` | `(id): string[]` | List agent names |
-| `listAgentsWithRuntime` | `(id): Promise<string[] \| AgentItem[]>` | List agents with runtime info |
-| `writeAgentsMd` | `(id, content): void` | Write AGENTS.md |
-| `readAgentsMd` | `(id): string` | Read AGENTS.md |
-| `deleteAgentsMd` | `(id): void` | Delete AGENTS.md |
+| Module | Responsibility |
+|--------|----------------|
+| `src/orchestrator/conversation-state.ts` | In-memory lifecycle source of truth, bounded event replay, running-client association, and readiness probes. |
+| `src/orchestrator/instance-manager.ts` | Capacity reservation, LRU eviction, idle sweep, workspace reuse, and runtime lifecycle delegation. |
+| `src/orchestrator/workspace-factory.ts` | Workspace creation, quota accounting, canonical config enforcement, safe path resolution, and file/agent/skill storage operations. |
+| `src/orchestrator/port-pool.ts` | Fixed-range allocation with optional OS-assigned fallback and idempotent release. |
+| `src/orchestrator/sse-bridge.ts` | One OpenCode SSE client per active conversation, reconnect policy, filtering, and event forwarding. |
 
-### MessageService
+Conversation statuses are `prepared`, `starting`, `running`, `restarting`,
+`stopped`, `destroyed`, and `error`. Stop, idle eviction, process exit, and
+migration preserve the workspace and managed session data. Explicit deletion
+owns workspace and managed persistent-data removal.
 
-**File:** `src/services/message-service.ts`
+## Runtime Abstraction
 
-Sends messages to OpenCode instances and retrieves message history.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `send` | `(id, text, rawModel?, rawAgent?): Promise<SendResult>` | Send message to OpenCode |
-| `getHistory` | `(id, sessionId?, limit?): Promise<unknown[]>` | Get message history |
-
-### FileService
-
-**File:** `src/services/file-service.ts`
-
-Manages files within conversation workspaces with path traversal protection.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `write` | `(id, path, content): Promise<void>` | Write file |
-| `read` | `(id, path): Promise<string>` | Read file |
-| `delete` | `(id, path): Promise<void>` | Delete file |
-| `copy` | `(id, source, dest): Promise<void>` | Copy file |
-| `list` | `(id, path?): Promise<string[]>` | List files |
-
-### SessionService
-
-**File:** `src/services/session-service.ts`
-
-Manages OpenCode sessions (conversations within a conversation).
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `create` | `(id, params?): Promise<unknown>` | Create session |
-| `list` | `(id): Promise<unknown[]>` | List sessions |
-| `get` | `(id, sessionId): Promise<unknown>` | Get session |
-| `delete` | `(id, sessionId): Promise<void>` | Delete session |
-| `fork` | `(id, sessionId, messageID?): Promise<unknown>` | Fork session |
-| `getChildren` | `(id, sessionId): Promise<unknown[]>` | Get session children |
-| `abort` | `(id): Promise<{ aborted: boolean }>` | Abort current session |
-| `listProviders` | `(id): Promise<ProviderListResult>` | List providers |
-
-### SkillService
-
-**File:** `src/services/skill-service.ts`
-
-Manages skills (reusable instruction sets) for conversations and agents.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `uploadSkill` | `(id, name, zipBuffer, agentName?): Promise<void>` | Upload skill from zip |
-| `importSkill` | `(id, source, name, agentName?): Promise<void>` | Import skill from local dir |
-| `listSkills` | `(id, agentName?): string[]` | List skill names |
-| `readSkill` | `(id, name, agentName?): string` | Read SKILL.md |
-| `getSkillInfo` | `(id, name, agentName?): SkillInfo` | Get skill metadata |
-| `deleteSkill` | `(id, name, agentName?): void` | Delete skill |
-
-## Domain Layer
-
-Domain objects manage state, resources, and lifecycle.
-
-### ConversationState
-
-**File:** `src/orchestrator/conversation-state.ts`
-
-The single source of truth for conversation state. Event-driven with subscription support.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `register` | `(id, agentType?): void` | Register new conversation |
-| `unregister` | `(id): void` | Remove conversation |
-| `transition` | `(id, status, meta?): void` | Transition to new status |
-| `get` | `(id): ConversationData` | Get conversation data |
-| `list` | `(): ConversationData[]` | List all conversations |
-| `subscribe` | `(id, callback): () => void` | Subscribe to events |
-| `emitEvent` | `(id, event): void` | Emit event to subscribers |
-
-**Status values:** `prepared`, `starting`, `running`, `stopping`, `stopped`, `destroying`, `error`
-
-### InstanceManager
-
-**File:** `src/orchestrator/instance-manager.ts`
-
-Manages the OpenCode instance map and lifecycle policy.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `startInstance` | `(id, agentType?): Promise<StartResult>` | Start instance |
-| `stopInstance` | `(id): Promise<void>` | Stop instance |
-| `restartInstance` | `(id): Promise<StartResult>` | Restart instance |
-| `destroy` | `(id): Promise<void>` | Destroy instance |
-| `getIdleCandidates` | `(): string[]` | Get instances eligible for idle timeout |
-| `isIdle` | `(id): boolean` | Check if instance is idle |
-
-### PortPool
-
-**File:** `src/orchestrator/port-pool.ts`
-
-Dynamic port allocation from a configurable range.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `allocate` | `(): number` | Allocate an available port |
-| `release` | `(port: number): void` | Release a port back to pool |
-| `available` | `(): number` | Get count of available ports |
-
-### WorkspaceFactory
-
-**File:** `src/orchestrator/workspace-factory.ts`
-
-Creates and manages conversation workspaces (directories with config, agents, files).
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `createWorkspace` | `(id, agentType?): WorkspaceInfo` | Create workspace directory |
-| `deleteWorkspace` | `(id): void` | Remove workspace |
-| `prepareWorkspace` | `(id): void` | Write config + agents to workspace |
-| `getWorkspacePath` | `(id): string` | Get workspace absolute path |
-| `write` | `(id, path, content): void` | Write file (with quota check) |
-| `read` | `(id, path): string` | Read file |
-| `delete` | `(id, path): void` | Delete file |
-| `list` | `(id, path?): string[]` | List files |
-| `copy` | `(id, source, dest): void` | Copy file |
-| `sanitizePath` | `(input): string` | Sanitize path (traversal protection) |
-
-### SSEBridge
-
-**File:** `src/orchestrator/sse-bridge.ts`
-
-Bridges Server-Sent Events from OpenCode instances to the event system.
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `connect` | `(id, port, password): void` | Connect to OpenCode SSE endpoint |
-| `disconnect` | `(): void` | Disconnect from all SSE streams |
-| `handleEvent` | `(id, event): void` | Process incoming SSE event |
-
-## Runtime Abstraction Layer
-
-Provides a pluggable system for spawning OpenCode instances.
-
-### Runtime Interface
-
-**File:** `src/agent-runtime/types.ts`
+`src/agent-runtime/types.ts` defines the common contract:
 
 ```typescript
-interface Runtime {
-  spawn(config: SpawnConfig): Promise<RuntimeHandle>;
-  kill(handle: RuntimeHandle): Promise<void>;
-  healthCheck(port: number, password: string): Promise<boolean>;
-}
-
-interface RuntimeHandle {
-  pid?: number;
-  containerName?: string;
-  port: number;
+interface AgentRuntime {
+  readonly type: string;
+  readonly capabilities: AgentCapabilities;
+  start(id, workspacePath, auth, healthCheck, runtimeAccess?): Promise<AgentEndpoint>;
+  stop(handle?, signal?): Promise<void>;
+  restart(id, healthCheck): Promise<AgentEndpoint>;
+  cleanupOrphans?(): Promise<void>;
+  preparePersistentDataDeletion?(id): Promise<void>;
+  deletePersistentData?(id): Promise<void>;
 }
 ```
 
-### RuntimeRegistry
+| Module | Responsibility |
+|--------|----------------|
+| `registry.ts` | Maps configured runtime IDs to valid adapters or retained validation errors. |
+| `runtime-factory.ts` | Maps runtime types to constructors and type-specific validators. |
+| `runtime-manager.ts` | Owns active endpoints/handles, generation-safe exit callbacks, ports, activity timestamps, and persistent-data hooks. |
+| `health.ts` | Bounded authenticated OpenCode health polling. |
+| `session-storage.ts` | Versioned ownership records, delete-pending state, quarantine, generation safety, and container mount/env mapping. |
+| `runtimes/direct.ts` | Spawns and terminates an OpenCode process tree. |
+| `runtimes/docker.ts` | Runs named OpenCode containers with port/network, log-limit, identity, and session mounts. |
+| `runtimes/kubernetes.ts` | Creates and verifies per-conversation PVC, Pod, and Service resources with UID/ownership safety. |
 
-**File:** `src/agent-runtime/registry.ts`
+An `AgentEndpoint` returns a typed `AgentClient`, optional port/process handle,
+base URL, Kubernetes node identity, and persistent-data annotations.
 
-Maps runtime type IDs to Runtime implementations.
+## Storage and Cleanup
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `register` | `(id, runtime): void` | Register runtime |
-| `get` | `(id): Runtime` | Get runtime by ID |
-| `has` | `(id): boolean` | Check if runtime exists |
-| `list` | `(): string[]` | List registered runtimes |
+| Module | Responsibility |
+|--------|----------------|
+| `src/storage/types.ts` | Async storage and runtime-access contracts. |
+| `src/storage/local.ts` | Local workspace backend with safe deletion and recursive copy. |
+| `src/storage/path-safety.ts` | Canonical containment, symlink rejection, and approved copy-source validation. |
+| `src/storage/atomic-file.ts` | Permission-preserving atomic file replacement. |
+| `src/storage/atomic-directory.ts` | Stage-and-swap directory replacement with rollback. |
+| `src/cleanup/cleanup-manager.ts` | Startup/scheduled/manual coordination, preview, single-flight gating, aggregation, metrics, and shutdown. |
+| `src/cleanup/file-log-provider.ts` | Prunes only recognized rotated AO log files under configured retention/count rules. |
+| `src/cleanup/local-persistent-data-provider.ts` | Enrolls and reaps owned Direct/Docker session artifacts after the two-pass grace policy. |
+| `src/cleanup/kubernetes-persistent-data-provider.ts` | Marks and reaps owned PVCs after authority, liveness, Pod-reference, UID, and grace checks. |
 
-### RuntimeManager
+Preview is read-only. Executing runs rescan and revalidate immediately before
+mutation. Absolute paths, credentials, and file contents are excluded from
+reports and logs.
 
-**File:** `src/agent-runtime/runtime-manager.ts`
+## Kubernetes Cluster Components
 
-Manages the instance map, lifecycle, and policy queries.
+| Module | Responsibility |
+|--------|----------------|
+| `src/cluster/status-reporter.ts` | Writes lifecycle, endpoint, node, quota, and persistent-data ownership to `OpencodeInstance` resources. |
+| `src/cluster/operator/controller.ts` | Reconciles instances/routes, evaluates placement, and drives dry-run or execute mode. |
+| `src/cluster/operator/placement.ts` | Load- and quota-aware candidate/node scoring. |
+| `src/cluster/operator/executor.ts` | Calls AO migration APIs and records bounded migration results. |
+| `src/cluster/operator/metrics-server.ts` | Exposes operator-specific Prometheus metrics. |
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `start` | `(id, config): Promise<RuntimeHandle>` | Start instance |
-| `destroy` | `(id): Promise<void>` | Destroy instance |
-| `getHandle` | `(id): RuntimeHandle \| undefined` | Get instance handle |
-| `setOnDestroyed` | `(callback): void` | Set destroy callback |
+The placement controller removes stale routes when an instance disappears but
+does not eagerly delete its PVC. Persistent-data retention belongs to the
+cleanup policy.
 
-### DirectRuntime
+## Observability and Utilities
 
-**File:** `src/agent-runtime/runtimes/direct.ts`
+| Module | Responsibility |
+|--------|----------------|
+| `src/metrics/registry.ts` | 26 bounded AO metrics plus default Node.js/process metrics. |
+| `src/utils/logger.ts` | Structured level filtering and shared root/child backend. |
+| `src/utils/rolling-file-sink.ts` | Serialized JSONL writes, rotation, pruning, reopen, flush, and close. |
+| `src/utils/errors.ts` | Stable application error codes and HTTP status mapping. |
+| `src/utils/conversation-id.ts` | Canonical conversation ID validation. |
+| `src/opencode-http/client.ts` | Authenticated typed OpenCode REST client. |
+| `src/opencode-http/sse-client.ts` | OpenCode SSE parsing and reconnect-aware stream client. |
 
-Spawns OpenCode as a child process.
-
-| Config Field | Type | Description |
-|-------------|------|-------------|
-| `binary` | `string` | OpenCode CLI command or path |
-| `version` | `string?` | Version hint |
-| `instanceHost` | `string?` | Hostname (default: `127.0.0.1`) |
-
-### DockerRuntime
-
-**File:** `src/agent-runtime/runtimes/docker.ts`
-
-Spawns OpenCode in a Docker container.
-
-| Config Field | Type | Description |
-|-------------|------|-------------|
-| `image` | `string` | Docker image name |
-| `instanceHost` | `string?` | Hostname (default: `127.0.0.1`) |
-| `networkMode` | `string?` | Docker network mode |
-
-## Supporting Modules
-
-### HTTP Server
-
-**File:** `src/http-api/server.ts`
-
-Express 5 HTTP server with middleware stack: body parsing, CORS, security headers, auth, metrics, dashboard.
-
-### WebSocket Router
-
-**File:** `src/websocket/router.ts`
-
-JSON-RPC 2.0 WebSocket handler with 20+ methods, event pushing, and role-based access control.
-
-### Config Loader
-
-**File:** `src/config-loader.ts`
-
-Loads JSONC configuration with env var overrides, validates all fields, and provides defaults.
-
-### Metrics Registry
-
-**File:** `src/metrics/registry.ts`
-
-Prometheus metrics via `prom-client`. See [Monitoring](../user/runbook/monitoring.md) for available metrics.
+For deployment behavior, see the [architecture overview](README.md). For exact
+public contracts, use the generated `/api-docs` UI or `/api-docs.json` document.
