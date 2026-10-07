@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- test(ci): run the pinned Docker conversation lifecycle suite on every main push and pull request
+- test(ci): run a pinned, credential-free Docker lifecycle suite on every main push and pull request
 - feat(cli): add operational conversation, session, message, cleanup, status, metrics, and config commands
 - feat(kubernetes): add owned manifest rendering, install, upgrade, status, doctor, adoption, and guarded uninstall commands
 - docs(setup): add linked end-to-end Direct, Docker, and Kubernetes setup tutorials with a Mermaid architecture diagram
@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - build(npm): include Kubernetes templates and a Kubernetes configuration example in the published package
 
 ### Fixed
+- fix(docker): support an explicit container user and home so Linux bind-mounted workspaces remain deletable
+- test(ci): make the Docker lifecycle gate deterministic without external model credentials
 - test(kubernetes): allocate an isolated ephemeral port for runtime timeout coverage
 - test(kubernetes): complete expected-failure management checks and always clean up the isolated k3d environment
 - fix(kubernetes): allow adoption of compatible CRDs after Kubernetes adds defaulted discovery fields

@@ -71,6 +71,7 @@ agent-orchestrator/
 │
 ├── e2e/                          # End-to-end tests
 │   ├── vitest.config.e2e.ts      # E2E config
+│   ├── vitest.config.docker-ci.ts # Credential-free Docker CI lifecycle config
 │   ├── vitest.config.runtime.ts  # Runtime-specific config
 │   └── scenarios/
 │       ├── lifecycle/            # Conversation lifecycle

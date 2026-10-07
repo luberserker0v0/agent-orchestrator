@@ -23,6 +23,9 @@ npm run test:e2e:direct
 # Runtime-specific tests
 npm run test:e2e:runtime
 
+# Credential-free Docker lifecycle gate used by CI
+npm run test:e2e:docker:ci
+
 # Kubernetes lifecycle tests (defaults to context k3d-ao-test)
 npm run test:e2e:kubernetes
 
@@ -190,7 +193,13 @@ docker exec -it <container-name> sh
 
 ## CI Behavior
 
-- GitHub Actions runs the Docker E2E suite with `ghcr.io/anomalyco/opencode:1.17.8`
+- GitHub Actions runs the credential-free Docker lifecycle suite with
+  `ghcr.io/anomalyco/opencode:1.17.8`. It verifies container creation, health,
+  port/auth configuration, stop/restart persistence, and explicit deletion.
+- The full `npm run test:e2e:docker` suite also sends real model messages and
+  therefore requires the provider configured in `src/test-fixtures/opencode.example.json`.
+- On Linux, the E2E harness runs the container with the host uid:gid so bind-mounted
+  workspaces remain removable by AgentOrchestrator.
 - Direct runtime tests are skipped unless `E2E_RUNTIME=direct` is set
 - Runtime-specific tests use `describe.skipIf` to skip when unavailable
 - Kubernetes tests are opt-in and never run from the Docker E2E config

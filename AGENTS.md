@@ -277,6 +277,8 @@ The `orchestrator` section in `config/agentorchestrator.json` controls instance 
 | `runtimes[].config.sessionStorage` | object | (none) | Per-conversation opencode data-dir: `{ sharedRoot, mode?: 'xdg' \| 'sqlite' }`. One subdirectory per conversation id; required for session resume across restarts/migration |
 | `runtimes[].config.docker.image` | string | (required for docker) | Docker image name (e.g. `ghcr.io/anomalyco/opencode:1.17.8`) |
 | `runtimes[].config.docker.networkMode` | string | (none) | Docker network mode (`host`, `bridge`, or custom network name). When `host`, port mapping is skipped. |
+| `runtimes[].config.docker.containerUser` | string | (image default) | Optional Docker user or `uid:gid`; match the AO uid:gid on Linux to keep bind-mounted workspaces removable. |
+| `runtimes[].config.docker.containerHome` | string | `/tmp/agentorchestrator-home` with `containerUser` | Writable HOME inside the spawned container. |
 | `runtimes[].config.kubernetes.image` | string | (required for kubernetes) | Container image running `opencode serve` |
 | `runtimes[].config.kubernetes.namespace` | string | `'ao-instances'` | Namespace for instance Pods/Services |
 | `runtimes[].config.kubernetes.instanceHost` | string | (Service DNS) | BaseUrl host override (e.g. `127.0.0.1` with `kubectl port-forward` when the orchestrator runs outside the cluster) |
@@ -384,6 +386,7 @@ E2E tests are split by runtime to reduce overlap. All orchestrator-layer tests (
 ```bash
 npm run test:e2e            # Run orchestrator E2E tests (Docker runtime, default)
 npm run test:e2e:docker     # Explicit Docker runtime E2E tests
+npm run test:e2e:docker:ci  # Credential-free Docker lifecycle gate used by CI
 npm run test:e2e:direct     # Direct runtime E2E tests (requires local opencode binary)
 npm run test:e2e:runtime    # Runtime-specific E2E tests (Docker: container lifecycle)
 npm run test:e2e:watch      # Watch mode for E2E tests
@@ -411,7 +414,7 @@ docker run -p 8080:8080 agent-orchestrator
 - Triggered on `push`/`PR` to `main`/`master`
 - **Node.js**: 24.x
 - **Main job**: `npm ci` → `npm run preflight` → dependency audit → coverage → upload coverage artifact
-- **Docker E2E job**: pull pinned OpenCode `1.17.8` image → `npm run test:e2e:docker`
+- **Docker E2E job**: pull pinned OpenCode `1.17.8` image → `npm run test:e2e:docker:ci`
 
 - **Dependabot**: Quarterly updates for npm (grouped dev dependencies, including `@vitest/*` scoped packages) and GitHub Actions (`.github/dependabot.yml`)
 

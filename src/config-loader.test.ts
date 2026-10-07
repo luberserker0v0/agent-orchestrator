@@ -3,7 +3,16 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse as parseJSONC } from 'jsonc-parser';
 import { describe, it, expect, afterEach } from 'vitest';
-import { defaultConfig, loadConfig, validateConfig, readJSON, normalizeApiKeys, validateDockerLoggingConfig, validateSessionStorageConfig } from './config-loader.js';
+import {
+  defaultConfig,
+  loadConfig,
+  normalizeApiKeys,
+  readJSON,
+  validateConfig,
+  validateDockerIdentityConfig,
+  validateDockerLoggingConfig,
+  validateSessionStorageConfig,
+} from './config-loader.js';
 import type { AgentOrchestratorConfig } from './config-loader.js';
 
 function createValidConfig(overrides?: Partial<AgentOrchestratorConfig>): AgentOrchestratorConfig {
@@ -508,6 +517,26 @@ describe('validateConfig', () => {
         '"logging.driver" must be "local" or "json-file"',
         '"logging.maxSize" must be a Docker size such as "10m"',
         '"logging.maxFiles" must be a positive integer',
+      ]);
+    });
+  });
+
+  describe('validateDockerIdentityConfig', () => {
+    it('accepts named and numeric Docker identities', () => {
+      expect(validateDockerIdentityConfig({ containerUser: 'opencode' })).toEqual([]);
+      expect(validateDockerIdentityConfig({
+        containerUser: '1000:1000',
+        containerHome: '/tmp/agentorchestrator-home',
+      })).toEqual([]);
+    });
+
+    it('rejects malformed identities and relative home paths', () => {
+      expect(validateDockerIdentityConfig({
+        containerUser: '1000:1000:1000',
+        containerHome: 'tmp/home',
+      })).toEqual([
+        '"containerUser" must be a Docker user or uid[:gid]',
+        '"containerHome" must be an absolute container path',
       ]);
     });
   });

@@ -93,6 +93,8 @@
           "image": "ghcr.io/anomalyco/opencode:1.17.8"
           // "instanceHost": "127.0.0.1"  // Hostname to reach spawned instances (default: "127.0.0.1")
           // "networkMode": "bridge"       // Docker network mode: "host", "bridge", or custom network name
+          // "containerUser": "1000:1000"  // Match the host uid:gid for writable Linux bind mounts
+          // "containerHome": "/tmp/agentorchestrator-home" // Defaults here when containerUser is set
           // To enable either optional property below, add a comma after "image" and
           // between enabled properties.
           // "logging": { "driver": "local", "maxSize": "10m", "maxFiles": 3 }

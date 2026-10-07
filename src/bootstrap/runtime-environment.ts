@@ -5,7 +5,11 @@ import { DirectRuntime } from '../agent-runtime/runtimes/direct.js';
 import { DockerRuntime } from '../agent-runtime/runtimes/docker.js';
 import { KubernetesRuntime } from '../agent-runtime/runtimes/kubernetes.js';
 import type { AgentOrchestratorConfig } from '../config-loader.js';
-import { validateDockerLoggingConfig, validateSessionStorageConfig } from '../config-loader.js';
+import {
+  validateDockerIdentityConfig,
+  validateDockerLoggingConfig,
+  validateSessionStorageConfig,
+} from '../config-loader.js';
 import { PortPool } from '../orchestrator/port-pool.js';
 import { logger } from '../utils/logger.js';
 
@@ -48,6 +52,7 @@ function createRuntimeFactory(): RuntimeFactory {
       ...(config.networkMode !== undefined && typeof config.networkMode !== 'string'
         ? ['"networkMode" must be a string']
         : []),
+      ...validateDockerIdentityConfig(config),
       ...validateSessionStorageConfig(config.sessionStorage),
       ...validateDockerLoggingConfig(config.logging),
     ];

@@ -146,6 +146,7 @@ export class DockerRuntime implements AgentRuntime {
       this.containerNames.set(id, containerName);
 
       const dockerArgs: string[] = ['run', '-d', '--name', containerName];
+      appendContainerIdentityArgs(dockerArgs, this.config);
       if (this.config.logging?.driver) {
         dockerArgs.push('--log-driver', this.config.logging.driver);
       }
@@ -311,4 +312,13 @@ export class DockerRuntime implements AgentRuntime {
     });
   }
 
+}
+
+function appendContainerIdentityArgs(args: string[], config: DockerRuntimeConfig): void {
+  if (config.containerUser) {
+    args.push('--user', config.containerUser);
+  }
+  if (config.containerUser || config.containerHome) {
+    args.push('-e', `HOME=${config.containerHome ?? '/tmp/agentorchestrator-home'}`);
+  }
 }

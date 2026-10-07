@@ -61,6 +61,6 @@ jobs:
       - name: Pull pinned OpenCode test image
         run: docker pull "$AO_TEST_DOCKER_IMAGE"
 
-      - name: Run Docker end-to-end tests
-        run: npm run test:e2e:docker
+      - name: Run credential-free Docker lifecycle tests
+        run: npm run test:e2e:docker:ci
 

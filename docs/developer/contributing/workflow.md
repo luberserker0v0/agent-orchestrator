@@ -104,7 +104,7 @@ GitHub Actions runs:
 - `npm run preflight` (lint + test + build)
 - `npm run audit:dependencies`
 - `npm run test:coverage`
-- `npm run test:e2e:docker` in a separate job with a pinned OpenCode image
+- `npm run test:e2e:docker:ci` in a separate credential-free job with a pinned OpenCode image
 
 All checks must pass before merging.
 

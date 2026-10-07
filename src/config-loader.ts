@@ -72,6 +72,10 @@ export interface DockerRuntimeConfig {
   instanceHost?: string;
   /** Docker network mode (e.g. `host`, `bridge`, or a custom network name). When `host`, port mapping is skipped. */
   networkMode?: string;
+  /** Optional container user or uid[:gid]. Use the host uid:gid for writable bind mounts on Linux. */
+  containerUser?: string;
+  /** HOME inside the container. Defaults to `/tmp/agentorchestrator-home` when containerUser is set. */
+  containerHome?: string;
   /** Per-conversation opencode data-dir (session persistence). Omit for ephemeral container storage. */
   sessionStorage?: SessionStorageConfig;
   /** Optional Docker-engine log rotation settings for the spawned container. */
@@ -342,6 +346,29 @@ export function validateConfig(config: AgentOrchestratorConfig): void {
   validateWorkspaceConfig(config);
   validateClusterConfig(config);
   validateMaintenanceConfig(config);
+}
+
+/** Validate optional Docker process identity settings. */
+export function validateDockerIdentityConfig(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return ['Docker runtime config must be an object'];
+  }
+  const config = value as Record<string, unknown>;
+  const errors: string[] = [];
+  if (config.containerUser !== undefined && (
+    typeof config.containerUser !== 'string' ||
+    !/^[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?$/.test(config.containerUser)
+  )) {
+    errors.push('"containerUser" must be a Docker user or uid[:gid]');
+  }
+  if (config.containerHome !== undefined && (
+    typeof config.containerHome !== 'string' ||
+    !config.containerHome.startsWith('/') ||
+    config.containerHome.includes('\0')
+  )) {
+    errors.push('"containerHome" must be an absolute container path');
+  }
+  return errors;
 }
 
 function validateServerConfig(config: AgentOrchestratorConfig): void {
